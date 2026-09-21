@@ -1,0 +1,47 @@
+{
+  "version": "v19-gemini-flash",
+  "provenance": {
+    "provider": "Gemini Web Flash",
+    "captured_at": "2026-09-20",
+    "conversation": "https://gemini.google.com/app/e4bd9eb4c1418c42",
+    "method": "Visible browser response; specification facts supplied, prose preserved verbatim",
+    "scope": "v19 delivery and colleague UI prose",
+    "local_revision": "2026-09-20: delivery notifications shortened to state labels",
+    "display_copy_v113": {
+      "provider": "Gemini Web Flash",
+      "model": "Flash",
+      "source_url": "https://gemini.google.com/app/af08b1e2ad755464",
+      "inventory_sha256": "c9b2ca9c37257a78dec6362d2d694ca5d38aac464f49152c5ae80a6d236a9371",
+      "final_copy_sha256": "5ea0c35e04d52642b9cdcdaf65135f9b1dbaa4d14e5b17207e70b19515f0487f",
+      "final_copy": "artifacts/simulator/v113/gemini-final-copy.json"
+    }
+  },
+  "entries": {
+    "shop_intro": "PCで設備を注文後、入口に届く配送箱を運んで設置すると効果が有効化されます。",
+    "delivery_waiting": "配送中",
+    "delivery_ready": "入口に到着",
+    "delivery_carried": "運搬中",
+    "delivery_placing": "設置位置確認",
+    "delivery_installed": "設置完了",
+    "delivery_destination": "受取場所: オフィス入口",
+    "delivery_order": "注文",
+    "delivery_install_effect": "設置後に効果が有効化されます。",
+    "delivery_empty": "配送待ち 0件",
+    "delivery_ordered": "注文済み · 配送中",
+    "delivery_arrived": "配送箱: 入口に到着",
+    "delivery_pickup": "箱を持つ",
+    "delivery_place": "設置する",
+    "delivery_rotate": "90度回転",
+    "delivery_put_down": "床に置く",
+    "delivery_invalid": "設置不可",
+    "delivery_hint": "設置場所まで2m以内",
+    "delivery_controls": "E/左クリック:設置 R:回転 右クリック:床に置く",
+    "delivery_timer_rule": "活動中はPC操作中も実時間30秒で配送されます。中断・設定・タイトル画面ではタイマーが停止します。",
+    "delivery_keep_hands_free": "両手がふさがっています",
+    "npc_break": "休憩中",
+    "npc_returning": "自席へ移動中",
+    "npc_coffee": "コーヒー休憩中",
+    "npc_break_rule": "同僚は仕事を優先します。休憩中に依頼した場合は席に戻ってから作業を開始します。",
+    "left_hand_hint": "左手のカップは左クリックで一口飲み、Eで置きます。"
+  }
+}

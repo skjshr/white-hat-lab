@@ -1,0 +1,60 @@
+Classical office music provenance
+
+The six recordings below are bundled unchanged as Ogg Vorbis files. The five Bach recordings are from the Open Goldberg Variations recording by Kimiko Ishizaka. The individual Wikimedia Commons pages record a CC0 1.0 dedication for each performance. The Satie recording is an explicit CC0 1.0 worldwide dedication by Jaan Patterson.
+
+goldberg_aria.ogg
+  Work: J. S. Bach, Goldberg Variations, Aria
+  Performer: Kimiko Ishizaka
+  License: CC0 1.0 performance dedication
+  Recording page: https://commons.wikimedia.org/wiki/File:Goldberg_Variations_01_Aria.ogg
+  Direct file: https://upload.wikimedia.org/wikipedia/commons/4/42/Goldberg_Variations_01_Aria.ogg
+  Duration: 299.546122 seconds
+  SHA-256: 70E465253EFEE94DADA9E0F545B7EDA68966D8744BA6D1BF64A2D081FC65A1F3
+
+goldberg_variation_1.ogg
+  Work: J. S. Bach, Goldberg Variation 1
+  Performer: Kimiko Ishizaka
+  License: CC0 1.0
+  Recording page: https://commons.wikimedia.org/wiki/File:Goldberg_Variations_02_Variatio_1_a_1_Clav.ogg
+  Direct file: https://upload.wikimedia.org/wikipedia/commons/1/1b/Goldberg_Variations_02_Variatio_1_a_1_Clav.ogg
+  Duration: 115.513469 seconds
+  SHA-256: 1405D704611BCDEECBE74DFCCFE3E60DB3B34C55DD858B520F1BBCCB33CDFF57
+
+goldberg_variation_3.ogg
+  Work: J. S. Bach, Goldberg Variation 3, Canon at the Unison
+  Performer: Kimiko Ishizaka
+  License: CC0 1.0
+  Recording page: https://commons.wikimedia.org/wiki/File:Goldberg_Variations_04_Variatio_3_a_1_Clav._Canone_all%27Unisuono.ogg
+  Direct file: https://upload.wikimedia.org/wikipedia/commons/2/23/Goldberg_Variations_04_Variatio_3_a_1_Clav._Canone_all%27Unisuono.ogg
+  Duration: 116.819592 seconds
+  SHA-256: 0CE746918704301DA2CFE99801D6DDE0A3D1811105D8DF78694B68B2308D17D9
+
+goldberg_variation_4.ogg
+  Work: J. S. Bach, Goldberg Variation 4
+  Performer: Kimiko Ishizaka
+  License: CC0 1.0 performance dedication
+  Recording page: https://commons.wikimedia.org/wiki/File:Goldberg_Variations_05_Variatio_4_a_1_Clav.ogg
+  Direct file: https://upload.wikimedia.org/wikipedia/commons/a/ac/Goldberg_Variations_05_Variatio_4_a_1_Clav.ogg
+  Duration: 68.623673 seconds
+  SHA-256: 649A00919C384E1DDD273D81C868C4004CF792DAB6DCCB27B477476086A9C9FE
+
+goldberg_variation_6.ogg
+  Work: J. S. Bach, Goldberg Variation 6, Canon at the Second
+  Performer: Kimiko Ishizaka
+  License: CC0 1.0
+  Recording page: https://commons.wikimedia.org/wiki/File:Goldberg_Variations_07_Variatio_6_a_1_Clav._Canone_alla_Seconda.ogg
+  Direct file: https://upload.wikimedia.org/wikipedia/commons/b/bf/Goldberg_Variations_07_Variatio_6_a_1_Clav._Canone_alla_Seconda.ogg
+  Duration: 98.142041 seconds
+  SHA-256: C4B48EF66FE058E614726D5D60911D978C662F928C07CD4D072C7A92578E8029
+
+satie_gnossienne_1.ogg
+  Work: Erik Satie, Gnossienne No. 1
+  Performer: Jaan Patterson
+  License: CC0 1.0 worldwide dedication
+  Recording page: https://commons.wikimedia.org/wiki/File:Jaan_Patterson_-_05_-_Gnossiennes_No1_ric_Alfred_Leslie_Satie.ogg
+  Direct file: https://upload.wikimedia.org/wikipedia/commons/c/c2/Jaan_Patterson_-_05_-_Gnossiennes_No1_ric_Alfred_Leslie_Satie.ogg
+  Duration: 262.060408 seconds
+  SHA-256: 05D60FD3EF5D9DE5410D75B4A7EBA5B3293EC5BB74FF0C3B0A88D4A8A22E4D5B
+
+Playlist total: 960.705305 seconds (16 minutes 00.705305 seconds), before any playback gain changes.
+Runtime loudness trims (dB): Aria +5.5, Variation 1 -4.3, Variation 3 -1.6, Variation 4 -3.2, Variation 6 +2.1, Satie -1.9. These are playback mixer gains only; bundled files are unchanged.

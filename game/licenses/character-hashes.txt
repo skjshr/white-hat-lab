@@ -1,0 +1,10 @@
+
+Algorithm : SHA256
+Hash      : 55C654D09A2A5FF6E3BD6158D4A1B462F181CD6F1E12A0F5E9D959F9C3ABC438
+Path      : game\assets\characters\aya.gltf
+
+Algorithm : SHA256
+Hash      : DD74886C26998A0FA888B4CE557A0932D7D97B0265DD4C763154D081B7A6CB98
+Path      : game\assets\characters\ren.gltf
+
+

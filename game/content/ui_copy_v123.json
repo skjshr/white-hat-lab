@@ -1,0 +1,112 @@
+{
+  "provenance": {
+    "provider": "Gemini Web Flash",
+    "model": "Flash",
+    "source_url": "https://gemini.google.com/app/9070455db718c76c",
+    "model_selector": "Flash selected in visible model selector",
+    "response_ids": [
+      "0ce570945492cb87",
+      "5d5a3e1337d619ff",
+      "b5cb81fffb01efca",
+      "7a1cfb88f4314b8b"
+    ],
+    "extraction_method": "Gemini response Copy button, browser clipboard text encoded as UTF-8 without normalization",
+    "raw_responses": [
+      {
+        "path": "artifacts/simulator/v123/gemini-portal-v123-raw.json",
+        "sha256": "269532ca3ebb13de4005c1a0d596bf078cfce0057db29e4accb5724c75aab89e"
+      },
+      {
+        "path": "artifacts/simulator/v123/gemini-portal-v123-source.json",
+        "sha256": "269532ca3ebb13de4005c1a0d596bf078cfce0057db29e4accb5724c75aab89e"
+      },
+      {
+        "path": "artifacts/simulator/v123/gemini-portal-v123-revision-20260920-raw.json",
+        "sha256": "e829cff45f56242b6bc5b1112aa1a7133c8b396850ed033862faecd1fdc650dc"
+      },
+      {
+        "path": "artifacts/simulator/v123/gemini-portal-v123-revision-20260920-source.json",
+        "sha256": "e829cff45f56242b6bc5b1112aa1a7133c8b396850ed033862faecd1fdc650dc"
+      },
+      {
+        "path": "artifacts/simulator/v123/gemini-portal-v123-response-labels-20260920-raw.json",
+        "sha256": "a02fe6d95e51f439588a806806af5954b4521cc50040dec26014428e5ddcba4b"
+      },
+      {
+        "path": "artifacts/simulator/v123/gemini-portal-v123-response-labels-20260920-source.json",
+        "sha256": "a02fe6d95e51f439588a806806af5954b4521cc50040dec26014428e5ddcba4b"
+      },
+      {
+        "path": "artifacts/simulator/v123/gemini-portal-v123-configuration-error-20260920-raw.json",
+        "sha256": "a8c0d25ea6787418c11e27b204e229adc45e292872eb9f6f22134eaeaee57f97"
+      },
+      {
+        "path": "artifacts/simulator/v123/gemini-portal-v123-configuration-error-20260920-source.json",
+        "sha256": "a8c0d25ea6787418c11e27b204e229adc45e292872eb9f6f22134eaeaee57f97"
+      }
+    ]
+  },
+  "entries": {
+    "portal_title": "ファイル共有",
+    "portal_all_files": "すべてのファイル",
+    "portal_shared": "共有中",
+    "portal_name": "名前",
+    "portal_size": "サイズ",
+    "portal_modified": "リビジョン",
+    "portal_sharing": "共有設定",
+    "portal_details": "詳細",
+    "portal_activity": "アクティビティ",
+    "portal_open": "開く",
+    "portal_close": "閉じる",
+    "portal_save": "保存",
+    "portal_cancel": "キャンセル",
+    "portal_preview": "受信者プレビュー",
+    "portal_file_content": "ファイル内容",
+    "portal_share_with": "共有先",
+    "portal_staff": "スタッフ",
+    "portal_partner": "パートナー",
+    "portal_public": "公開リンク",
+    "portal_read_only": "閲覧のみ",
+    "portal_can_edit": "編集可能",
+    "portal_no_access": "共有なし",
+    "portal_expiration": "有効期限",
+    "portal_unlimited": "無期限",
+    "portal_seven_days": "7日間",
+    "portal_thirty_days": "30日間",
+    "portal_remove_share": "共有解除",
+    "portal_copy_link": "リンクをコピー",
+    "portal_link_copied": "コピー完了",
+    "portal_test_identity": "テストアカウント",
+    "portal_link_age": "リンク発行日",
+    "portal_current": "本日",
+    "portal_week_old": "8日前",
+    "portal_month_old": "31日前",
+    "portal_load": "読込",
+    "portal_write": "書込",
+    "portal_response": "応答結果",
+    "portal_no_files": "ファイルなし",
+    "portal_unsaved": "未保存",
+    "portal_saved": "保存済",
+    "portal_service_config": "サービス構成",
+    "portal_connection_required": "顧客ホストへの接続が必要です",
+    "portal_service_unavailable": "サービス停止中",
+    "portal_legacy": "旧VM環境のため専用ページを使用中",
+    "portal_error_invalid_role": "無効な共有先です",
+    "portal_error_invalid_permission": "無効な権限設定です",
+    "portal_error_invalid_expiry": "無効な有効期限です",
+    "portal_error_file_missing": "ファイルが見つかりません",
+    "portal_error_save_failed": "保存に失敗しました",
+    "portal_error_unsupported_model": "このVMでは未対応の操作です",
+    "portal_error_operation_failed": "処理に失敗しました",
+    "portal_reference": "リファレンス",
+    "portal_reference_body": "Nextcloudのファイル一覧および共有サイドバーの一部を再現し、保存対象の実CSVに対する読込・書込、共有先ごとの権限・有効期限、および各操作の応答結果を扱います。なお、MFA・TLS・監査設定は共有設定からは分離されており、サービス構成側で個別に管理します。",
+    "release_title": "v1.23 リリース",
+    "release_note": "v1.23ではNextcloud風の共有画面を新設し、実CSVの保存・再読込、共有先ごとの権限・期限管理、および操作の応答結果判定に対応しました。旧VM環境もそのまま維持されます。なお、本バージョンの日本語UI文言はGeminiにより作成されたものです。",
+    "portal_access_allowed": "アクセス許可",
+    "portal_access_denied": "アクセス拒否",
+    "portal_mfa_required": "追加認証要求",
+    "portal_link_expired": "リンク期限切れ",
+    "portal_tls_failed": "TLS接続エラー",
+    "portal_error_configuration_pending": "サービス構成にエラーがあります。エディタで修正してから共有設定を変更してください"
+  }
+}

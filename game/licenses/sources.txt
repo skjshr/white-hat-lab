@@ -1,0 +1,28 @@
+Godot Engine 4.7.2-stable
+Official repository: https://github.com/godotengine/godot
+Ref: 4.7.2-stable
+API source: https://api.github.com/repos/godotengine/godot/contents/LICENSE.txt?ref=4.7.2-stable
+Copyright source: https://api.github.com/repos/godotengine/godot/contents/COPYRIGHT.txt?ref=4.7.2-stable
+Local files: godot-MIT.txt, godot-COPYRIGHT.txt
+SHA-256 godot-MIT.txt: B0435E3B3E4E55238F05F4B306F30524A1B2E20147810D436EAA554FA6855C80
+SHA-256 godot-COPYRIGHT.txt: CB1980C88089573BCACD7221D777C689BB8BBD778799F24C27FCA0FE5F774D6D
+
+Whimfoome first-person starter
+Upstream: https://github.com/Whimfoome/godot-FirstPersonStarter
+License: MIT (see first-person-starter-MIT.txt)
+Local upstream files: artifacts/simulator/upstream/MovementController.gd, Head.gd, LICENSE
+自作SVG素材: game/assets/office/wood_floor.svg, contact_shadow.svg, window_light.svg（本プロジェクト内で手描き作成、第三者素材不使用）
+UI 1.3: menu_backdrop.svg is an original project vector asset; no third-party artwork used.
+
+V19 world generation packs
+--------------------------
+Kenney City Kit Commercial: https://kenney.nl/assets/city-kit-commercial
+Kenney City Kit Roads: https://kenney.nl/assets/city-kit-roads
+Kenney Nature Kit: https://kenney.nl/assets/nature-kit
+Kenney Car Kit: https://kenney.nl/assets/car-kit
+License for all four packs: CC0 1.0, https://creativecommons.org/publicdomain/zero/1.0/
+Authoring script: game/tools/blender/build_world_v19.py
+Derived outputs: game/assets/world/neighbourhood.glb, street_hatchback.glb, street_delivery_van.glb
+Original source inventory: artifacts/simulator/v19/assets/ (preserved; source files are not overwritten)
+The GLB files are Blender-generated layouts/exports from the preserved source
+packs; no source meshes are claimed as original project artwork.

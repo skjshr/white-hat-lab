@@ -1,0 +1,43 @@
+{
+  "provenance": {
+    "provider": "Gemini Web Flash",
+    "model": "Flash",
+    "source_url": "https://gemini.google.com/app/9070455db718c76c",
+    "raw_responses": [
+      {
+        "path": "artifacts/simulator/v118/gemini-care-v118-raw.json",
+        "sha256": "2cb80216178e15b8d98cdc7c834c1ecaca6618bf22946a6bf9fbca18df51e81d"
+      },
+      {
+        "path": "artifacts/simulator/v118/gemini-care-v118-cost-revision-raw.json",
+        "sha256": "3439b0287a404b67d5d3b3aef27d36064959b56a6d2a8463705444700057c4ed"
+      }
+    ]
+  },
+  "entries": {
+    "care_incident_title": "保守障害対応票",
+    "care_incident_detected": "要対応",
+    "care_incident_working": "対応中",
+    "care_incident_recheck": "再検査待ち",
+    "care_incident_closed": "対応完了",
+    "care_incident_open": "対応票を開く",
+    "care_incident_start": "対応開始",
+    "care_incident_reinspect": "再検査",
+    "care_incident_covered": "保守契約範囲内",
+    "care_incident_capacity": "対応枠上限です。既存の案件を完了させてください",
+    "care_incident_unavailable": "点検結果が未確定です",
+    "care_incident_subject": "顧客 %s / 保守点検異常検知",
+    "care_incident_brief": "顧客 %s の環境において、DAY %d の定期点検で異常が検出されました。合意済みの要求仕様と現状の稼働結果を照合し、修正および再測定を実施してください。本対応は定額保守契約に含まれるため、追加作業費は発生しません。",
+    "care_incident_goal": "要求仕様を満たす安全な運用状態への復旧と業務動作確認",
+    "care_incident_debrief": "修正作業完了。当日の保守報酬計上には次回再検査の完了が必要です",
+    "care_incident_kind_share": "ファイル共有 / 異常検知",
+    "care_incident_kind_backup": "バックアップ / 異常検知",
+    "care_incident_kind_network": "ネットワーク / 異常検知",
+    "care_incident_kind_account": "アカウント管理 / 異常検知",
+    "care_incident_kind_incident": "セキュリティ設定 / 異常検知",
+    "care_incident_kind_portal": "ポータルサイト / 異常検知",
+    "care_incident_costs": "保守内対応原価: ¥%d",
+    "release_title": "v1.18 リリース",
+    "release_note": "v1.18では日付変更時に顧客環境の設定ドリフトが発生する機能が追加され、実検査による異常検知と既存VMでの障害対応チケット・キュー連携および状態保存に対応しました。本対応は定額保守の範囲内として扱われるため追加報酬や経験値の過剰獲得は発生せず、再検査完了後にのみ当日の日次保守売上が計上されます。なお、本バージョンの日本語UI文言はGemini Flashにより作成されたものであり、実在のソフトウェアや運用との完全な互換性を保証するものではありません。"
+  }
+}

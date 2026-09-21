@@ -1,0 +1,11 @@
+Kenney City Kit Commercial
+
+Creator: Kenney (https://kenney.nl)
+Official page: https://kenney.nl/assets/city-kit-commercial
+License: Creative Commons Zero (CC0 1.0)
+License text: https://creativecommons.org/publicdomain/zero/1.0/
+
+This local copy documents the license for the source pack used to generate
+game/assets/world/neighbourhood.glb. The Blender-generated scene is a derived
+layout; the original downloaded source remains preserved under the authoring
+asset inventory.

@@ -1,0 +1,28 @@
+{
+  "provenance": {
+    "provider": "Gemini Web Flash",
+    "model": "Flash",
+    "source_url": "https://gemini.google.com/app/9070455db718c76c",
+    "model_selector": "Flash selected in visible model selector",
+    "response_id": "11efcd3130b09136",
+    "extraction_method": "Gemini response Copy button, browser clipboard text encoded as UTF-8 without normalization",
+    "raw_responses": [
+      {
+        "path": "artifacts/simulator/v122/gemini-care-v122-raw.json",
+        "sha256": "b188587dc864c9cfdeec29cefd5fcbe22937823d0bee1acb2bcd3a5674414158"
+      },
+      {
+        "path": "artifacts/simulator/v122/gemini-care-v122-source.json",
+        "sha256": "b188587dc864c9cfdeec29cefd5fcbe22937823d0bee1acb2bcd3a5674414158"
+      }
+    ]
+  },
+  "entries": {
+    "care_owner": "定期担当者",
+    "care_owner_manual": "毎回手動割当",
+    "care_scope_count": "管理対象: %d件",
+    "care_owner_unavailable": "担当者不在（要再設定）",
+    "release_title": "v1.22 リリース",
+    "release_note": "既存顧客における複数拠点・サービスの保守対象引き継ぎと担当者の毎日自動割当に対応し、複数スタッフ作業時の時間計算の不具合を修正しました（異常検知時の調査・対応は従来通り手動で実施する必要があります）。"
+  }
+}

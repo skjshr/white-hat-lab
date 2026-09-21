@@ -1,0 +1,20 @@
+{
+  "source": "Gemini Web Flash",
+  "source_url": "https://gemini.google.com/app/16dc5b2c1bec9360",
+  "raw_file": "artifacts/simulator/branch/gemini-raw.json",
+  "raw_sha256": "f8ed9cada25b5a12214c66b399f0d5d7c143d7d9bb0ed451cb0b62503c5a7887",
+  "entries": {
+    "branch_brief": "北斗物流の新支店です。社内で注文一覧が開けず更新が滞り、取引先への注文ファイル共有も停止しています。社員が更新でき、取引先にはMFA必須・7日間閲覧のみ（匿名公開不可）で安全に共有できる状態へ復旧してください。",
+    "branch_share_brief": "//files01.client.test/share 内の既存注文データを保持したまま、社員が読み書きできる状態へ復旧してください。",
+    "branch_gateway_brief": "https://intranet.client.test/sales にて実注文データが正常に閲覧できるか確認と復旧をお願いします。",
+    "branch_portal_brief": "https://portal.client.test/apps/files/ でpartner-order.csvを取引先へMFA必須・7日間限定の閲覧権限で共有してください。",
+    "branch_probe_orders": "注文一覧読取診断",
+    "branch_probe_shared": "共有元実体読取診断",
+    "branch_storage_unavailable": "共有サーバー接続失敗",
+    "branch_storage_denied": "共有元アクセス拒否",
+    "branch_storage_label": "支店共有データ",
+    "branch_storage_missing": "対象ファイル未検出",
+    "branch_open_sales": "注文一覧表示",
+    "branch_open_files": "共有元を開く"
+  }
+}

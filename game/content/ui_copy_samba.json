@@ -1,0 +1,64 @@
+{
+  "provenance": {
+    "provider": "Gemini Web Flash",
+    "model": "Flash",
+    "source_url": "https://gemini.google.com/app/9070455db718c76c",
+    "model_selector": "Flash selected in visible model selector",
+    "response_ids": [
+      "0b747e7424ec2b51"
+    ],
+    "adopted_response_ids": [
+      "0b747e7424ec2b51"
+    ],
+    "extraction_method": "Gemini response Copy button, browser clipboard text encoded as UTF-8 without normalization",
+    "raw_responses": [
+      {
+        "path": "artifacts/simulator/samba/gemini-samba-labels-raw.json",
+        "sha256": "2b6da716ef53ad58f862c83aab3896bbdb9a1ba772ef5563199aced0748a560a",
+        "response_id": "0b747e7424ec2b51",
+        "disposition": "adopted"
+      }
+    ]
+  },
+  "entries": {
+    "samba_title": "ファイル共有",
+    "samba_shares": "共有一覧",
+    "samba_global_settings": "全体設定",
+    "samba_name": "名前",
+    "samba_path": "パス",
+    "samba_available": "共有の有効化",
+    "samba_read_only": "読み取り専用",
+    "samba_guest_access": "ゲストアクセス",
+    "samba_allowed_users": "許可ユーザー",
+    "samba_denied_users": "拒否ユーザー",
+    "samba_write_list": "書込許可リスト",
+    "samba_read_list": "読込専用リスト",
+    "samba_guest_mapping": "ゲストマッピング",
+    "samba_edit_share": "共有編集",
+    "samba_save": "保存",
+    "samba_cancel": "キャンセル",
+    "samba_pending": "未適用の変更",
+    "samba_apply_restart": "適用して再起動",
+    "samba_test_config": "設定テスト",
+    "samba_open_config": "設定ファイルを開く",
+    "samba_access_share": "共有にアクセス",
+    "samba_user": "ユーザー",
+    "samba_employee": "従業員",
+    "samba_guest": "ゲスト",
+    "samba_connect": "接続",
+    "samba_refresh": "更新",
+    "samba_download": "ダウンロード",
+    "samba_upload": "アップロード",
+    "samba_local_source": "ローカル元ファイル",
+    "samba_remote_filename": "リモートファイル名",
+    "samba_download_destination": "保存先",
+    "samba_content": "ファイル内容",
+    "samba_no_files": "ファイルなし",
+    "samba_access_denied": "アクセス拒否",
+    "samba_result": "実行結果",
+    "samba_back": "戻る",
+    "samba_saved": "保存済み",
+    "samba_connection_failed": "接続失敗",
+    "samba_selected_file": "選択中のファイル"
+  }
+}

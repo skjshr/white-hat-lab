@@ -1,0 +1,63 @@
+{
+  "provenance": {
+    "provider": "Gemini Web Flash",
+    "model": "Flash",
+    "source_url": "https://gemini.google.com/app/be67f36e0650f548",
+    "model_selector": "Flash selected in visible model selector",
+    "response_ids": [
+      "5e8199ca9edefb62",
+      "a85df27317601dc0"
+    ],
+    "adopted_response_ids": [
+      "5e8199ca9edefb62",
+      "a85df27317601dc0"
+    ],
+    "extraction_method": "Gemini code Copy button, browser clipboard UTF-8 encoded without normalization",
+    "raw_responses": [
+      {
+        "path": "artifacts/simulator/market/gemini-market-raw-1.json",
+        "sha256": "3986eabd2172b577324c93f4ec8ea055a322a3f56de12b1f91b1192447936e46",
+        "response_id": "5e8199ca9edefb62",
+        "disposition": "adopted except market_quoted superseded by second response"
+      },
+      {
+        "path": "artifacts/simulator/market/gemini-market-raw-2.json",
+        "sha256": "d91b3710d3d60cb7044ca8cb3e6e9e412c53d3922ad9df98ec265a246f4ef0c9",
+        "response_id": "a85df27317601dc0",
+        "disposition": "adopted"
+      }
+    ]
+  },
+  "copy": {
+    "market_inquiries": "本日の相談",
+    "market_catalog": "サービス一覧",
+    "market_new_today": "新規相談",
+    "market_quoted": "見積下書き",
+    "market_requote": "再見積",
+    "market_accepted": "受注済",
+    "market_delivered": "納品済",
+    "market_not_requested": "現在、相談はありません",
+    "market_count": "%d件",
+    "market_empty": "本日の相談はありません",
+    "market_no_matching": "該当する相談がありません",
+    "market_nextday": "翌営業日に更新",
+    "market_client": "顧客",
+    "market_service": "サービス",
+    "market_reference": "参考価格",
+    "market_demand": "需要",
+    "market_open_quote": "見積作成",
+    "market_open_work": "作業開始",
+    "market_detail": "詳細",
+    "market_catalog_available": "相談あり",
+    "market_catalog_locked": "未解放",
+    "market_draft_saved": "下書き保存",
+    "market_search": "顧客名・案件名を検索",
+    "market_all": "すべて",
+    "market_advisory": "診断・設計",
+    "market_operations": "監視・運用",
+    "market_response": "調査・復旧",
+    "investigation_role_mismatch": "復元または証拠保全の案件のみ担当可能です",
+    "investigation_observations": "観測記録",
+    "investigation_observed_at": "観測日時"
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "provenance": {
+    "provider": "Gemini Web Flash",
+    "model": "Flash",
+    "source_url": "https://gemini.google.com/app/9070455db718c76c",
+    "model_selector": "Flash selected in visible model selector",
+    "response_ids": [
+      "cdc623e823760d9e",
+      "d5c345f588520c68",
+      "3e0f3eca266f70c9"
+    ],
+    "adopted_response_ids": [
+      "cdc623e823760d9e",
+      "3e0f3eca266f70c9"
+    ],
+    "extraction_method": "Gemini response Copy button, browser clipboard text encoded as UTF-8 without normalization",
+    "raw_responses": [
+      {
+        "path": "artifacts/simulator/experience/gemini-experience-audio-raw.json",
+        "sha256": "5c27fb5bffaca550ecdbeeb10d16007eb50e36d0d9def6f1b8a24981aca1be49",
+        "response_id": "cdc623e823760d9e",
+        "disposition": "adopted"
+      },
+      {
+        "path": "artifacts/simulator/experience/gemini-experience-ui-incomplete-raw.txt",
+        "sha256": "c31a3a73443d77c549c5a7a1b4fcf4d46fd5ac1a2d043c0e08c0ec2ee38700fb",
+        "response_id": "d5c345f588520c68",
+        "disposition": "rejected_invalid_json"
+      },
+      {
+        "path": "artifacts/simulator/experience/gemini-experience-ui-raw.json",
+        "sha256": "973e94fa07d9b8ada4db9c557d807daaa630b533357f4bd4e876aabba2743ed8",
+        "response_id": "3e0f3eca266f70c9",
+        "disposition": "adopted"
+      }
+    ]
+  },
+  "entries": {
+    "audio_music": "BGM音量",
+    "audio_music_track": "再生中の曲",
+    "audio_off": "なし",
+    "experience_related_entities": "関連エンティティ",
+    "experience_event_details": "イベント詳細",
+    "experience_all_events": "全イベント",
+    "experience_network_events": "ネットワークイベント",
+    "experience_file_events": "ファイルイベント",
+    "experience_dns_events": "DNSイベント",
+    "experience_list_view": "リスト表示",
+    "experience_grid_view": "グリッド表示",
+    "experience_file_preview": "ファイルプレビュー",
+    "experience_edit_source": "ソース編集",
+    "experience_flow": "認証フロー",
+    "experience_required": "必須",
+    "experience_optional": "任意",
+    "experience_search_users": "ユーザーを検索"
+  }
+}

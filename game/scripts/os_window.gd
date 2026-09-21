@@ -1,0 +1,135 @@
+extends Control
+const UI = preload("res://scripts/ui_theme.gd")
+## Lightweight native Controls: persistent, movable desktop application windows.
+signal focused(app: String)
+signal minimized(app: String)
+signal dismissed(app: String)
+var app_id := ""
+var content: VBoxContainer
+var caption: Label
+var titlebar: PanelContainer
+var frame: StyleBoxFlat
+var title_text := ""
+var titlebar_row: HBoxContainer
+var chrome_buttons: Array[Button] = []
+var maximized := false
+var restore_rect := Rect2()
+var _dragging := false
+var _resizing := false
+var _origin := Vector2.ZERO
+var _initial := Rect2()
+
+func _chrome_color(active: bool = true) -> Color:
+	if app_id in ["editor", "terminal"]: return Color("323233") if active else Color("282828")
+	return Color("dee7f3") if app_id == "browser" else Color("f3f3f3")
+
+func _chrome_ink(active: bool = true) -> Color:
+	if app_id in ["editor", "terminal"]: return Color("cccccc") if active else Color("999999")
+	return Color("242424") if active else Color("777777")
+
+func configure(id: String, title: String, _accent: Color) -> void:
+	app_id = id; name = "Window_" + id
+	title_text = title
+	custom_minimum_size = Vector2(530, 320)
+	clip_contents = true
+	frame = StyleBoxFlat.new(); frame.bg_color = UI.app_background(id); frame.border_color = Color("b8c3cd"); frame.set_border_width_all(1); frame.set_corner_radius_all(7); frame.shadow_color = Color(0,0,0,0.22); frame.shadow_size = 9; frame.shadow_offset = Vector2(0,4)
+	var panel := PanelContainer.new(); panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); panel.add_theme_stylebox_override("panel",frame); add_child(panel)
+	var layout := VBoxContainer.new(); layout.add_theme_constant_override("separation",0); panel.add_child(layout)
+	titlebar = PanelContainer.new(); titlebar.custom_minimum_size.y = 34; titlebar.mouse_default_cursor_shape = Control.CURSOR_MOVE; layout.add_child(titlebar)
+	var bar := StyleBoxFlat.new(); bar.bg_color = _chrome_color(); bar.content_margin_left = 10; bar.content_margin_right = 0; titlebar.add_theme_stylebox_override("panel",bar)
+	var row := HBoxContainer.new(); row.mouse_filter = Control.MOUSE_FILTER_PASS; row.add_theme_constant_override("separation",0); titlebar.add_child(row); titlebar_row = row
+	var icon := TextureRect.new(); icon.texture = UI.icon(id); icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE; icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED; icon.custom_minimum_size = Vector2(21,21); icon.mouse_filter = Control.MOUSE_FILTER_IGNORE; row.add_child(icon)
+	caption = Label.new(); caption.text = "  "+title; caption.size_flags_horizontal = Control.SIZE_EXPAND_FILL; caption.add_theme_font_size_override("font_size",13); caption.add_theme_color_override("font_color",UI.INK); caption.mouse_filter = Control.MOUSE_FILTER_IGNORE; row.add_child(caption)
+	caption.clip_text = true; caption.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	if id == "browser":
+		caption.custom_minimum_size.x=240; caption.size_flags_horizontal=Control.SIZE_FILL
+		caption.add_theme_stylebox_override("normal",UI.style(Color("f7f9fc"),Color.TRANSPARENT,14,5,6))
+		var tab_space:=Control.new(); tab_space.size_flags_horizontal=Control.SIZE_EXPAND_FILL; row.add_child(tab_space)
+	for spec in [["−", "fidelity_minimize"],["□", "fidelity_maximize"],["×", "fidelity_close"]]:
+		var b := Button.new(); b.text = spec[0]; b.tooltip_text = UI.copy(spec[1]); b.custom_minimum_size = Vector2(46,32); b.add_theme_font_size_override("font_size",18); b.flat = true; row.add_child(b)
+		chrome_buttons.append(b)
+		var button_style := StyleBoxFlat.new(); button_style.bg_color = Color.TRANSPARENT; button_style.set_corner_radius_all(2); b.add_theme_stylebox_override("normal",button_style)
+		b.add_theme_color_override("font_color",UI.INK)
+		if spec[0] == "−": b.pressed.connect(func(): hide(); minimized.emit(app_id))
+		elif spec[0] == "□": b.pressed.connect(toggle_maximize)
+		else: b.pressed.connect(func(): hide(); dismissed.emit(app_id))
+	content = VBoxContainer.new(); content.size_flags_vertical = Control.SIZE_EXPAND_FILL; content.add_theme_constant_override("separation",0); layout.add_child(content)
+	titlebar.gui_input.connect(_title_input)
+	gui_input.connect(func(e):
+		if e is InputEventMouseButton and e.pressed: focused.emit(app_id))
+	var grip := Control.new(); grip.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT); grip.offset_left = -18; grip.offset_top = -18; grip.mouse_default_cursor_shape = Control.CURSOR_FDIAGSIZE; add_child(grip)
+	grip.gui_input.connect(_resize_input)
+	grip.draw.connect(func():
+		grip.draw_line(Vector2(7,15),Vector2(15,7),Color("a2acb5"),1)
+		grip.draw_line(Vector2(11,15),Vector2(15,11),Color("a2acb5"),1))
+	var handle := Control.new(); handle.set_anchors_preset(Control.PRESET_TOP_WIDE); handle.offset_left = 2; handle.offset_right = -134; handle.offset_top = 3; handle.offset_bottom = 31; handle.mouse_default_cursor_shape = Control.CURSOR_MOVE; add_child(handle); handle.gui_input.connect(_title_input)
+
+func _title_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			focused.emit(app_id)
+			if event.double_click: toggle_maximize(); return
+			_dragging = not maximized
+			_origin = event.global_position; _initial = Rect2(position,size)
+		else:
+			if _dragging: _move_to(event.global_position)
+			_dragging = false
+		accept_event()
+	elif event is InputEventMouseMotion and _dragging:
+		_move_to(event.global_position); accept_event()
+
+func _resize_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			focused.emit(app_id); _resizing = not maximized
+			_origin = event.global_position; _initial = Rect2(position,size)
+		else:
+			if _resizing: _resize_to(event.global_position)
+			_resizing = false
+		accept_event()
+	elif event is InputEventMouseMotion and _resizing:
+		_resize_to(event.global_position); accept_event()
+
+func _move_to(point: Vector2) -> void:
+	position = _initial.position + point - _origin; clamp_to_desktop()
+
+func _resize_to(point: Vector2) -> void:
+	size = (_initial.size + point - _origin).max(custom_minimum_size).min(get_parent_control().size - position); queue_redraw()
+
+func clamp_to_desktop() -> void:
+	var area := get_parent_control().size
+	position.x = clampf(position.x,0,maxf(0,area.x - 160))
+	position.y = clampf(position.y,0,maxf(0,area.y - 42))
+
+func toggle_maximize() -> void:
+	_dragging = false; _resizing = false
+	focused.emit(app_id)
+	if maximized:
+		position = restore_rect.position; size = restore_rect.size
+	else:
+		restore_rect = Rect2(position,size); position = Vector2.ZERO; size = get_parent_control().size
+	maximized = not maximized
+	chrome_buttons[1].text="❐" if maximized else "□"
+	frame.set_corner_radius_all(0 if maximized else 7)
+
+func set_active(active: bool) -> void:
+	# Keep the document readable in background windows; use the titlebar and border
+	# as the focus indicator instead of washing out the whole application.
+	modulate = Color.WHITE
+	if is_instance_valid(caption):
+		caption.text = "  " + title_text
+		caption.add_theme_color_override("font_color", _chrome_ink(active))
+	for button in chrome_buttons:
+		if is_instance_valid(button):
+			button.add_theme_stylebox_override("normal", UI.style(Color.TRANSPARENT, Color.TRANSPARENT, 4, 2, 2))
+			button.add_theme_stylebox_override("hover", UI.style(Color("c42b1c") if button==chrome_buttons[2] else Color("e0e7ee"), Color.TRANSPARENT, 4, 2, 0))
+			button.add_theme_color_override("font_color", _chrome_ink(active))
+			button.add_theme_color_override("font_hover_color", Color.WHITE if button==chrome_buttons[2] else UI.INK)
+	if is_instance_valid(frame):
+		frame.border_color = Color("9aabbc") if active else Color("cbd3db")
+		frame.set_border_width_all(1)
+		frame.set_corner_radius_all(0 if maximized else 7)
+	if is_instance_valid(titlebar):
+		titlebar.add_theme_stylebox_override("panel", UI.style(_chrome_color(active), Color.TRANSPARENT, 8, 0, 0))
+	if chrome_buttons.size()>1: chrome_buttons[1].text="❐" if maximized else "□"
+	if chrome_buttons.size()>1: chrome_buttons[1].tooltip_text=UI.copy("fidelity_restore" if maximized else "fidelity_maximize")

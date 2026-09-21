@@ -1,0 +1,40 @@
+{
+  "provenance": {
+    "provider": "Gemini Web Flash",
+    "model": "Flash",
+    "source_url": "https://gemini.google.com/app/9070455db718c76c",
+    "raw_responses": [
+      {
+        "path": "artifacts/simulator/v119/gemini-expansion-v119-raw.json",
+        "sha256": "6f64bf9ba2a9c3a8d2f9b32f7bfb74a220f80674061aec9eaedca823d08bd3ed"
+      },
+      {
+        "path": "artifacts/simulator/v119/gemini-expansion-v119-route-revision-raw.json",
+        "sha256": "dc03776a8c812ca0024ae4a3e5db9aa469ed3a370ff80228d094bfa0620c7069"
+      }
+    ]
+  },
+  "entries": {
+    "expansion_title": "隣室オフィス拡張",
+    "expansion_buy": "拡張工事を発注（費用: ¥28,000）",
+    "expansion_locked": "キャリアモード限定機能",
+    "expansion_ordered": "発注済（翌営業日に施工完了）",
+    "expansion_open": "拡張完了",
+    "expansion_available_day": "完了予定: DAY %d",
+    "expansion_career_only": "キャリアモード専用",
+    "expansion_insufficient": "資金不足（必要額: ¥%d）",
+    "expansion_wait": "翌営業日まで待機",
+    "expansion_desk_a": "増設デスクA",
+    "expansion_desk_b": "増設デスクB",
+    "expansion_desk_effect": "設置効果: 雇用枠+1 · 同時受注枠+1 · 保守枠+1",
+    "expansion_desk_location": "増設先: 隣室オフィス",
+    "expansion_desk_requires_room": "隣室のオフィス拡張が必要です",
+    "expansion_cost": "工事費用: ¥%d",
+    "expansion_space_name": "隣室オフィス",
+    "expansion_added_seats": "増設座席数: %d",
+    "expansion_staff_seat": "座席: %s",
+    "release_title": "v1.19 リリース",
+    "release_note": "v1.19ではオフィス拡張機能が追加され、発注した隣室工事は翌営業日に完了します。増設可能な2台のデスクは従来の配送・設置フローに対応し、独立した座席や動線がスタッフ雇用、給与計算、同時受注枠、保守点検枠と連動します。従来のセーブデータとの互換性も維持されています。なお、本バージョンの日本語UI文言はGeminiにより作成されたものです。",
+    "expansion_route_blocked": "観葉植物が通路を塞いでいます。移動するまで発注できません"
+  }
+}

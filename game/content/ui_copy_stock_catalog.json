@@ -1,0 +1,53 @@
+{
+  "source": "Gemini Web Flash",
+  "source_url": "https://gemini.google.com/app/56b44f23498556c7",
+  "model_selector": "Flash",
+  "extraction": "Visible code innerText, UTF-8 with trailing LF, values verbatim",
+  "raw_responses": [
+    {
+      "sha256": "998113c02d5210437d9e36a1017c62fc29febb62eb4219d2cf088fa17c24693a",
+      "path": "artifacts/simulator/stock-catalog/gemini-labels-raw.json"
+    },
+    {
+      "sha256": "f4003c163f493644bf002d13f9dc34a5e7eacb383f4aacee31d3e417344a39f2",
+      "path": "artifacts/simulator/stock-catalog/gemini-revision-raw.json"
+    },
+    {
+      "path": "artifacts/simulator/stock-catalog/gemini-additions-raw.json",
+      "sha256": "76748bfa3084579395b9937974dc59873e19c7618ddfd082dbb567ce76e422c6"
+    }
+  ],
+  "entries": {
+    "stock_product": "製品名",
+    "stock_catalog": "製品カタログ",
+    "stock_inventory": "シリアル在庫一覧",
+    "stock_search_serial": "シリアル / 機種 / 顧客で検索",
+    "stock_all_products": "すべての製品",
+    "stock_on_hand": "社内在庫",
+    "stock_assigned": "案件割当済",
+    "stock_receiving": "入荷待ち",
+    "stock_location": "保管場所",
+    "stock_current_job": "作業中案件",
+    "stock_backup_appliance": "データ退避用サーバー",
+    "stock_backup_case_title": "業務台帳の自動保存設定",
+    "stock_backup_case_brief": "顧客台帳や受注表の消失を防ぐため、日次で拠点内保存先に退避したいです。導入にあたり、別フォルダーへの復元テストとハッシュ照合でデータが正しく戻せることを確認のうえ納品してください。",
+    "stock_backup_case_debrief": "保存の成功だけで安心せず、別場所に正常に戻せるかまで確かめることが重要になる。",
+    "stock_backup_case_check": "3台帳の日次退避、別フォルダー復元、ハッシュ照合の完了",
+    "stock_order_lines": "発注明細",
+    "stock_order_total": "発注合計",
+    "stock_quantity_available": "利用可能数",
+    "stock_product_details": "製品詳細",
+    "stock_serial_details": "シリアル詳細",
+    "stock_receive_area": "入荷受領エリア",
+    "stock_setup_bench": "キッティング作業台",
+    "stock_client_site": "顧客設置先",
+    "stock_in_transit": "配送中",
+    "stock_pick_product": "製品を選択",
+    "stock_gateway_summary": "拠点間通信の制御・保護装置",
+    "stock_backup_summary": "業務台帳の自動保存・復元装置",
+    "stock_error_checks": "出荷前検証が未完了の項目があります",
+    "stock_storage_shelf": "機材保管棚",
+    "stock_carry_location": "所持中",
+    "stock_no_matches": "一致する在庫がありません"
+  }
+}

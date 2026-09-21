@@ -1,0 +1,13 @@
+Kenney Furniture Kit
+Official page: https://kenney.nl/assets/furniture-kit
+Direct download: https://kenney.nl/media/pages/assets/furniture-kit/440e0608a4-1677580847/kenney_furniture-kit.zip
+Downloaded archive: artifacts/simulator/downloads/kenney_furniture-kit.zip
+SHA-256: E67652D0932CEE41683F74711C03D3E192A2AF9979EF8E6B237711F5482D46B0
+License: CC0 (see kenney-furniture-kit-License.txt)
+
+Kenney Interface Sounds
+Official page: https://kenney.nl/assets/interface-sounds
+Direct download: https://kenney.nl/media/pages/assets/interface-sounds/fa43c1dd4d-1677589452/kenney_interface-sounds.zip
+Downloaded archive: artifacts/simulator/downloads/kenney_interface-sounds.zip
+SHA-256: F2193D072726D6758A5F7871B2DCC54DCCE0D5C35C6F0A62F92549B327C81232
+License: CC0 (see kenney-interface-sounds-License.txt)

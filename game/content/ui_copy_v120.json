@@ -1,0 +1,93 @@
+{
+  "provenance": {
+    "provider": "Gemini Web Flash",
+    "model": "3.8 Flash",
+    "source_url": "https://gemini.google.com/app/9070455db718c76c",
+    "raw_responses": [
+      {
+        "path": "artifacts/simulator/v120/gemini-edr-v120-dom-raw.json",
+        "sha256": "8af069e2e09a21b2897c1cbac7b2be40caa74ff263c07366690343c217d3b0a3"
+      },
+      {
+        "path": "artifacts/simulator/v120/gemini-edr-v120-dom-source.json",
+        "sha256": "8af069e2e09a21b2897c1cbac7b2be40caa74ff263c07366690343c217d3b0a3"
+      },
+      {
+        "path": "artifacts/simulator/v120/gemini-edr-change-v120-raw.json",
+        "sha256": "4ced7156811a883453b10cad7598412293645c72ff9bf399b1076189b89811d9"
+      },
+      {
+        "path": "artifacts/simulator/v120/gemini-edr-change-v120-source.json",
+        "sha256": "4ced7156811a883453b10cad7598412293645c72ff9bf399b1076189b89811d9"
+      },
+      {
+        "path": "artifacts/simulator/v120/gemini-edr-change-v120-dom-raw.json",
+        "sha256": "3f90ecb550845816e5b6c4420a2dcbbd9681dfdceebe9d22c7c5d06e24707fdd"
+      },
+      {
+        "path": "artifacts/simulator/v120/gemini-edr-change-v120-dom-source.json",
+        "sha256": "3f90ecb550845816e5b6c4420a2dcbbd9681dfdceebe9d22c7c5d06e24707fdd"
+      },
+      {
+        "path": "artifacts/simulator/v120/gemini-edr-errors-v120-raw.json",
+        "sha256": "6ee09adaf1521c276ad87cdc9b4c70e6b8ff7b5ee5efd30c02d85d22d110ffac"
+      },
+      {
+        "path": "artifacts/simulator/v120/gemini-edr-errors-v120-source.json",
+        "sha256": "6ee09adaf1521c276ad87cdc9b4c70e6b8ff7b5ee5efd30c02d85d22d110ffac"
+      }
+    ]
+  },
+  "entries": {
+    "edr_title": "EDR管理コンソール",
+    "edr_devices": "デバイス一覧",
+    "edr_timeline": "タイムライン",
+    "edr_actions": "アクション",
+    "edr_device": "デバイス",
+    "edr_status": "ステータス",
+    "edr_connected": "接続中",
+    "edr_isolated": "隔離中",
+    "edr_management": "管理コンソール",
+    "edr_business": "業務アクセス",
+    "edr_available": "利用可能",
+    "edr_blocked": "遮断",
+    "edr_isolate": "デバイスを隔離",
+    "edr_release": "隔離を解除",
+    "edr_collect": "調査パッケージを収集",
+    "edr_evidence": "証拠データ",
+    "edr_integrity_ok": "整合性確認済",
+    "edr_integrity_bad": "整合性エラー",
+    "edr_no_package": "パッケージなし",
+    "edr_search": "検索",
+    "edr_no_results": "該当なし",
+    "edr_time": "日時",
+    "edr_event": "イベント",
+    "edr_process": "プロセス",
+    "edr_publisher": "発行元",
+    "edr_destination": "通信先",
+    "edr_change": "変更申請番号",
+    "edr_details": "詳細",
+    "edr_back": "戻る",
+    "edr_connection_required": "接続が必要です",
+    "edr_reference": "リファレンス",
+    "edr_reference_body": "本機能はMicrosoft Defenderのデバイス一覧、タイムライン、端末隔離、調査パッケージの挙動を模したオフライン学習用モックであり、実製品の全機能を提供するものではありません。",
+    "edr_operation_failed": "操作に失敗しました",
+    "edr_case_title_0": "不審な外部通信の調査",
+    "edr_case_title_1": "前回と異なる検知アラート",
+    "edr_case_title_2": "アラート対応後の業務影響",
+    "edr_case_title_3": "複数端末での同時アラート",
+    "edr_case_title_4": "誤検知の可能性調査",
+    "edr_case_title_5": "隔離後の検知継続調査",
+    "edr_check_a": "PC-Aの通信制御が調査結果と一致している",
+    "edr_check_b": "PC-Bの通信制御が調査結果と一致している",
+    "edr_probe_a": "PC-A 通信状況の確認",
+    "edr_probe_b": "PC-B 通信状況の確認",
+    "edr_probe_description": "端末のネットワーク通信状態を確認します",
+    "release_title": "v1.20 リリース",
+    "release_note": "v1.20ではEDR管理コンソールが追加され、実VMと連動したデバイス一覧、タイムライン検索、端末隔離・解除、調査パッケージ収集およびSHA検証に対応しました。正常端末の業務通信維持と対象端末の通信制御を再検査するフローが実装され、旧セーブデータとの互換性も保持されています。なお、本バージョンの日本語UI文言はGemini Web Flashにより作成されたものです。",
+    "edr_error_source_invalid": "原本ログが欠落または改ざんされているため収集できません",
+    "edr_error_copy_conflict": "既存の証拠データと不整合があるため収集を中止しました",
+    "edr_error_unsaved_config": "未反映の設定変更があります。先に適用してください",
+    "edr_error_save_failed": "保存に失敗したため操作を取り消しました"
+  }
+}

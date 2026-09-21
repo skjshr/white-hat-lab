@@ -1,0 +1,63 @@
+{
+  "provenance": {
+    "provider": "Gemini Web Flash",
+    "model": "Flash",
+    "source_url": "https://gemini.google.com/app/9070455db718c76c",
+    "raw_responses": [
+      {
+        "path": "artifacts/simulator/v114/gemini-code-1789891753916.json",
+        "sha256": "376e0e1fa9c504505e0a18e0406a0ff4f374703cb44f14e33c307cd67a6c4033"
+      },
+      {
+        "path": "artifacts/simulator/v114/gemini-code-1789891851289.json",
+        "sha256": "5e92e61806eb7e24c22379ebe12da23c3fb2abd0676b36f5fbee98320d995650"
+      },
+      {
+        "path": "artifacts/simulator/v114/gemini-code-1789892143916.json",
+        "sha256": "dcf3e4b1f1ca5b1284c7942ec2d9883c961e63eaa0e351b3719db25d15cc1802"
+      },
+      {
+        "path": "artifacts/simulator/v114/gemini-code-1789892544554.json",
+        "sha256": "8006798f0bd3bdf6fcfbb560f032f806a52dcafe080ff2ad4cb8097fa1841a9b"
+      },
+      {
+        "path": "artifacts/simulator/v114/gemini-code-1789892758104.json",
+        "sha256": "1fe0df51b95d55f49a6aa62a3ff23d7aefd8f35de53e97c85dfe692fc72e9404"
+      }
+    ]
+  },
+  "entries": {
+    "care_title": "当日保守点検",
+    "care_status_idle": "対象なし",
+    "care_status_pending": "未着手",
+    "care_status_working": "点検中",
+    "care_status_done": "正常完了",
+    "care_status_failed": "要対応",
+    "care_status_legacy": "従来型契約",
+    "care_self_check": "自主点検を実施",
+    "care_assign_member": "%s に割当",
+    "care_assignee_unassigned": "未割当",
+    "care_assignee_member": "担当: %s",
+    "care_assignee_self": "%s (本人)",
+    "care_result": "結果確認",
+    "care_progress": "%d / %d秒",
+    "care_client_status": "%s 保守点検",
+    "care_summary": "未着手: %d件 / 実行中: %d件 / 正常: %d件 / 異常: %d件",
+    "care_today": "確定売上: ¥%d / 固定原価: ¥%d / 純利益: ¥%d",
+    "care_contract_rates": "想定売上: ¥%d / 固定原価: ¥%d / 想定純利益: ¥%d",
+    "care_result_title": "点検結果レポート - %s",
+    "care_result_empty": "点検結果なし",
+    "care_end_day_busy": "点検作業が継続中のため退勤不可",
+    "care_maintenance_unavailable": "離席中（復帰待ち）",
+    "care_maintenance_working": "点検中",
+    "care_maintenance_done": "点検済: 異常なし",
+    "care_maintenance_failed": "点検済: 要対応項目あり",
+    "care_maintenance_signed": "納品時検証済（当日点検に充当）",
+    "care_billing": "検収日以降・点検完了分のみ日次計上（固定原価別）",
+    "backup_selection_required": "複数世代を検出：内容確認と世代選択待ち",
+    "backup_reference": "・snapshots: 保存先ごとのID・元パス・件数一覧（-r local/offsiteで切替）\n・ls <ID>: 収録パス一覧 / dump <ID> <path>: ファイル内容の直接確認\n・restore <ID> --target /restore: パスを保持し/restore/srv/data/...へ復元\n・restore <ID>:/srv/data --target /restore: 直下に/restore/...として展開\n・latestは破損の可能性があるため、正常性の事前確認が必須\n・元データは直接上書きせず、復元後にマニフェストのハッシュと照合",
+    "backup_reference_commands": "cat /home/operator/recovery-manifest.sha256\nrestic backup /srv/data\nrestic snapshots\nrestic -r offsite snapshots\nrestic ls <ID>\nrestic dump <ID> /srv/data/ledger.txt\nrestic restore <ID> --target /restore\nrestic restore <ID>:/srv/data --target /restore\nsha256sum /restore/srv/data/ledger.txt",
+    "backup_id_placeholder": "<ID> 部分は restic snapshots の一覧で確認したIDに置き換えて手動で入力してください。",
+    "backup_recovery_done": "データ復元および証拠保全完了"
+  }
+}

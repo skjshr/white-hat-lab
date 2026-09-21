@@ -1,0 +1,10 @@
+Calm Track - loopable music
+
+Source: https://opengameart.org/content/calm-track
+File: https://opengameart.org/sites/default/files/calm_track-loop.ogg
+Author: pmiller
+License: CC0 / Public Domain (the source page states that attribution is not
+necessary). Retrieved 2026-09-20.
+
+Bundled file was loudness-normalized without clipping; the musical content and
+loop are otherwise unchanged.

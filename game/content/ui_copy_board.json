@@ -1,0 +1,28 @@
+{
+  "source": "Gemini Web Flash",
+  "source_url": "https://gemini.google.com/app/a971a4391b7ea63e",
+  "model_selector": "Flash",
+  "extraction": "Visible response code text, UTF-8 LF, values verbatim",
+  "raw_responses": [
+    {
+      "path": "artifacts/simulator/board-trim/gemini-board-raw.json",
+      "sha256": "b69fa86576258f64d465f6d5cdcb0699c5640eb4d53b5ab54ecdf49973b61fdb"
+    }
+  ],
+  "entries": {
+    "board_list": "案件一覧",
+    "board_category": "分類",
+    "board_stage": "進捗",
+    "board_all_categories": "全分類",
+    "board_all_stages": "全状態",
+    "board_brief": "依頼詳細",
+    "board_conditions": "契約条件",
+    "board_plan": "プラン",
+    "board_price": "提示額",
+    "board_facts": "%d拠点 · 目安%d分 · 経費¥%d",
+    "board_profit": "見込利益 ¥%d",
+    "board_quote_limits": "相場 ¥%d / 上限 ¥%d",
+    "board_save_draft": "下書き保存",
+    "board_send_quote": "見積送信"
+  }
+}

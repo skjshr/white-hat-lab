@@ -1,0 +1,27 @@
+{
+  "provenance": {
+    "provider": "Gemini Web Flash",
+    "model": "Flash",
+    "source_url": "https://gemini.google.com/app/9070455db718c76c",
+    "model_selector": "Flash selected in visible model selector",
+    "response_ids": [
+      "95a463fd8159599c"
+    ],
+    "adopted_response_ids": [
+      "95a463fd8159599c"
+    ],
+    "extraction_method": "Gemini response Copy button, browser clipboard text encoded as UTF-8 without normalization",
+    "raw_responses": [
+      {
+        "path": "artifacts/simulator/clone/gemini-service-clone-flow-raw.json",
+        "sha256": "f796d982fd6592a87f3bf3306c082ddd9d6f72b05ae5f574ccf84d84c3f1ee01",
+        "response_id": "95a463fd8159599c",
+        "disposition": "adopted"
+      }
+    ]
+  },
+  "entries": {
+    "identity_flow_step": "ステップ",
+    "identity_flow_requirement": "条件"
+  }
+}

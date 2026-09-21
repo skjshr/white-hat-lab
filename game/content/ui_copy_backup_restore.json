@@ -1,0 +1,41 @@
+{
+  "provenance": {
+    "provider": "Gemini Web Flash",
+    "model": "Flash",
+    "source_url": "https://gemini.google.com/app/21496255c4dd18ec",
+    "model_selector": "Flash selected in visible model selector",
+    "extraction_method": "Visible code block innerText, UTF-8 LF without edits",
+    "captured_utc": "2026-09-20T22:30:15.845258+00:00",
+    "raw_responses": [
+      {
+        "path": "artifacts/simulator/backup/gemini-selective-restore-raw.json",
+        "sha256": "3102cf811812f0b56e3a6216e4c95e052a79be7ef73b1960add7e381e2d5b5fa",
+        "disposition": "adopted"
+      }
+    ]
+  },
+  "entries": {
+    "backup_restore_to_path": "指定パスへ復元",
+    "backup_selected_path": "選択中のパス",
+    "backup_overwrite": "既存ファイルの処理",
+    "backup_overwrite_always": "常に上書き",
+    "backup_overwrite_never": "既存ファイルを保持",
+    "backup_preview_changes": "差分プレビュー",
+    "backup_execute_restore": "復元を実行",
+    "backup_status_new": "新規",
+    "backup_status_unchanged": "変更なし",
+    "backup_status_overwrite": "上書き",
+    "backup_status_skipped": "スキップ",
+    "backup_current_hash": "現行 SHA-256",
+    "backup_snapshot_hash": "スナップショット SHA-256",
+    "backup_restore_failed": "復元失敗",
+    "backup_restore_succeeded": "復元完了",
+    "backup_preview_stale": "ファイル変更を検知。プレビューを再確認してください。",
+    "backup_restore_count": "{count} 件選択中",
+    "backup_destination_path": "復元先パス",
+    "backup_name": "名前",
+    "backup_info": "詳細",
+    "backup_close": "閉じる",
+    "backup_all_files": "すべてのファイル"
+  }
+}

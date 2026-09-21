@@ -1,0 +1,67 @@
+{
+  "provenance": {
+    "provider": "Gemini Web Flash",
+    "model": "Flash",
+    "source_url": "https://gemini.google.com/app/9070455db718c76c",
+    "raw_responses": [
+      {
+        "path": "artifacts/simulator/v116/gemini-staffing-v116-raw.json",
+        "sha256": "c7a847b36f922a3ebbe28d5c3dcbf315e40aa7bb60be094c28e003c3cc1f18b5"
+      },
+      {
+        "path": "artifacts/simulator/v116/gemini-staffing-wage-v116-raw.json",
+        "sha256": "a25c08ca7b0667148d2498cd68398843394d01260456f21c200b86e6bd197c0d"
+      },
+      {
+        "path": "artifacts/simulator/v116/gemini-staffing-effects-v116-raw.json",
+        "sha256": "b7f39fa97a92c1c8c9e98747feb7cf3d9474b2c13b4341518fc8cc56bf6cf921"
+      }
+    ]
+  },
+  "entries": {
+    "staffing_title": "人員管理",
+    "staffing_candidates": "採用候補一覧",
+    "staffing_hire": "採用する",
+    "staffing_release": "契約解除",
+    "staffing_shift": "シフト",
+    "staffing_shift_day": "終日 (9:00–18:00)",
+    "staffing_shift_morning": "午前 (9:00–13:00)",
+    "staffing_shift_afternoon": "午後 (13:00–18:00)",
+    "staffing_role_aya": "調査担当",
+    "staffing_role_ren": "復旧担当",
+    "staffing_role_maintenance": "保守点検担当",
+    "staff_name_mio": "水野 美緒",
+    "staff_name_haru": "佐々木 遥",
+    "staff_name_sora": "橘 空",
+    "staffing_terms": "採用費 ¥%d / 日額 ¥%d",
+    "staffing_summary": "追加人員: %d/%d名 · 当日給与: ¥%d · 未払: ¥%d",
+    "staffing_pay_arrears": "未払分を精算",
+    "staffing_next_shift": "翌日予定: %s",
+    "staffing_shift_hours": "%s–%s",
+    "staffing_daily_cost": "日額 ¥%d",
+    "staffing_used_time": "稼働 %d / %d分",
+    "staffing_career_only": "キャリアモード限定",
+    "staffing_no_desk": "チームデスク未設置",
+    "staffing_full": "座席上限に達しています",
+    "staffing_funds": "資金不足です",
+    "staffing_busy": "作業対応中",
+    "staffing_off_shift": "勤務時間外",
+    "staffing_capacity_used": "本日の稼働上限に到達",
+    "staffing_arrears_block": "未払給与の精算が必要です",
+    "staffing_role_mismatch": "担当業務の不一致",
+    "staffing_inactive": "未契約のスタッフです",
+    "staffing_already": "採用済みです",
+    "staffing_invalid_shift": "有効なシフトを選択してください",
+    "staffing_save_failed": "保存に失敗しました",
+    "staffing_status_arriving": "出社中",
+    "staffing_status_leaving": "退勤中",
+    "staffing_status_off_shift": "時間外",
+    "staffing_existing_member": "初期メンバー",
+    "staffing_report": "担当者: %s",
+    "staffing_wage_note": "契約解除日当日の給与も精算対象となります",
+    "release_note": "チームデスクの設置により追加人員1名の雇用が可能になりました。調査・復旧・保守点検の3つの専門役割を選択でき、出退勤やシフト管理、翌日変更、日額給与および未払精算システムが連動します。スタッフは実VM環境での成果物作成に対応し、既存の初期メンバー2名および旧バージョンのセーブデータとの互換性も維持されています。",
+    "staffing_effect_backup": "通常委任の作業時間 -1分",
+    "staffing_effect_monitor": "通常委任の作業時間 -1分 · 保守枠 +2",
+    "staffing_effect_teamdesk": "通常委任の作業時間 -2分 · 保守枠 +2 · 追加雇用 +1名"
+  }
+}

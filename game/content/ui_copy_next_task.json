@@ -1,0 +1,59 @@
+{
+  "source": "Gemini Web Flash",
+  "source_url": "https://gemini.google.com/app",
+  "response_id": "aa7cf2d232404750",
+  "model_selector": "Flash",
+  "extraction": "Visible response code text, UTF-8 LF with terminal newline; values verbatim",
+  "raw_responses": [
+    {
+      "path": "artifacts/simulator/next-task/gemini-next-task-raw.json",
+      "sha256": "f8cdf75aae608ba503412f3a44905b1a51e9a717d20d6ca4f796b0a69967e203"
+    },
+    {
+      "path": "artifacts/simulator/next-task/gemini-next-task-extra-raw.json",
+      "sha256": "cf6acb1b1a68f6ee2ee11925e45028309d2080c37ac0c91fdd7aee1b12ad7387",
+      "response_id": "e5025f30fb7ba780"
+    }
+  ],
+  "entries": {
+    "next_guide": "次タスクガイド",
+    "next_task": "次の作業",
+    "next_hint": "詳しいヒント",
+    "next_hide_hint": "ヒントを閉じる",
+    "next_hide": "ガイド非表示",
+    "next_show": "ガイド再表示",
+    "next_board_title": "案件を探す",
+    "next_board_body": "案件ボードで依頼を選び、内容を確認します。",
+    "next_connect_title": "作業対象に接続",
+    "next_connect_body": "管理画面を開き、対象端末に接続します。",
+    "next_investigate_title": "現状を調べる",
+    "next_investigate_body": "記録や診断結果から問題の範囲を調べます。",
+    "next_fix_title": "原因に対応する",
+    "next_fix_body": "依頼内容と診断結果をもとに設定を修正します。",
+    "next_test_title": "動作を確かめる",
+    "next_test_body": "未実施の検査を実行し、動作を確認します。",
+    "next_failed_hint": "失敗結果と依頼条件を確認し、管理画面で見直します。",
+    "next_site_title": "次の対象へ",
+    "next_site_body": "未完了の対象を選び、作業を継続します。",
+    "next_done_title": "作業完了",
+    "next_done_body": "精算結果を確認し、案件ボードで次の依頼を探します。",
+    "next_accept_title": "依頼を引き受ける",
+    "next_accept_body": "内容と条件を確認し、依頼を引き受けます。",
+    "next_workbench_body": "作業台で記録を分析し、必要な対応を進めます。",
+    "next_optional_baseline": "変更前記録は任意です。残す場合は変更前に保存します。",
+    "next_diagnostic_hint": "設定変更後は診断が古くなるため、再実行が必要です。",
+    "next_restore_hint": "対象と保存先を確認して復元し、正常動作を検査します。",
+    "next_terminal_body": "ターミナルを開き、接続を押します。",
+    "next_apply_body": "サービス管理で設定を適用し、再起動します。",
+    "next_buy_body": "機材画面で条件に合う機材を発注します。",
+    "next_receive_body": "届いた機材を受け取り、作業机に配置します。",
+    "next_inbound_body": "機材の到着を待ち、オフィスで受け取ります。",
+    "next_ship_body": "検査済みの機材を出荷場所へ運びます。",
+    "next_shipping_body": "機材が納入先へ到着するまで待機します。",
+    "next_team_body": "チーム画面で同僚の進捗を確認します。",
+    "next_fix_hint": "不合格理由を確認して設定を適用後、再検査します。",
+    "next_validation_body": "納品条件確認を実行し、達成状況を調べます。",
+    "next_probe_body": "診断ラボで項目を選び、検査を実行します。",
+    "next_location_blocked": "移動できません。変更を保存してから再試行してください。"
+  }
+}

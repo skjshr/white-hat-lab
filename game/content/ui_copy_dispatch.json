@@ -1,0 +1,59 @@
+{
+  "source": "Gemini Web Flash",
+  "source_url": "https://gemini.google.com/app/16dc5b2c1bec9360",
+  "model_selector": "Flash",
+  "extraction": "Visible response paragraph innerText, UTF-8, values verbatim",
+  "raw_responses": [
+    {
+      "path": "artifacts/simulator/dispatch/gemini-initial-raw.json",
+      "sha256": "562c35e543ad96406944316e09a9f6ff90ef798c8a33952dcf03d24a656925d7"
+    },
+    {
+      "path": "artifacts/simulator/dispatch/gemini-refinement-raw.json",
+      "sha256": "330f70b3f764241abba99a1ce3f3adab7a191a7c1c5b524390fc0973b8bb2d85"
+    }
+  ],
+  "entries": {
+    "dispatch_title": "作業配分",
+    "dispatch_member": "担当技術者",
+    "dispatch_active": "進行中",
+    "dispatch_queue": "作業キュー",
+    "dispatch_tickets": "チケット",
+    "dispatch_client": "顧客名",
+    "dispatch_subject": "件名",
+    "dispatch_target": "対象機器",
+    "dispatch_kind": "作業種別",
+    "dispatch_status": "状態",
+    "dispatch_deadline": "期日",
+    "dispatch_normal": "通常依頼",
+    "dispatch_maintenance": "定期保守",
+    "dispatch_queued": "待機中",
+    "dispatch_paused": "中断中",
+    "dispatch_pause": "作業中断",
+    "dispatch_start": "開始・再開",
+    "dispatch_enqueue": "キュー追加",
+    "dispatch_up": "上へ移動",
+    "dispatch_down": "下へ移動",
+    "dispatch_remove": "キュー解除",
+    "dispatch_empty": "待機なし",
+    "dispatch_idle": "対応可能",
+    "dispatch_held": "自動開始停止",
+    "dispatch_remaining": "残り %d 分",
+    "dispatch_position": "第 %d 順位",
+    "dispatch_duplicate": "同一役割の担当者が既に設定されています",
+    "dispatch_invalid": "この作業は選択できません",
+    "dispatch_save_failed": "変更を保存できませんでした",
+    "dispatch_work_pending": "未着手または中断の作業があります",
+    "dispatch_staff_pending": "担当者に未完了の作業が残っています",
+    "dispatch_started_remove": "着手済みの作業は解除できません",
+    "dispatch_failed": "割当の更新に失敗しました",
+    "dispatch_select": "チケット選択",
+    "dispatch_all": "全作業",
+    "dispatch_owner": "保守主担当",
+    "dispatch_done": "完了",
+    "dispatch_estimate": "完了予定 %s",
+    "dispatch_overdue": "期限超過",
+    "dispatch_waiting": "着手待ち",
+    "dispatch_blocked": "保留中"
+  }
+}

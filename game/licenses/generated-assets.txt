@@ -1,0 +1,27 @@
+White Hat Lab project-created generated artwork
+
+assets/ui/aoba-wallpaper-v16.png: original wallpaper generated for this project with OpenAI image generation.
+assets/ui/app-icons-v17.png: original ten-icon transparent atlas generated for this project with OpenAI image generation, 2026-09-19.
+assets/ui/equipment-v18.png: original six-equipment transparent atlas generated for this project with OpenAI image generation, 2026-09-20.
+assets/ui/sales/board-pictograms-atlas.png: original monochrome pictogram atlas generated for this project with OpenAI image generation, 2026-09-21.
+The images do not contain third-party logos or copied application artwork. Reference software informed interaction layout only.
+Development prompt record: artifacts/simulator/v17-assets/prompts.md
+Version 1.8 design and equipment prompts: artifacts/simulator/v18/design-prompt-neutral.md and equipment-prompt.md.
+Generated assets are included in the game distribution. No new public license for the entire project is granted here.
+
+Version 1.9: art/v19/world-and-hand-reference.png is an original OpenAI Image Gen direction image used during development, not a runtime environment texture.
+tools/blender/build_world_v19.py arranges the credited Kenney CC0 geometry into the neighbourhood and street vehicles. Original Blender scene: art/v19/neighbourhood.blend.
+tools/blender/build_hand_v19.py adapts the credited Quaternius left hand and adds an original sleeve. Original Blender scene: art/v19/left_coffee_hand.blend.
+tools/blender/build_npc_v19.py adds original seated and drinking skeletal animation to the credited Quaternius characters while preserving their original idle and walk clips. Original Blender scenes: art/v19/aya-office.blend and ren-office.blend.
+See sources.txt and the individual upstream license files for third-party asset provenance.
+
+Customer procurement: assets/ui/customer-appliances.png is an original transparent
+product atlas generated with OpenAI Image Gen on 2026-09-21. The two appliances
+contain no third-party logos. tools/blender/build_customer_appliances.py authors
+the corresponding original meshes and materials in meters from that reference.
+Editable source: art/customer-appliances.blend. Runtime models:
+assets/props/customer-appliances/gateway.glb and backup.glb.
+
+Version 2.1: assets/ui/sales/model-aya.png and model-ren.png are runtime portraits
+rendered directly from the credited Quaternius Aya and Ren game models by
+tests/render_sales_model_portraits.gd. They are not separately generated artwork.

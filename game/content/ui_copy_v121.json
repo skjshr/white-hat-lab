@@ -1,0 +1,35 @@
+{
+  "provenance": {
+    "provider": "Gemini Web Flash",
+    "model": "Flash",
+    "source_url": "https://gemini.google.com/app/9070455db718c76c",
+    "model_selector": "Flash selected in visible model selector",
+    "raw_responses": [
+      {
+        "path": "artifacts/simulator/v121/gemini-equipment-v121-raw.json",
+        "sha256": "8c4123c3df5008b91809e8f7874f64ceaccc7c77396ce45d01929469da28a079"
+      },
+      {
+        "path": "artifacts/simulator/v121/gemini-equipment-v121-source.json",
+        "sha256": "8c4123c3df5008b91809e8f7874f64ceaccc7c77396ce45d01929469da28a079"
+      },
+      {
+        "path": "artifacts/simulator/v121/gemini-equipment-v121-revision-20260920-raw.json",
+        "sha256": "0993d539d7bc46c8cb3ada88ce59d7fbd58a092587be6eef933df73db4d35b11"
+      },
+      {
+        "path": "artifacts/simulator/v121/gemini-equipment-v121-revision-20260920-source.json",
+        "sha256": "0993d539d7bc46c8cb3ada88ce59d7fbd58a092587be6eef933df73db4d35b11"
+      }
+    ]
+  },
+  "entries": {
+    "equipment_free_placement": "床面自由配置",
+    "equipment_move": "移動",
+    "equipment_move_busy": "スタッフが使用中のため移動できません",
+    "equipment_route_blocked": "通路または出入口を塞ぐため配置できません",
+    "equipment_monitor_fixed": "復旧担当デスク",
+    "release_title": "v1.21 リリース",
+    "release_note": "設備の自由配置とスタッフの動線判定に対応し、MFAおよびTLS診断の不具合を修正しました。"
+  }
+}

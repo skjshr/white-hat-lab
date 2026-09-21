@@ -1,0 +1,61 @@
+{
+  "source": "Gemini Web Flash",
+  "source_url": "https://gemini.google.com/app/64f037b11a76ad28",
+  "model_selector": "Flash",
+  "extraction": "Visible response code text, UTF-8 LF, values verbatim",
+  "raw_responses": [
+    {
+      "path": "artifacts/simulator/tutorial-guided/gemini-guide-raw.json",
+      "sha256": "fa54ba491b050caba95019b9d6dd003abec56f2875c32865da097c0cde3cd35e"
+    },
+    {
+      "path": "artifacts/simulator/tutorial-guided/gemini-guide-diagnostic-raw.json",
+      "sha256": "d77a92f5debf9cdb0fc0946b9680861a6c0f9631c148f4b4351fc9c290f1eb50"
+    }
+  ],
+  "entries": {
+    "guide_progress": "最初の仕事",
+    "guide_skip": "案内を終了",
+    "guide_locate": "場所を確認",
+    "guide_resume": "案内を再開",
+    "guide_finish": "案内を閉じる",
+    "guide_return": "作業に戻る",
+    "guide_baseline_unavailable": "変更前記録は後から作成できません。そのまま作業を続けて問題ありません。",
+    "guide_strategy_title": "得意分野を選択",
+    "guide_strategy_body": "3つの中から会社の得意分野を1つ選んでください。どれを選んでも最初の仕事を進められます。",
+    "guide_walk_title": "周囲を見渡して移動",
+    "guide_walk_body": "マウスで周囲を見回し、WASDキーで移動してみましょう。",
+    "guide_desk_title": "自分のPCを開く",
+    "guide_desk_body": "目印がついた自分のPCデスクへ近づき、EキーまたはFキーを押して操作画面を開いてください。",
+    "guide_mail_title": "新着依頼を確認",
+    "guide_mail_body": "画面上の「Outwatch」を開き、届いている新着依頼を選択して内容を確認しましょう。",
+    "guide_accept_title": "依頼の引き受け",
+    "guide_accept_body": "社員が更新可能でゲストを遮断する共有設定の依頼内容を確認し、「引き受ける」を押してください。",
+    "guide_connect_title": "顧客端末へ接続",
+    "guide_connect_body": "ブラウザから「Samba」を開き、対象となる顧客端末へ接続してください。",
+    "guide_baseline_title": "変更前の記録を保存",
+    "guide_baseline_body": "「納品・精算」画面を開き、「変更前記録保存」を押して元の設定状態を残しておきましょう。",
+    "guide_observe_title": "現状の動作を診断",
+    "guide_observe_body": "診断ラボで「社員の保存」を選び「検査実行」を押してください。不合格の確認も大切な作業です。",
+    "guide_edit_title": "共有設定の編集",
+    "guide_edit_body": "Samba管理画面に戻り、「share」共有の編集項目を開いてください。",
+    "guide_read_only_title": "書き込み権限の変更",
+    "guide_read_only_body": "社員がファイルを更新できるようにするため、「読み取り専用」のチェックを外してください。",
+    "guide_guest_title": "ゲストアクセスの遮断",
+    "guide_guest_body": "匿名アクセスを防ぐため、「ゲストアクセス」のチェックを外してください。",
+    "guide_users_title": "許可ユーザーの指定",
+    "guide_users_body": "「許可ユーザー」の入力欄に「staff」と入力してください。",
+    "guide_save_title": "設定内容の保存",
+    "guide_save_body": "「保存」を押してください。この段階ではまだサービス本体へは反映されません。",
+    "guide_restart_title": "サービスを再起動",
+    "guide_restart_body": "「適用して再起動」を押して、保存した設定変更をシステムへ反映させましょう。",
+    "guide_diagnose_title": "診断の再実行",
+    "guide_diagnose_body": "未実行や不合格の項目を順に選んで検査を実行し、社員の利用成功とゲストの拒否を確認してください。",
+    "guide_validate_title": "納品条件の照合",
+    "guide_validate_body": "「納品条件確認」を押し、すべての診断結果が依頼要件を満たしているか照合してください。",
+    "guide_deliver_title": "納品と完了報告",
+    "guide_deliver_body": "「納品・精算」を押して、顧客への修正完了報告を行ってください。",
+    "guide_done_title": "業務完了",
+    "guide_done_body": "最初の仕事が完了しました。精算画面で入金と利益を確認し、次は案件ボードへ向かいましょう。"
+  }
+}

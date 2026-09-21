@@ -1,0 +1,24 @@
+{
+  "source": "Gemini Web Flash",
+  "source_url": "https://gemini.google.com/app/85700571360fe015",
+  "model_selector": "Flash",
+  "extraction": "Visible response code text, UTF-8 LF, values verbatim",
+  "raw_responses": [
+    {
+      "path": "artifacts/simulator/comparison/gemini-comparison-raw.json",
+      "sha256": "74ddff34f45b28de9f515092f445b60b742ee3003330e47b37ef72a50d5946cf"
+    }
+  ],
+  "entries": {
+    "compare_saved": "保存データと比較",
+    "compare_baseline": "ベースラインと比較",
+    "compare_close": "比較を閉じる",
+    "compare_saved_title": "保存データ",
+    "compare_working_title": "編集中の設定",
+    "compare_baseline_title": "設定控え",
+    "compare_unchanged": "差分なし",
+    "compare_results": "計測結果を比較",
+    "compare_first": "初回計測",
+    "compare_latest": "最新計測"
+  }
+}

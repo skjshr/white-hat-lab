@@ -1,0 +1,53 @@
+{
+  "source": "Gemini Web Flash",
+  "source_url": "https://gemini.google.com/app/6c8d3de03d0960ba",
+  "model_selector": "Flash",
+  "extraction": "Visible response code text, UTF-8 LF, values verbatim",
+  "raw_responses": [
+    {
+      "path": "artifacts/simulator/workstations/gemini-workload-raw.json",
+      "sha256": "184a28687c6e0d768aae82d9876f9b3bc69fd7f65780c49ace0b419e9e691bb0"
+    },
+    {
+      "path": "artifacts/simulator/workstations/gemini-workload-refinement-raw.json",
+      "sha256": "c9bfe577d05b7990e96d4c81b9520be26b1e5e32fc4c68176634ef7ff23fa5ba"
+    },
+    {
+      "path": "artifacts/simulator/workstations/gemini-music-controls-raw.json",
+      "sha256": "18d0308caedeca0395291e900611f7be5c5153db779dd52ef0cfefdf08ef31ad"
+    },
+    {
+      "path": "artifacts/simulator/workstations/gemini-placement-raw.json",
+      "sha256": "0b53ff9d5ee9ca18dba40b018f21a9143b37867b06ce14f3af8e3e8ef9a5a849"
+    }
+  ],
+  "entries": {
+    "workload_today": "本日の稼働状況",
+    "workload_reserved": "作業予定計: %d分",
+    "workload_available": "当日空き: %d分",
+    "workload_used": "消化済み: %d分",
+    "workload_finish": "作業完了見込: %s",
+    "workload_start": "着手見込: %s",
+    "workload_overflow": "翌日以降へ持越: %d分",
+    "workload_late": "注意: 顧客期限超過見込 (+%d分)",
+    "workload_blocked": "前提作業待ち (着手未定)",
+    "workload_held": "保留中 (再開待ち)",
+    "workload_after_queue": "キュー末尾追加時の予測",
+    "workload_schedule": "勤務予定",
+    "workload_unassigned": "担当者未選択",
+    "workload_day_time": "DAY %d %s",
+    "workstation_waiting": "待機中",
+    "workstation_hardware_wait": "機器接続待ち",
+    "workstation_working": "作業中",
+    "workstation_done": "結果確認待ち",
+    "workstation_queue": "キュー: %d件",
+    "workstation_off_shift": "時間外",
+    "workstation_app": "TaskQueue Monitor",
+    "music_next": "スキップ",
+    "music_playlist": "クラシック選曲",
+    "equipment_surface_hint": "天板の空きスペースを指定",
+    "equipment_surface_invalid": "配置不可: 重なりまたはみ出し",
+    "equipment_surface_placement": "卓上フリー配置",
+    "equipment_placement_controls": "左クリック: 設置 / ホイール: 回転 / 右クリック: 取消"
+  }
+}

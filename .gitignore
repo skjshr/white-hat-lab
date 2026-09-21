@@ -1,0 +1,11 @@
+.godot/
+.gemini/
+.env*
+*.log
+*.tmp
+*.bak
+*.blend1
+__pycache__/
+dist/
+artifacts/
+export_credentials.cfg

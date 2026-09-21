@@ -1,0 +1,74 @@
+{
+  "provenance": {
+    "provider": "Gemini Web Flash",
+    "model": "Flash",
+    "source_url": "https://gemini.google.com/app/9070455db718c76c",
+    "model_selector": "Flash selected in visible model selector",
+    "response_ids": [
+      "72510a2e3eb21853",
+      "0f29285908ec432f",
+      "33a32423ae948535"
+    ],
+    "adopted_response_ids": [
+      "72510a2e3eb21853",
+      "0f29285908ec432f",
+      "33a32423ae948535"
+    ],
+    "extraction_method": "Gemini response Copy button, browser clipboard text encoded as UTF-8 without normalization",
+    "raw_responses": [
+      {
+        "path": "artifacts/simulator/backup/gemini-backup-initial-raw.json",
+        "sha256": "59792d3c9706a523c322ef3c47d68e5f187ef48b23d2becab275d721c6da0602",
+        "response_id": "72510a2e3eb21853",
+        "disposition": "adopted_except_backup_restored"
+      },
+      {
+        "path": "artifacts/simulator/backup/gemini-backup-restored-revision-raw.json",
+        "sha256": "8b341bf21fb91144eda8e8157797f4e22f7c24988285f6a7a2fda22d91bac3d4",
+        "response_id": "0f29285908ec432f",
+        "disposition": "adopted"
+      },
+      {
+        "path": "artifacts/simulator/backup/gemini-backup-additional-raw.json",
+        "sha256": "38379bfbbdd9939cd99a5e814104b30b75269c653aac9bfd191ce1c66cfab9b8",
+        "response_id": "33a32423ae948535",
+        "disposition": "adopted"
+      }
+    ]
+  },
+  "entries": {
+    "backup_repositories": "リポジトリ",
+    "backup_snapshots": "スナップショット一覧",
+    "backup_source": "バックアップ元",
+    "backup_files": "ファイル一覧",
+    "backup_size": "サイズ",
+    "backup_browse": "ファイル閲覧",
+    "backup_preview": "プレビュー",
+    "backup_restore": "復元",
+    "backup_restore_to": "復元先",
+    "backup_restore_confirm": "このスナップショットを復元",
+    "backup_backup_now": "今すぐバックアップ",
+    "backup_plan": "バックアップ計画",
+    "backup_schedule": "スケジュール",
+    "backup_daily": "日次",
+    "backup_disabled": "無効",
+    "backup_save_plan": "計画を保存",
+    "backup_no_snapshots": "スナップショットなし",
+    "backup_select_snapshot": "スナップショットを選択",
+    "backup_result": "実行結果",
+    "backup_snapshot": "スナップショット",
+    "backup_local": "ローカルリポジトリ",
+    "backup_offsite": "オフサイトリポジトリ",
+    "backup_restored": "前回復元情報",
+    "backup_content": "ファイル内容",
+    "backup_restore_review": "復元詳細",
+    "backup_open_files": "復元先フォルダを開く",
+    "backup_refresh": "更新",
+    "backup_cancel": "キャンセル",
+    "backup_apply": "適用",
+    "backup_title": "バックアップ",
+    "backup_inspect": "詳細確認",
+    "backup_back": "戻る",
+    "backup_select_file": "ファイルを選択"
+  }
+}

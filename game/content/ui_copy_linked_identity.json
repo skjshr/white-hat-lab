@@ -1,0 +1,23 @@
+{
+  "provenance": {
+    "provider": "Gemini Web Flash",
+    "model": "Flash",
+    "source_url": "https://gemini.google.com/app/4df9adf23b7cf77c",
+    "response_id": "5002d246dffb44ff",
+    "model_selector": "Flash selected in visible model selector",
+    "extraction_method": "Gemini code Copy button; browser clipboard UTF-8 bytes without normalization",
+    "raw_path": "artifacts/simulator/linked-identity/gemini-linked-identity-raw.json",
+    "raw_sha256": "537282b54d58f797806cedcdcf9546552672f61969af8121d20a67e1f8c769a9",
+    "verbatim": true
+  },
+  "entries": {
+    "linked_identity_current": "現職",
+    "linked_identity_former": "退職済",
+    "linked_identity_revoked": "無効",
+    "linked_identity_active": "有効",
+    "linked_identity_session": "%s [%s] - %s",
+    "linked_identity_provider": "連携IDプロバイダー",
+    "linked_identity_portal_brief": "退職者アカウント停止後も既存セッションでのファイル閲覧と外部共有リンクが有効な状態です。現職社員と取引先の正規権限を維持しつつ、退職者および公開アクセスを遮断してください。",
+    "linked_identity_probe_former": "退職者セッション導通確認"
+  }
+}

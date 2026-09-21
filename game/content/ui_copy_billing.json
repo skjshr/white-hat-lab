@@ -1,0 +1,66 @@
+{
+  "source": "Gemini Web Flash",
+  "source_url": "https://gemini.google.com/app/531bcf1d0efe53e6",
+  "sources": [
+    {
+      "response_id": "model-response-message-contentr_5f82d7b86c08cc17",
+      "raw_file": "artifacts/simulator/billing/gemini-billing-raw-1.json",
+      "raw_sha256": "01f307ee537dad783f36bd7bd48f0b4fab2884d7440279bf749bd35611677ad5"
+    },
+    {
+      "response_id": "model-response-message-contentr_5c07dd68c843cdac",
+      "raw_file": "artifacts/simulator/billing/gemini-billing-raw-2.json",
+      "raw_sha256": "958473d82fd66ad9ebca69d8740cf9400df40558672b3fda462aae0ff6ab6b2a"
+    },
+    {
+      "response_id": "model-response-message-contentr_70dd810ccfef3749",
+      "raw_file": "artifacts/simulator/billing/gemini-billing-raw-3.json",
+      "raw_sha256": "a3950a4c59df9df5dda71252908b269639471aef2a3f0b3d29fcfc1fcaf5f29a"
+    }
+  ],
+  "entries": {
+    "billing_app": "請求管理",
+    "billing_invoices": "請求書",
+    "billing_payments": "入金履歴",
+    "billing_all": "すべて",
+    "billing_draft": "下書き",
+    "billing_posted": "未入金",
+    "billing_paid": "入金済",
+    "billing_invoice": "請求書番号",
+    "billing_client": "取引先",
+    "billing_invoice_date": "確定日",
+    "billing_due_date": "期日",
+    "billing_amount": "金額",
+    "billing_status": "ステータス",
+    "billing_reference": "取引参照",
+    "billing_payment_date": "入金日",
+    "billing_terms": "入金条件",
+    "billing_terms_immediate": "請求書確定時即時入金",
+    "billing_terms_days": "請求書確定後%d営業日入金",
+    "billing_confirm": "確定",
+    "billing_back": "請求書一覧へ戻る",
+    "billing_search": "請求書・取引先を検索",
+    "billing_no_results": "該当するデータがありません",
+    "billing_fee": "契約基本料",
+    "billing_quality_bonus": "納期・品質ボーナス",
+    "billing_baseline_bonus": "事前構成記録ボーナス",
+    "billing_total": "合計",
+    "billing_draft_total": "未確定合計",
+    "billing_receivable_total": "売掛金残高",
+    "billing_paid_today": "本日入金額",
+    "billing_due_next_day": "翌朝入金予定額",
+    "billing_open_invoice": "請求書を開く",
+    "billing_save_failed": "変更を保存できませんでした。以前の状態を維持します。",
+    "billing_invalid_invoice": "請求書データが不正です。",
+    "billing_missing_invoice": "請求書が見つかりません。",
+    "billing_not_draft": "この請求書はすでに確定済みです。",
+    "billing_confirm_failed": "請求書を確定できませんでした。",
+    "billing_cash": "利用可能資金",
+    "billing_records": "%d件",
+    "billing_delivered": "業務完了日",
+    "billing_contract": "契約件名",
+    "billing_not_issued": "未発行",
+    "billing_receipt_pending": "確定待ち",
+    "billing_next_cash": "翌朝入金後残高"
+  }
+}

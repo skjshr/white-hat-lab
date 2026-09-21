@@ -1,0 +1,16 @@
+Quaternius: Ultimate Modular Men Pack (February 2022)
+https://quaternius.com/packs/ultimatemodularcharacters.html
+Official Download folder:
+https://drive.google.com/drive/folders/1USAAquX2JJWuA2m6zol0KUkFe3UkZ8zX
+Individual Characters / glTF:
+https://drive.google.com/drive/folders/1qpSIycVWTwhKMgyA_bEFHPh1CfBBBa09
+
+Casual_2.gltf -> game/assets/characters/aya.gltf
+https://drive.google.com/file/d/1Jn7kULNmrtqP8BUUL19h8MhbdOnwPFhv/view
+Casual_Hoodie.gltf -> game/assets/characters/ren.gltf
+https://drive.google.com/file/d/1em1So1xwwQNfHJYMvzKcXkZllvtxpKP5/view
+
+License.txt from the official top-level folder was read in the Google Drive viewer
+on 2026-09-18 and transcribed into quaternius-CC0.txt. Both files were obtained
+from the official public download without an account or purchase requirement.
+Only idle animation is used; other included animation clips are not played.

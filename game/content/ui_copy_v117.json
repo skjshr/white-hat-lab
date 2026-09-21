@@ -1,0 +1,81 @@
+{
+  "provenance": {
+    "provider": "Gemini Web Flash",
+    "model": "Flash",
+    "source_url": "https://gemini.google.com/app/9070455db718c76c",
+    "raw_responses": [
+      {
+        "path": "artifacts/simulator/v117/gemini-identity-v117-raw.json",
+        "sha256": "48b9e5436198f9fa6f71430699a6232e7b8acf3668b5b3dc96d0fc27fd236aaa"
+      },
+      {
+        "path": "artifacts/simulator/v117/gemini-identity-v117-remaining-raw.json",
+        "sha256": "4a8bda68567ac2238e24079d601227ef426a67d18a862f067caaac0635cb1619"
+      },
+      {
+        "path": "artifacts/simulator/v117/gemini-identity-v117-revision-raw.json",
+        "sha256": "9a7c22f571771c09cbc18fa7350d7c56e263bbbf3bc9e29c8a219a754c4e4317"
+      }
+    ]
+  },
+  "entries": {
+    "identity_title": "ID管理コンソール",
+    "identity_users": "ユーザー一覧",
+    "identity_authentication": "認証設定",
+    "identity_events": "イベントログ",
+    "identity_test_login": "テストログイン",
+    "identity_details": "ユーザー詳細",
+    "identity_credentials": "認証情報",
+    "identity_sessions": "セッション一覧",
+    "identity_enabled": "有効",
+    "identity_disabled": "無効",
+    "identity_save": "保存",
+    "identity_username": "ユーザー名",
+    "identity_password": "パスワード",
+    "identity_otp": "ワンタイムパスワード",
+    "identity_sign_in": "サインイン",
+    "identity_verify_otp": "OTP検証",
+    "identity_logout": "ログアウト",
+    "identity_logout_all": "全セッション切断",
+    "identity_no_sessions": "アクティブなセッションはありません",
+    "identity_session_id": "セッションID",
+    "identity_client": "クライアント",
+    "identity_ip": "IPアドレス",
+    "identity_issued": "発行番号",
+    "identity_user": "ユーザー",
+    "identity_mfa_required": "MFA必須",
+    "identity_mfa_off": "MFA任意",
+    "identity_otp_registered": "OTP登録済",
+    "identity_otp_unregistered": "OTP未登録",
+    "identity_configure_otp": "OTP設定",
+    "identity_required": "必須",
+    "identity_disabled_flow": "OTP認証ポリシー無効",
+    "identity_apply": "適用",
+    "identity_access": "アクセス試行",
+    "identity_token": "トークン",
+    "identity_response": "レスポンス",
+    "identity_search": "検索",
+    "identity_back_users": "ユーザー一覧に戻る",
+    "identity_password_credential": "パスワード設定",
+    "identity_login_required": "ログインが必要です",
+    "identity_challenge_required": "追加認証が必要です",
+    "identity_enrollment_required": "初期登録が必要です",
+    "identity_authenticated": "認証成功",
+    "identity_revoked": "失効済",
+    "identity_denied": "アクセス拒否",
+    "identity_invalid_credentials": "認証情報が無効です",
+    "identity_invalid_otp": "無効なワンタイムパスワードです",
+    "identity_saved": "設定を保存しました",
+    "identity_realm": "レルム",
+    "identity_status": "ステータス",
+    "identity_empty_events": "記録されたイベントはありません",
+    "identity_exercise_credentials": "演習用認証情報",
+    "identity_reference": "ヘルプ・リファレンス",
+    "identity_reference_body": "・本コンソールはKeycloakのユーザー管理、認証情報、セッション、OTP必須化の挙動を模した演習環境です。\n・「OTP登録済」と「MFA必須ポリシー」は別設定であり、必須化時は未登録ユーザーに初期登録が要求されます。\n・「Training-117!」および固定値「123456」は演習用の値です（実運用のOTPは時間変動します）。\n・ユーザーを無効化すると新規ログインは拒否されますが、発行済アプリセッションは個別ログアウトが必要です。\n・実運用はトークン有効期限やバックチャネル通信に依存しますが、本演習では各リクエスト時にセッション状態を検証します。",
+    "release_title": "v1.17 リリース",
+    "release_note": "v1.17ではID管理コンソールを新設し、ユーザー認証、ワンタイムパスワード（OTP）検証、セッションの一覧表示および個別・一括ログアウト機能を追加しました。管理者の実務フローを模した演習シナリオに対応し、アカウント状態や認証ポリシーがアクセス制御に与える影響をシミュレーション環境で学習できます。なお、本機能は学習用モックであり実環境のKeycloakとの完全な互換性を保証するものではありません。",
+    "identity_business_probe": "業務アプリ連携診断",
+    "identity_connection_required": "SSH接続が必要です",
+    "identity_save_failed": "保存に失敗したため変更を取り消しました"
+  }
+}

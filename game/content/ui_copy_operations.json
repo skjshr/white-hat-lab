@@ -1,0 +1,132 @@
+{
+  "provenance": {
+    "provider": "Gemini Web Flash",
+    "model": "Flash",
+    "source_url": "https://gemini.google.com/app/9070455db718c76c",
+    "model_selector": "Flash selected in visible model selector",
+    "response_ids": [
+      "dd3fe71e5319ef4a",
+      "99e7ca5ce1522f16",
+      "b3e3d4377f13c76d",
+      "3fe8c189ec01451c"
+    ],
+    "extraction_method": "Gemini response Copy button, browser clipboard text encoded as UTF-8 without normalization",
+    "raw_responses": [
+      {
+        "path": "artifacts/simulator/operations/gemini-operations-initial-raw.json",
+        "sha256": "307d736a4779a34cad16badfe6f03c7ef3d806f350cadb480b009f036d8fc09e",
+        "response_id": "dd3fe71e5319ef4a",
+        "disposition": "superseded"
+      },
+      {
+        "path": "artifacts/simulator/operations/gemini-operations-initial-source.json",
+        "sha256": "307d736a4779a34cad16badfe6f03c7ef3d806f350cadb480b009f036d8fc09e",
+        "response_id": "dd3fe71e5319ef4a",
+        "disposition": "superseded"
+      },
+      {
+        "path": "artifacts/simulator/operations/gemini-operations-incomplete-raw.txt",
+        "sha256": "4c18bbd3486256ce7fc6456a1af8d0afb32cc74900034dca1cb3b99e843664dd",
+        "response_id": "99e7ca5ce1522f16",
+        "disposition": "rejected_incomplete"
+      },
+      {
+        "path": "artifacts/simulator/operations/gemini-operations-incomplete-source.txt",
+        "sha256": "4c18bbd3486256ce7fc6456a1af8d0afb32cc74900034dca1cb3b99e843664dd",
+        "response_id": "99e7ca5ce1522f16",
+        "disposition": "rejected_incomplete"
+      },
+      {
+        "path": "artifacts/simulator/operations/gemini-operations-final-raw.json",
+        "sha256": "e22b5d7b0edbdc498c2c7d4ed893f294399624feb885a09ad25ed0376c31d378",
+        "response_id": "b3e3d4377f13c76d",
+        "disposition": "adopted"
+      },
+      {
+        "path": "artifacts/simulator/operations/gemini-operations-final-source.json",
+        "sha256": "e22b5d7b0edbdc498c2c7d4ed893f294399624feb885a09ad25ed0376c31d378",
+        "response_id": "b3e3d4377f13c76d",
+        "disposition": "adopted"
+      },
+      {
+        "path": "artifacts/simulator/operations/gemini-operations-additional-raw.json",
+        "sha256": "368ed45a09845c74d1d4c5247b710ffe030347578f18d2a936eef9f592de3ce4",
+        "response_id": "3fe8c189ec01451c",
+        "disposition": "adopted"
+      },
+      {
+        "path": "artifacts/simulator/operations/gemini-operations-additional-source.json",
+        "sha256": "368ed45a09845c74d1d4c5247b710ffe030347578f18d2a936eef9f592de3ce4",
+        "response_id": "3fe8c189ec01451c",
+        "disposition": "adopted"
+      }
+    ],
+    "adopted_response_ids": [
+      "b3e3d4377f13c76d",
+      "3fe8c189ec01451c"
+    ]
+  },
+  "entries": {
+    "ops_title": "日次業務管理",
+    "ops_today": "本日の業務",
+    "ops_sales": "新規受注・カタログ",
+    "ops_close": "業務終了確認",
+    "ops_continue": "業務を続ける",
+    "ops_previous": "前日の実績",
+    "ops_staff": "人員配置",
+    "ops_clients": "顧客案件",
+    "ops_care": "定期保守点検",
+    "ops_ready": "進行中の案件なし",
+    "ops_open": "作業PCを開く",
+    "ops_assign": "割り当て",
+    "ops_unassigned": "担当者を選択",
+    "ops_target": "対象拠点を選択",
+    "ops_due": "期限",
+    "ops_remaining": "残り %d分",
+    "ops_late": "超過 %d分",
+    "ops_duration": "所要時間 %d分",
+    "ops_wage": "日当 ¥%d",
+    "ops_busy": "%s 対応中（残り %d分）",
+    "ops_available": "空きあり",
+    "ops_done": "納品完了",
+    "ops_report": "結果確認",
+    "ops_queue_full": "受注枠上限",
+    "ops_payroll": "給与手当",
+    "ops_contract_net": "案件純利益",
+    "ops_care_net": "保守純利益",
+    "ops_hiring": "採用経費",
+    "ops_profit": "日次営業利益",
+    "ops_cash": "現在資金",
+    "ops_cash_after": "精算後資金",
+    "ops_paid_wages": "支払済給与",
+    "ops_arrears": "未払給与",
+    "ops_carryover": "継続案件 %d件",
+    "ops_missed": "未完了保守 %d件",
+    "ops_investment": "設備投資額",
+    "ops_invest": "設備投資",
+    "ops_hire": "採用・シフト",
+    "ops_next": "翌営業日へ進む",
+    "ops_no_receipt": "前日実績なし",
+    "ops_delivery": "受取待ち設備 %d点",
+    "ops_receive": "受け取る",
+    "ops_priority": "優先度",
+    "ops_priority_first": "最優先",
+    "ops_invalid_target": "対象案件は終了しています",
+    "ops_assign_failed": "現在は割り当てできません",
+    "ops_result_failed": "保存に失敗しました",
+    "ops_closing_day": "DAY %d 業務終了処理",
+    "ops_care_earned": "獲得保守料",
+    "ops_care_cost": "保守原価",
+    "ops_reserved": "出勤予定",
+    "ops_open_count": "進行中 %d / %d件",
+    "ops_settled_day": "DAY %d 実績",
+    "ops_minutes": "%d分",
+    "ops_staff_task": "%s / %s",
+    "ops_end_blocked": "作業実行中のため終了できません",
+    "ops_task_cost": "作業原価 ¥%d",
+    "ops_finish_at": "%s 退勤",
+    "ops_open_tasks": "業務一覧",
+    "ops_available_at": "%s 稼働開始",
+    "ops_settlement": "日次決算書"
+  }
+}

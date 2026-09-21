@@ -1,0 +1,45 @@
+{
+  "provider": "Gemini Web Flash",
+  "date": "2026-09-20",
+  "conversation": "https://gemini.google.com/app/e4bd9eb4c1418c42",
+  "entries": {
+    "os_apps": "アプリケーション",
+    "os_windows": "ウィンドウ",
+    "os_tile": "左右に並べて表示",
+    "os_cascade": "重ねて表示",
+    "os_office": "オフィスへ戻る",
+    "os_connected": "接続中",
+    "os_disconnected": "未接続",
+    "os_details": "詳細",
+    "os_properties": "プロパティ",
+    "os_status": "ステータス",
+    "os_configuration": "構成",
+    "os_config_file": "設定ファイル",
+    "os_config_pending": "未反映の変更あり",
+    "os_config_applied": "適用済み",
+    "os_log_empty": "表示するログはありません",
+    "os_search_service": "サービス名を検索...",
+    "os_result_none": "未実行",
+    "os_result_pass": "合格",
+    "os_result_fail": "不合格",
+    "os_result_stale": "過去の診断結果",
+    "os_response": "レスポンス",
+    "os_command": "コマンド",
+    "os_mail_headers": "メッセージヘッダー",
+    "os_attachments": "添付ファイル",
+    "os_service": "サービス",
+    "os_unsaved": "未保存",
+    "os_saved": "保存済み",
+    "os_search": "検索"
+  },
+  "provenance": {
+    "display_copy_v113": {
+      "provider": "Gemini Web Flash",
+      "model": "Flash",
+      "source_url": "https://gemini.google.com/app/af08b1e2ad755464",
+      "inventory_sha256": "c9b2ca9c37257a78dec6362d2d694ca5d38aac464f49152c5ae80a6d236a9371",
+      "final_copy_sha256": "5ea0c35e04d52642b9cdcdaf65135f9b1dbaa4d14e5b17207e70b19515f0487f",
+      "final_copy": "artifacts/simulator/v113/gemini-final-copy.json"
+    }
+  }
+}

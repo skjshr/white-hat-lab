@@ -1,0 +1,31 @@
+{
+  "provenance": {
+    "provider": "Gemini Web Flash",
+    "model": "Flash",
+    "source_url": "https://gemini.google.com/app/9070455db718c76c",
+    "raw_responses": [
+      {
+        "path": "artifacts/simulator/v115/gemini-code-1789893512787.json",
+        "sha256": "a3ed1f20a7d97ab9330af08729cd51cedde1eaae60d626eb487bfd340d4fc5e9"
+      }
+    ]
+  },
+  "entries": {
+    "queue_title": "受注案件一覧",
+    "queue_capacity": "%d / %d件",
+    "queue_current": "対応中",
+    "queue_open": "未納品",
+    "queue_done": "納品済",
+    "queue_switch": "切替",
+    "queue_full": "同時対応上限に達しています",
+    "queue_already": "受注済みの案件です",
+    "queue_deadline": "DAY %d %s",
+    "queue_overnight": "翌日へ進む",
+    "queue_end_busy": "担当者が作業中のため終了不可",
+    "queue_empty": "受注中の案件はありません",
+    "queue_offers": "新規依頼一覧",
+    "queue_save_failed": "保存失敗のため切替を中止しました",
+    "queue_resume": "対応中の案件に戻る",
+    "queue_scope": "案件ID: %s"
+  }
+}

@@ -1,0 +1,114 @@
+{
+  "provenance": {
+    "provider": "Gemini Web Flash",
+    "model": "Flash",
+    "source_url": "https://gemini.google.com/app/9070455db718c76c",
+    "model_selector": "Flash selected in visible model selector",
+    "response_ids": [
+      "b3631a6096e493ca",
+      "29bd16088646e9ea",
+      "595f553edd22edce",
+      "53ea780576491410"
+    ],
+    "extraction_method": "Gemini response Copy button, browser clipboard text encoded as UTF-8 without normalization",
+    "raw_responses": [
+      {
+        "path": "artifacts/simulator/v124/gemini-firewall-v124-raw.json",
+        "sha256": "d3903f7b05b88db598da434c6fa77543ef42f7739ea2bff7eff8f528fd9d5e43"
+      },
+      {
+        "path": "artifacts/simulator/v124/gemini-firewall-v124-source.json",
+        "sha256": "d3903f7b05b88db598da434c6fa77543ef42f7739ea2bff7eff8f528fd9d5e43"
+      },
+      {
+        "path": "artifacts/simulator/v124/gemini-firewall-v124-revision-raw.json",
+        "sha256": "7a0bc81358d52f05c0d9bee4b3ab5253f9b6c4d09a4d9df4e8acddc36767a1a1"
+      },
+      {
+        "path": "artifacts/simulator/v124/gemini-firewall-v124-revision-source.json",
+        "sha256": "7a0bc81358d52f05c0d9bee4b3ab5253f9b6c4d09a4d9df4e8acddc36767a1a1"
+      },
+      {
+        "path": "artifacts/simulator/v124/gemini-firewall-v124-reference-final-raw.json",
+        "sha256": "58c3af90bab851d22da4a48fbe50464ce662de0ab0b8abd49e0e2a5765b50566"
+      },
+      {
+        "path": "artifacts/simulator/v124/gemini-firewall-v124-reference-final-source.json",
+        "sha256": "58c3af90bab851d22da4a48fbe50464ce662de0ab0b8abd49e0e2a5765b50566"
+      },
+      {
+        "path": "artifacts/simulator/v124/gemini-firewall-v124-reference-plain-raw.json",
+        "sha256": "c42bacdaf184414f3ea6fc335cea3d65709735509a51e3590a99a9291ec660d3"
+      },
+      {
+        "path": "artifacts/simulator/v124/gemini-firewall-v124-reference-plain-source.json",
+        "sha256": "c42bacdaf184414f3ea6fc335cea3d65709735509a51e3590a99a9291ec660d3"
+      }
+    ]
+  },
+  "entries": {
+    "fw_title": "ファイアウォール",
+    "fw_rules": "ルール一覧",
+    "fw_edit_rule": "ルール編集",
+    "fw_add_top": "先頭に追加",
+    "fw_add_bottom": "末尾に追加",
+    "fw_edit": "編集",
+    "fw_clone": "複製",
+    "fw_delete": "削除",
+    "fw_delete_confirm": "このルールを削除しますか？",
+    "fw_move_up": "上へ移動",
+    "fw_move_down": "下へ移動",
+    "fw_enable": "有効化",
+    "fw_disable": "無効化",
+    "fw_enabled": "有効",
+    "fw_disabled": "無効",
+    "fw_action": "アクション",
+    "fw_pass": "Pass（許可）",
+    "fw_block": "Block（破棄）",
+    "fw_reject": "Reject（拒否応答）",
+    "fw_interface": "インターフェース",
+    "fw_protocol": "プロトコル",
+    "fw_any": "すべて (any)",
+    "fw_source": "送信元",
+    "fw_source_port": "送信元ポート",
+    "fw_destination": "宛先",
+    "fw_destination_port": "宛先ポート",
+    "fw_lan_net": "LAN net",
+    "fw_this_firewall": "This Firewall",
+    "fw_description": "説明",
+    "fw_log": "ログ記録",
+    "fw_save": "保存",
+    "fw_cancel": "キャンセル",
+    "fw_apply": "変更を適用",
+    "fw_revert": "適用済みに戻す",
+    "fw_pending": "未適用の変更あり",
+    "fw_applied": "適用済み",
+    "fw_saved": "保存完了",
+    "fw_no_rules": "ルールがありません",
+    "fw_service_config": "サービス設定",
+    "fw_dns": "DNS",
+    "fw_tls": "TLS",
+    "fw_on": "有効",
+    "fw_off": "無効",
+    "fw_diagnostics": "通信診断",
+    "fw_run": "診断実行",
+    "fw_source_address": "送信元アドレス",
+    "fw_destination_address": "宛先アドレス",
+    "fw_port": "ポート",
+    "fw_result": "診断結果",
+    "fw_matched_rule": "一致ルール",
+    "fw_default_deny": "暗黙の拒否（不一致）",
+    "fw_logs": "ログ一覧",
+    "fw_no_logs": "ログなし",
+    "fw_reference": "リファレンス",
+    "fw_reference_body": "pfSenseを着想元とした学習用のIPv4ファイアウォールです。WANやLANの受信側で上から順に判定し、最初に一致したルール（許可・破棄・拒否）を適用します。一致しない通信は遮断されます。編集内容は適用を押すまで反映されず、診断時は毎回新しい接続として扱われます。通信やログはすべてゲーム内の模擬動作で、外部通信は行いません。NATやステートテーブル、実機のXML設定・出力には未対応で独自形式を使用します。ネットワーク制御の結果はHTTPのログインや認可とは異なります。",
+    "fw_connection_required": "顧客ホストへの接続が必要です",
+    "fw_service_unavailable": "サービス停止中",
+    "fw_error_invalid_config": "無効なサービス構成です",
+    "fw_error_invalid_rule": "無効なファイアウォールルールです",
+    "fw_error_rule_missing": "指定されたルールが見つかりません",
+    "fw_error_save_failed": "保存に失敗しました",
+    "fw_error_operation_failed": "処理に失敗しました",
+    "fw_release_note": "v1.24ではpfSenseに着想を得たWAN/LAN対応のIPv4ファイアウォール機能を追加しました。順序依存のファーストマッチ評価、ルールの作成・編集・複製・並べ替え・有効化切替・削除、保存・適用・ロールバック、および模擬診断トレースとログ確認に対応しています。DNSおよびTLSはファイアウォールルールとは独立したサービス設定として管理されます。なお、本バージョンの日本語UI文言はGeminiにより作成されたものです。"
+  }
+}

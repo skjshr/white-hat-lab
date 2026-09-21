@@ -1,0 +1,71 @@
+{
+  "source": "Gemini Web Flash",
+  "source_url": "https://gemini.google.com/app/a325dde6b9d6a418",
+  "sources": [
+    {
+      "source_url": "https://gemini.google.com/app/a325dde6b9d6a418",
+      "raw_file": "artifacts/simulator/remediation/gemini-remediation-raw-1.json",
+      "raw_sha256": "a0e58d5b3f2bdc311fd53b4bf20a3489d469725c247f8174330a268da573b41d"
+    },
+    {
+      "source_url": "https://gemini.google.com/app/a325dde6b9d6a418",
+      "raw_file": "artifacts/simulator/remediation/gemini-remediation-raw-2.json",
+      "raw_sha256": "3307a866daa6ff79a623e1d6a31295f1a31948021fc2a149ffbd33c9146f3bb0"
+    },
+    {
+      "source_url": "https://gemini.google.com/app/a325dde6b9d6a418",
+      "raw_file": "artifacts/simulator/remediation/gemini-remediation-raw-3.json",
+      "raw_sha256": "8c93848f1599d394f6ac9f37057a4656c3d90481e578fa1f861bb269f76954d5"
+    }
+  ],
+  "entries": {
+    "rmd_files": "ファイル",
+    "rmd_file": "ファイル",
+    "rmd_quarantine": "停止して検疫",
+    "rmd_restore": "検疫の解除",
+    "rmd_scan": "ウイルス対策スキャンを実行",
+    "rmd_sha256": "SHA-256",
+    "rmd_path": "ファイル パス",
+    "rmd_present": "デバイス上に存在",
+    "rmd_quarantined": "検疫済み",
+    "rmd_absent": "デバイス上に未検出",
+    "rmd_running": "実行中",
+    "rmd_stopped": "停止",
+    "rmd_scan_clean": "脅威は検出されませんでした",
+    "rmd_scan_threats": "脅威が検出されました",
+    "rmd_scan_stale": "前回のスキャン以降にデバイスが変更されました",
+    "rmd_no_scan": "未スキャン",
+    "rmd_threat_count": "検出された脅威の数: {count}",
+    "rmd_action_result": "結果",
+    "rmd_completed": "完了",
+    "rmd_restored": "復元済み",
+    "rmd_file_details": "ファイルの詳細",
+    "rmd_case_title": "不審な外部通信の調査と復旧",
+    "rmd_case_brief": "PC-Aの外部通信を調査し原因を特定・隔離してください。証拠保全を維持し、PC-Bを含む両端末を安全に業務復帰させます。",
+    "rmd_check_business": "両端末でネットワークおよび業務アプリが正常稼働している",
+    "rmd_check_clean": "原因プロセス・ファイルが排除され、両端末の最新スキャンで脅威が検出されない",
+    "rmd_check_evidence": "初期証拠および保存コピーが改変・初期化されず保全されている",
+    "rmd_debrief": "ネットワーク隔離は封じ込めに過ぎず、原因の根本排除と安全確認を経て初めて安全な業務復帰が可能になります。",
+    "rmd_probe_business_a": "PC-A 業務稼働状況の確認",
+    "rmd_probe_business_b": "PC-B 業務稼働状況の確認",
+    "rmd_probe_clean_a": "PC-A スキャンおよび脅威検出状態",
+    "rmd_probe_clean_b": "PC-B スキャンおよび脅威検出状態",
+    "rmd_probe_description": "現在の計測結果を契約要件と照合してください。",
+    "rmd_guide_review": "イベントログ、ファイル、変更履歴の調査",
+    "rmd_guide_remediate": "調査で特定した原因ファイルの停止および検疫",
+    "rmd_guide_scan": "両端末のウイルス対策スキャンの実行",
+    "rmd_guide_reconnect": "両端末の業務およびネットワーク通信の再開",
+    "rmd_error_conflict": "元のパスに同名ファイルが存在するため復元できません",
+    "rmd_error_missing": "対象ファイルが見つかりません",
+    "rmd_error_invalid": "検疫データの整合性エラーにより処理できません",
+    "rmd_error_no_record": "検疫レコードが存在しません",
+    "rmd_scan_results": "スキャン結果",
+    "rmd_persistence": "自動起動エントリ",
+    "rmd_current_hash": "現在の SHA-256",
+    "rmd_observed_hash": "調査で確認された SHA-256",
+    "rmd_error_trusted": "信頼された発行元によって署名されたファイルのため保護されています",
+    "rmd_error_failed": "操作を完了できませんでした",
+    "rmd_overview": "概要",
+    "rmd_detected_count": "検出された項目: {count}"
+  }
+}

@@ -1,0 +1,8 @@
+* text=auto
+*.gd text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.png binary
+*.ogg binary
+*.glb binary
+*.ttf binary

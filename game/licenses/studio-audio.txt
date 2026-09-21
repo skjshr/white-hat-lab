@@ -1,0 +1,19 @@
+WHITE HAT LAB studio sound set
+
+The WAV files in assets/audio/studio are original procedural recordings
+generated for this project by tools/build_studio_audio.py (Python standard
+library, fixed random seed). They contain no third-party recordings or songs.
+No additional public license is assigned to the project's original work.
+
+Version 1.6 uses the original sound set without layering Kenney's click_001.ogg.
+The legacy recording remains in the asset archive. It is part of Kenney Interface
+Sounds, CC0; see kenney-interface-sounds-License.txt and the asset source register.
+
+Sound events: UI press, UI hover, keyboard typing, positive and negative
+result feedback, footsteps, and a quiet office fan/room-tone loop. UI hover is silent.
+No background song
+or known public-domain composition is included.
+
+Version 1.8 adds original procedural coffee and spatial office/exterior sounds
+in scripts/soundscape.gd. The PCM is synthesized by the project's code without
+external recordings, online services, or a third-party composition.
