@@ -35,12 +35,14 @@ func run() -> void:
 	await process_frame
 	ui.open_panel("terminal")
 	var desktop = ui.desktop
+	var current_mail: Dictionary = preload("res://scripts/os_business_apps.gd")._mail_for(game.mission(), game)
+	desktop.widgets.mail.selected_subject = str(current_mail.get("subject", game.mission().title))
 	desktop.widgets.mail.reading = true
 	desktop._refresh_mail()
 	check(desktop.widgets.mail.recipient.text.contains("綾の会社 / 蓮太"),"mail recipient uses company and player")
-	check(ui.controls.subtitle.text == "綾の会社", "title identity refreshes after profile rename")
+	check(ui.controls.company_title.text == "ホワイトハッカーラボ", "title remains fixed after profile rename")
 	desktop._show_app("team")
-	check(desktop.widgets.team.cards[0].name.text=="星" and desktop.widgets.team.cards[0].initial.text=="星","team name and avatar initial match")
+	check(desktop.widgets.team.cards[0].name.text=="星" and str(desktop.widgets.team.cards[0].member.name)=="星","team name and member identity match")
 	check(game.set_profile({"company":"わかば株式会社","player":"空","aya":"風","ren":"雲"}),"change to previous company name")
 	await process_frame
 	check(desktop.system_company.text=="わかば株式会社","shell shows live previous company")
@@ -49,8 +51,8 @@ func run() -> void:
 	check(desktop.widgets.mail.recipient.text.contains("海の会社 / 空"),"open mail reflects rename")
 	check(desktop.widgets.mail.recipient_details.text.contains("海の会社 / 空"),"expanded mail headers reflect rename")
 	check(desktop.system_company.text=="海の会社" and desktop.brand_label.text=="海の会社","shell and wallpaper identity reflect rename")
-	check(ui.controls.subtitle.text=="海の会社","existing title reflects repeated rename")
-	check(desktop.widgets.team.cards[0].initial.text=="風","open team reflects rename")
+	check(ui.controls.company_title.text=="ホワイトハッカーラボ","existing title remains fixed after repeated rename")
+	check(desktop.widgets.team.cards[0].name.text=="風" and str(desktop.widgets.team.cards[0].member.name)=="風","open team reflects rename")
 	var mail = load("res://scripts/os_business_apps.gd")
 	for scenario in game.CASES.all():
 		if str(scenario.client)=="青葉デザイン":

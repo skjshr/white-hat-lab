@@ -1,0 +1,15 @@
+{
+  "provenance": {"provider": "Gemini Web Flash", "source_url": "https://gemini.google.com/app/e6261e6126411200", "raw": "artifacts/simulator/realism-20260926/gemini-labels-raw.json"},
+  "entries": {
+    "realism_share_settings": "共有設定",
+    "realism_share_permissions": "アクセス権設定",
+    "realism_back_to_shares": "共有一覧に戻る",
+    "realism_show_response": "実行結果を表示",
+    "realism_hide_response": "実行結果を隠す",
+    "realism_unsaved_changes": "未保存の変更",
+    "realism_apply_pending": "反映待ち（未適用）",
+    "realism_no_matching_items": "該当する項目がありません",
+    "realism_search_shares": "共有名またはパスを検索",
+    "realism_service_configuration": "現在の適用構成"
+  }
+}

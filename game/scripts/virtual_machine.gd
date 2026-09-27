@@ -1197,8 +1197,10 @@ func _probe_passes(output: String, expectation: String) -> bool:
 			var expected_status := part.trim_prefix("status:")
 			var status_matches := output.begins_with("HTTP/1.1 "+expected_status)
 			if not status_matches and not output.begins_with("HTTP/"):
-				var parsed: Variant = JSON.parse_string(output)
-				status_matches = parsed is Dictionary and int(parsed.get("code", -1)) == int(expected_status)
+				var json := JSON.new()
+				if json.parse(output) == OK:
+					var parsed: Variant = json.data
+					status_matches = parsed is Dictionary and int(parsed.get("code", -1)) == int(expected_status)
 			if not status_matches: return false
 		elif part == "DENIED":
 			# Samba reports an unavailable share as BAD_NETWORK_NAME before it can

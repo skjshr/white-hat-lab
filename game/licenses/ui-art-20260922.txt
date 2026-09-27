@@ -1,0 +1,15 @@
+White Hat Lab — UI artwork, 2026-09-22
+
+The generated title-art alternative is retained only in task artifacts. The
+shipped title retains the pre-existing live office and menu_backdrop.svg.
+
+assets/ui/equipment_catalog_polish/*.png
+Eight studio renders made in Blender 4.4 from assemblies exported directly
+from the game's EquipmentVisuals.build() factory. These retain the actual
+installed geometry and material assignments. The underlying furniture and
+project-created appliance license notices remain applicable and are included
+with the other asset licenses. Lighting and camera framing were revised for
+catalog legibility. Export/render sources are retained in the task artifacts.
+
+Reference screenshots used for UI analysis are kept under artifacts/ and are
+not included in the game assets or redistributed in the executable.

@@ -91,6 +91,48 @@ static func persist(d) -> void:
 static func rerender(d) -> void:
 	persist(d);d._render_portal()
 
+static func _is_compact(d) -> bool:
+	return float(d.windows.browser.size.x) < 1050 * float(d.game.settings.get("text_scale", 1.0))
+
+static func _apply_live_layout(d, page: Control) -> void:
+	if not is_instance_valid(page): return
+	var compact := _is_compact(d)
+	var shell := page.find_child("PortalShell", true, false) as BoxContainer
+	var nav_frame := page.find_child("PortalNavigation", true, false) as Control
+	var nav_primary := page.find_child("PortalNavPrimary", true, false) as BoxContainer
+	var nav_fill := page.find_child("PortalNavFill", true, false) as Control
+	var nav_status := page.find_child("PortalNavStatus", true, false) as BoxContainer
+	if shell != null:
+		shell.vertical = compact
+		shell.custom_minimum_size.y = maxf(460, float(d.windows.browser.size.y) - 153)
+	if nav_frame != null: nav_frame.custom_minimum_size = Vector2(0, 100) if compact else Vector2(260, 0)
+	if nav_primary != null: nav_primary.vertical = not compact
+	if nav_fill != null: nav_fill.visible = not compact
+	if nav_status != null: nav_status.vertical = not compact
+	var split := page.find_child("PortalFileSplit", true, false) as BoxContainer
+	if split != null:
+		split.vertical = compact
+		split.size_flags_vertical = Control.SIZE_SHRINK_BEGIN if compact else Control.SIZE_EXPAND_FILL
+		var list := split.find_child("PortalFileList", false, false) as Control
+		var detail_frame := split.find_child("PortalDetailsFrame", false, false) as Control
+		var state: Dictionary = d.portal_ui
+		var has_details := detail_frame != null and (bool(state.get("details", false)) or bool(state.get("sharing", not compact)))
+		if list != null: list.visible = not compact or not has_details
+		if detail_frame != null:
+			detail_frame.visible = has_details
+			split.move_child(detail_frame, 0 if compact else 1)
+			detail_frame.custom_minimum_size = Vector2(0, 320) if compact else Vector2(320, 0)
+			detail_frame.size_flags_horizontal = Control.SIZE_EXPAND_FILL if compact else Control.SIZE_FILL
+			if not compact:
+				var style := UI.style(Color.WHITE, LINE, 12, 12, 0)
+				style.set_border_width_all(0)
+				style.border_width_left = 1
+				detail_frame.add_theme_stylebox_override("panel", style)
+		var grid := page.find_child("PortalFileGrid", true, false) as GridContainer
+		if grid != null: grid.columns = 2 if compact else 3
+	var panes := page.find_child("PortalVersionPanes", true, false) as BoxContainer
+	if panes != null: panes.vertical = compact
+
 static func _file_content(d, path: String) -> String:
 	var machine: Variant = null
 	if d.game != null and d.game.has_method("_vm"): machine = d.game._vm()
@@ -102,7 +144,7 @@ static func reset_response(d) -> void:
 	d._portal_restore_draft()
 
 static func show_files(d,shared: bool=false) -> void:
-	d.portal_ui["view"]="files";d.portal_ui["filter"]="shared" if shared else "all";d.portal_ui["details"]=false;d.portal_ui["sharing"]=float(d.windows.browser.size.x)>=1050;d._browse_url(d.PORTAL_URL,true)
+	d.portal_ui["view"]="files";d.portal_ui["filter"]="shared" if shared else "all";d.portal_ui["details"]=false;d.portal_ui.erase("sharing");d._browse_url(d.PORTAL_URL,true)
 
 static func app_button(d, parent: Node, icon: String, name: String, action: Callable, tooltip: String = "") -> Button:
 	var node := button(d, parent, "", name, action)
@@ -133,34 +175,41 @@ static func render(d,parent: VBoxContainer) -> void:
 	var app_spacer:=Control.new();app_spacer.custom_minimum_size.x=4;top_row.add_child(app_spacer)
 	var spacer:=Control.new();spacer.size_flags_horizontal=Control.SIZE_EXPAND_FILL;top_row.add_child(spacer)
 	var account:=fixed_label(d,top_row,"OP",14,Color.WHITE);account.size_flags_horizontal=Control.SIZE_SHRINK_END;account.tooltip_text=d._player_display_name()
-	var compact:=float(d.windows.browser.size.x)<1050
-	var shell:=HBoxContainer.new();shell.size_flags_horizontal=Control.SIZE_EXPAND_FILL;shell.add_theme_constant_override("separation",0);shell.custom_minimum_size.y=maxf(460,float(d.windows.browser.size.y)-153);page.add_child(shell)
-	var nav_frame:=PanelContainer.new();nav_frame.custom_minimum_size.x=190 if compact else 260;nav_frame.add_theme_stylebox_override("panel",UI.style(Color("d5eaf3"),Color.TRANSPARENT,8,8,0));shell.add_child(nav_frame)
+	var compact:=_is_compact(d)
+	var shell:=BoxContainer.new();shell.name="PortalShell";shell.vertical=compact;shell.size_flags_horizontal=Control.SIZE_EXPAND_FILL;shell.add_theme_constant_override("separation",0);shell.custom_minimum_size.y=maxf(460,float(d.windows.browser.size.y)-153);page.add_child(shell)
+	var nav_frame:=PanelContainer.new();nav_frame.name="PortalNavigation";nav_frame.custom_minimum_size=Vector2(0,100) if compact else Vector2(260,0);nav_frame.add_theme_stylebox_override("panel",UI.style(Color("d5eaf3"),Color.TRANSPARENT,8,8,0));shell.add_child(nav_frame)
 	var nav_style: StyleBoxFlat=nav_frame.get_theme_stylebox("panel");nav_style.corner_radius_top_left=16;nav_style.corner_radius_bottom_left=16
 	var nav:=VBoxContainer.new();nav.add_theme_constant_override("separation",4);nav_frame.add_child(nav)
-	var search:=LineEdit.new();search.name="PortalSearch";search.placeholder_text=UI.copy("os_search");search.text=str(state.get("query",""));search.custom_minimum_size.y=34;nav.add_child(search)
+	var nav_primary:=BoxContainer.new();nav_primary.name="PortalNavPrimary";nav_primary.vertical=not compact;nav_primary.add_theme_constant_override("separation",4);nav.add_child(nav_primary)
+	var search:=LineEdit.new();search.name="PortalSearch";search.placeholder_text=UI.copy("os_search");search.text=str(state.get("query",""));search.custom_minimum_size=Vector2(160*float(d.game.settings.get("text_scale",1.0)),34);nav_primary.add_child(search)
 	search.add_theme_stylebox_override("normal",UI.style(Color.WHITE,Color("949494"),10,5,8))
 	search.text_submitted.connect(func(value):state["query"]=value;rerender(d))
 	for item in [["all_files","all","files"],["shared","shared","team"]]:
 		var active:=str(state.get("view","files"))=="files" and str(state.get("filter","all"))==str(item[1])
-		var entry:=button(d,nav,copy(item[0]),"PortalNav_"+str(item[1]),func():show_files(d,str(item[1])=="shared"));entry.alignment=HORIZONTAL_ALIGNMENT_LEFT;entry.icon=UI.symbol(str(item[2]));entry.expand_icon=true;entry.add_theme_constant_override("icon_max_width",18);entry.custom_minimum_size.y=38
+		var entry:=button(d,nav_primary,copy(item[0]),"PortalNav_"+str(item[1]),func():show_files(d,str(item[1])=="shared"));entry.alignment=HORIZONTAL_ALIGNMENT_LEFT;entry.icon=UI.symbol(str(item[2]));entry.expand_icon=true;entry.add_theme_constant_override("icon_max_width",18);entry.custom_minimum_size.y=38
 		entry.add_theme_stylebox_override("normal",UI.style(BLUE if active else Color.TRANSPARENT,Color.TRANSPARENT,10,7,8));entry.add_theme_color_override("font_color",Color.WHITE if active else INK)
-	var fill:=Control.new();fill.size_flags_vertical=Control.SIZE_EXPAND_FILL;nav.add_child(fill)
+	var fill:=Control.new();fill.name="PortalNavFill";fill.size_flags_vertical=Control.SIZE_EXPAND_FILL;nav.add_child(fill)
 	var used:=0
 	for file in snap.get("files",[]):used+=int(file.get("size",0))
-	label(d,nav,str(used)+" B",13,MUTED)
-	_storage_status(d,nav,_external_storage(snap))
-	var config:=button(d,nav,copy("service_config"),"PortalConfig",func():d._show_app("editor");d._open_editor(str(d.game.vm_info().config_path)));config.alignment=HORIZONTAL_ALIGNMENT_LEFT
-	var workspace:=PanelContainer.new();workspace.size_flags_horizontal=Control.SIZE_EXPAND_FILL;workspace.add_theme_stylebox_override("panel",UI.style(Color.WHITE,Color.TRANSPARENT,12,8,0));shell.add_child(workspace)
+	var nav_status:=BoxContainer.new();nav_status.name="PortalNavStatus";nav_status.vertical=not compact;nav_status.add_theme_constant_override("separation",8);nav.add_child(nav_status)
+	label(d,nav_status,str(used)+" B",13,MUTED)
+	_storage_status(d,nav_status,_external_storage(snap))
+	var config:=button(d,nav_primary,copy("service_config"),"PortalConfig",func():d._show_app("editor");d._open_editor(str(d.game.vm_info().config_path)));config.alignment=HORIZONTAL_ALIGNMENT_LEFT
+	var workspace:=PanelContainer.new();workspace.name="PortalWorkspace";workspace.size_flags_horizontal=Control.SIZE_EXPAND_FILL;workspace.add_theme_stylebox_override("panel",UI.style(Color.WHITE,Color.TRANSPARENT,12,8,0));shell.add_child(workspace)
 	var workspace_style: StyleBoxFlat=workspace.get_theme_stylebox("panel");workspace_style.corner_radius_top_right=16;workspace_style.corner_radius_bottom_right=16
 	var body:=VBoxContainer.new();body.size_flags_horizontal=Control.SIZE_EXPAND_FILL;body.add_theme_constant_override("separation",0);workspace.add_child(body)
 	if str(state.get("view","files"))=="preview":preview(d,body,state)
 	else:files(d,body,state,snap,compact)
+	if not page.has_meta("portal_resize_callback"):
+		var resize_callback := func(): _apply_live_layout(d,page)
+		page.set_meta("portal_resize_callback",resize_callback)
+		page.resized.connect(resize_callback)
+	_apply_live_layout(d,page)
 
 static func files(d,parent: VBoxContainer,state: Dictionary,snap: Dictionary,compact: bool) -> void:
-	var split: BoxContainer=VBoxContainer.new() if compact else HBoxContainer.new();split.add_theme_constant_override("separation",12);split.size_flags_horizontal=Control.SIZE_EXPAND_FILL;parent.add_child(split)
+	var split:=BoxContainer.new();split.name="PortalFileSplit";split.vertical=compact;split.add_theme_constant_override("separation",12);split.size_flags_horizontal=Control.SIZE_EXPAND_FILL;parent.add_child(split)
 	if not compact: split.size_flags_vertical=Control.SIZE_EXPAND_FILL
-	var list:=VBoxContainer.new();list.size_flags_horizontal=Control.SIZE_EXPAND_FILL;list.add_theme_constant_override("separation",0);split.add_child(list)
+	var list:=VBoxContainer.new();list.name="PortalFileList";list.size_flags_horizontal=Control.SIZE_EXPAND_FILL;list.add_theme_constant_override("separation",0);split.add_child(list)
 	var viewbar:=HBoxContainer.new();viewbar.custom_minimum_size.y=48;viewbar.add_theme_constant_override("separation",4);list.add_child(viewbar)
 	label(d,viewbar,copy("shared" if str(state.get("filter","all"))=="shared" else "all_files"),16)
 	var toolbar_space:=Control.new();toolbar_space.size_flags_horizontal=Control.SIZE_EXPAND_FILL;viewbar.add_child(toolbar_space)
@@ -197,11 +246,15 @@ static func files(d,parent: VBoxContainer,state: Dictionary,snap: Dictionary,com
 	if not selected.is_empty() and selected not in visible_paths:selected="";state["details"]=false
 	if selected.is_empty() and not visible_paths.is_empty():selected=visible_paths[0]
 	state["selected_path"]=selected
-	if not selected.is_empty() and (bool(state.get("details",false)) or bool(state.get("sharing",not compact))):
+	if not selected.is_empty():
 		var details:=detail_sidebar(d,split,state,snap,selected,compact)
-		if compact:
-			split.move_child(details.get_parent(),0)
-			list.visible=false
+		details.name="PortalDetailsPane"
+		var detail_frame:=details.get_parent() as Control
+		detail_frame.name="PortalDetailsFrame"
+		var show_details:=bool(state.get("details",false)) or bool(state.get("sharing",not compact))
+		detail_frame.visible=show_details
+		list.visible=not compact or not show_details
+		if compact and show_details:split.move_child(detail_frame,0)
 		var content_host: VBoxContainer=details if compact else list
 		if str(state.get("detail_tab","sharing"))=="versions":_version_preview(d,content_host,state,selected,compact)
 		elif bool(state.get("details",false)):
@@ -341,7 +394,7 @@ static func _version_preview(d, parent: VBoxContainer, state: Dictionary, select
 	var restore:=button(d,heading,copy("version_restore"),"PortalVersionRestore_"+_node_token(str(version.id)),func():run(d,"portal restore "+str(version.id)))
 	restore.disabled=saved==current
 	if saved==current:label(d,parent,copy("version_identical"),13,MUTED)
-	var panes: BoxContainer=VBoxContainer.new() if compact else HBoxContainer.new();panes.add_theme_constant_override("separation",12);parent.add_child(panes)
+	var panes:=BoxContainer.new();panes.name="PortalVersionPanes";panes.vertical=compact;panes.add_theme_constant_override("separation",12);parent.add_child(panes)
 	for spec in [["version_before",saved,"PortalVersionPreviewGrid"],["version_after",current,"PortalVersionCurrentGrid"]]:
 		var pane:=VBoxContainer.new();pane.size_flags_horizontal=Control.SIZE_EXPAND_FILL;panes.add_child(pane)
 		label(d,pane,copy(str(spec[0])),14,BLUE)

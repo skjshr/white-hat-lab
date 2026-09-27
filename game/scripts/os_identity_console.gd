@@ -33,6 +33,62 @@ static func _st(d) -> Dictionary:
 static func _rerender(d) -> void:
 	d._render_identity()
 
+static func _reflow_password_row(shell: Control, row_name: String, label_name: String, field_name: String, inline_fields: bool, text_scale: float) -> void:
+	var row := shell.find_child(row_name, true, false) as BoxContainer
+	var field_label := shell.find_child(label_name, true, false) as Label
+	var field := shell.find_child(field_name, true, false) as LineEdit
+	if not is_instance_valid(row) or not is_instance_valid(field_label) or not is_instance_valid(field): return
+	if row.vertical == inline_fields: row.vertical = not inline_fields
+	var separation := 12 if inline_fields else 2
+	if row.get_theme_constant("separation") != separation: row.add_theme_constant_override("separation", separation)
+	var label_width := 160.0 * text_scale if inline_fields else 0.0
+	if not is_equal_approx(field_label.custom_minimum_size.x, label_width): field_label.custom_minimum_size.x = label_width
+	var label_flags := Control.SIZE_SHRINK_BEGIN if inline_fields else Control.SIZE_EXPAND_FILL
+	if field_label.size_flags_horizontal != label_flags: field_label.size_flags_horizontal = label_flags
+	var wrapping := TextServer.AUTOWRAP_OFF if inline_fields else TextServer.AUTOWRAP_WORD_SMART
+	if field_label.autowrap_mode != wrapping: field_label.autowrap_mode = wrapping
+	field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+static func _reflow(d, shell: Control) -> void:
+	if not is_instance_valid(shell) or not is_instance_valid(d.windows.browser): return
+	var scale := maxf(1.0, float(d.game.settings.get("text_scale", 1.0)))
+	var width := float(d.windows.browser.size.x)
+	var narrow_nav := width / scale < 1100.0
+	var compact_nav := narrow_nav and not bool(_st(d).get("nav_expanded", false))
+	var desired_height := maxf(360.0, float(d.windows.browser.size.y) - 86.0)
+	if not is_equal_approx(shell.custom_minimum_size.y, desired_height): shell.custom_minimum_size.y = desired_height
+	var nav_panel := shell.find_child("IdentityNavigationPanel", true, false) as Control
+	var nav_width := 156.0 if compact_nav else 205.0
+	if is_instance_valid(nav_panel) and not is_equal_approx(nav_panel.custom_minimum_size.x, nav_width): nav_panel.custom_minimum_size.x = nav_width
+	var nav_items := shell.find_child("IdentityNavigationItems", true, false) as Control
+	var nav_items_width := 136.0 if compact_nav else 185.0
+	if is_instance_valid(nav_items) and not is_equal_approx(nav_items.custom_minimum_size.x, nav_items_width): nav_items.custom_minimum_size.x = nav_items_width
+	var nav_pad := shell.find_child("IdentityNavigationPadding", true, false) as MarginContainer
+	if is_instance_valid(nav_pad):
+		var nav_padding := 6 if compact_nav else 10
+		for edge in ["left", "right", "top", "bottom"]:
+			if nav_pad.get_theme_constant("margin_" + edge) != nav_padding: nav_pad.add_theme_constant_override("margin_" + edge, nav_padding)
+	var nav_toggle := shell.find_child("IdentityNavigationToggle", true, false) as Button
+	if is_instance_valid(nav_toggle):
+		if nav_toggle.visible != narrow_nav: nav_toggle.visible = narrow_nav
+		var toggle_text := "›" if compact_nav else "‹"
+		if nav_toggle.text != toggle_text: nav_toggle.text = toggle_text
+	var nav_fill := shell.find_child("IdentityNavigationFill", true, false) as Control
+	if is_instance_valid(nav_fill) and nav_fill.visible == compact_nav: nav_fill.visible = not compact_nav
+	var nav_version := shell.find_child("IdentityNavigationVersion", true, false) as Control
+	if is_instance_valid(nav_version) and nav_version.visible == compact_nav: nav_version.visible = not compact_nav
+	var content_margin := shell.find_child("IdentityContentMargin", true, false) as MarginContainer
+	if is_instance_valid(content_margin):
+		var content_padding := 12 if compact_nav else 28
+		for edge in ["left", "right", "top", "bottom"]:
+			if content_margin.get_theme_constant("margin_" + edge) != content_padding: content_margin.add_theme_constant_override("margin_" + edge, content_padding)
+	var form := shell.find_child("IdentityPasswordForm", true, false) as Control
+	var form_width := clampf(width - 270.0, 240.0, 600.0)
+	if is_instance_valid(form) and not is_equal_approx(form.custom_minimum_size.x, form_width): form.custom_minimum_size.x = form_width
+	var inline_fields := width / scale >= 550.0
+	_reflow_password_row(shell, "IdentityNewPasswordRow", "IdentityNewPasswordLabel", "IdentityPassword", inline_fields, scale)
+	_reflow_password_row(shell, "IdentityConfirmPasswordRow", "IdentityConfirmPasswordLabel", "IdentityPasswordConfirmation", inline_fields, scale)
+
 static func _run(d, command: String) -> void:
 	var s := _st(d)
 	var raw := str(d._identity_command("identity "+command)) if d.has_method("_identity_command") else ""
@@ -126,6 +182,9 @@ static func _run_user(d, command: String) -> void:
 
 static func render(d, parent: VBoxContainer) -> void:
 	var s := _st(d)
+	var text_scale := maxf(1.0, float(d.game.settings.get("text_scale", 1.0)))
+	var narrow_nav := float(d.windows.browser.size.x) / text_scale < 1100.0
+	var compact_nav := narrow_nav and not bool(s.get("nav_expanded", false))
 	var snapshot: Dictionary = {}
 	if is_instance_valid(d.game) and d.game.has_method("_vm") and d.game._vm() != null:
 		snapshot = d.game._vm().identity_snapshot()
@@ -149,27 +208,33 @@ static func render(d, parent: VBoxContainer) -> void:
 	var context := _label(d, top, _copy("identity_admin", "Admin Console"), 12, Color("aeb4b7")); context.size_flags_horizontal = Control.SIZE_SHRINK_END; context.autowrap_mode = TextServer.AUTOWRAP_OFF
 
 	var work := HBoxContainer.new(); work.size_flags_vertical = Control.SIZE_EXPAND_FILL; work.add_theme_constant_override("separation", 0); shell.add_child(work)
-	var nav_panel := PanelContainer.new(); nav_panel.custom_minimum_size.x = 205; nav_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL; nav_panel.add_theme_stylebox_override("panel", COPY.style(NAV, Color.TRANSPARENT, 0, 0, 0)); work.add_child(nav_panel)
+	var nav_panel := PanelContainer.new(); nav_panel.name = "IdentityNavigationPanel"; nav_panel.custom_minimum_size.x = 156 if compact_nav else 205; nav_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL; nav_panel.add_theme_stylebox_override("panel", COPY.style(NAV, Color.TRANSPARENT, 0, 0, 0)); work.add_child(nav_panel)
 	var nav := VBoxContainer.new(); nav.add_theme_constant_override("separation", 3); nav_panel.add_child(nav)
 	var nav_scroll := ScrollContainer.new(); nav_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL; nav.add_child(nav_scroll)
-	var nav_items := VBoxContainer.new(); nav_items.add_theme_constant_override("separation", 3); nav_items.custom_minimum_size.x = 185; nav_scroll.add_child(nav_items)
-	var nav_pad := MarginContainer.new()
-	for edge in ["left","right","top","bottom"]: nav_pad.add_theme_constant_override("margin_"+edge, 10)
+	var nav_items := VBoxContainer.new(); nav_items.name = "IdentityNavigationItems"; nav_items.add_theme_constant_override("separation", 3); nav_items.custom_minimum_size.x = 136 if compact_nav else 185; nav_scroll.add_child(nav_items)
+	var nav_pad := MarginContainer.new(); nav_pad.name = "IdentityNavigationPadding"
+	for edge in ["left","right","top","bottom"]: nav_pad.add_theme_constant_override("margin_"+edge, 6 if compact_nav else 10)
 	nav_items.add_child(nav_pad)
 	var nav_content := VBoxContainer.new(); nav_content.add_theme_constant_override("separation", 3); nav_pad.add_child(nav_content)
+	var nav_toggle := _nav_button(d, nav_content, "›" if compact_nav else "‹", "IdentityNavigationToggle", func():s["nav_expanded"] = not bool(s.get("nav_expanded", false)); d.identity_ui = s; _rerender(d))
+	nav_toggle.tooltip_text = "Keycloak navigation"
+	nav_toggle.visible = narrow_nav
 	_label(d, nav_content, "client", 12, Color("b1b7ba"))
 	var view := str(s.get("view", "users"))
 	for item in [["users", "identity_users", "Users"], ["authentication", "identity_authentication", "Authentication"], ["events", "identity_events", "Events"]]:
-		var nav_button := _nav_button(d, nav_content, _copy(item[1], item[2]), "IdentityView_"+str(item[0]), func(): s["view"] = item[0]; s.erase("user"); s.erase("output"); d.identity_ui = s; _rerender(d), view == item[0])
-	var login_nav := _nav_button(d, nav_content, _copy("identity_test_login", "Test login"), "IdentityView_login", func(): s["view"] = "login"; s.erase("output"); s.erase("challenge"); s.erase("enrollment"); s.erase("required_action"); d.identity_ui = s; _rerender(d), view == "login")
-	var nav_fill := Control.new(); nav_fill.size_flags_vertical = Control.SIZE_EXPAND_FILL; nav_content.add_child(nav_fill)
-	var version := _label(d, nav_content, "Keycloak Admin Console", 11, Color("9aa3a7")); version.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		var nav_label := _copy(item[1], item[2])
+		var nav_button := _nav_button(d, nav_content, nav_label, "IdentityView_"+str(item[0]), func(): s["view"] = item[0]; s.erase("user"); s.erase("output"); d.identity_ui = s; _rerender(d), view == item[0])
+	var login_label := _copy("identity_test_login", "Test login")
+	var login_nav := _nav_button(d, nav_content, login_label, "IdentityView_login", func(): s["view"] = "login"; s.erase("output"); s.erase("challenge"); s.erase("enrollment"); s.erase("required_action"); d.identity_ui = s; _rerender(d), view == "login")
+	var nav_fill := Control.new(); nav_fill.name = "IdentityNavigationFill"; nav_fill.size_flags_vertical = Control.SIZE_EXPAND_FILL; nav_content.add_child(nav_fill)
+	var version := _label(d, nav_content, "Keycloak Admin Console", 11, Color("9aa3a7")); version.name = "IdentityNavigationVersion"; version.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
 	var paper := PanelContainer.new(); paper.size_flags_horizontal=Control.SIZE_EXPAND_FILL; paper.size_flags_vertical=Control.SIZE_EXPAND_FILL; paper.add_theme_stylebox_override("panel",COPY.style(Color.WHITE,Color.TRANSPARENT,0,0,0)); work.add_child(paper)
 	var main := VBoxContainer.new(); main.size_flags_horizontal = Control.SIZE_EXPAND_FILL; main.size_flags_vertical = Control.SIZE_EXPAND_FILL; main.add_theme_constant_override("separation", 0); paper.add_child(main)
 	var main_scroll := ScrollContainer.new(); main_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL; main_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL; main.add_child(main_scroll)
-	var margin := MarginContainer.new(); margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL; margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	for edge in ["left","right","top","bottom"]: margin.add_theme_constant_override("margin_"+edge, 28)
+	var margin := MarginContainer.new(); margin.name = "IdentityContentMargin"; margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL; margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var content_padding := 12 if compact_nav else 28
+	for edge in ["left","right","top","bottom"]: margin.add_theme_constant_override("margin_"+edge, content_padding)
 	main_scroll.add_child(margin)
 	var body := VBoxContainer.new(); body.size_flags_horizontal = Control.SIZE_EXPAND_FILL; body.add_theme_constant_override("separation", 12); margin.add_child(body)
 	var page_title := _copy("identity_users", "Users") if view == "users" else (_copy("identity_authentication", "Authentication") if view == "authentication" else (_copy("identity_events", "Events") if view == "events" else _copy("identity_test_login", "Test login")))
@@ -181,6 +246,10 @@ static func render(d, parent: VBoxContainer) -> void:
 	elif view == "login": _login(d, body)
 	else: _users(d, body, s, snapshot)
 	if view != "login" and not _response(d).is_empty(): _result(d,body)
+	shell.resized.connect(func():
+		if is_instance_valid(shell): _reflow(d, shell)
+	)
+	_reflow(d, shell)
 
 static func _response(d) -> Dictionary:
 	var output = _st(d).get("output", {})
@@ -293,10 +362,28 @@ static func _password_form(d, body: VBoxContainer, id: String, state: Dictionary
 	var form := VBoxContainer.new(); form.name = "IdentityPasswordForm"; form.add_theme_constant_override("separation", 8); body.add_child(form)
 	form.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN; form.custom_minimum_size.x = minf(600, float(d.windows.browser.size.x) - 270)
 	_label(d, form, _copy("identity_admin_reset_password", "Change password"), 18, INK)
-	_label(d, form, _copy("identity_admin_new_password", "New password"), 12, MUTED)
-	var password := LineEdit.new(); password.name = "IdentityPassword"; password.placeholder_text = _copy("identity_admin_new_password", "New password"); password.secret = true; form.add_child(password)
-	_label(d, form, _copy("identity_admin_confirm_password", "Confirm password"), 12, MUTED)
-	var confirmation := LineEdit.new(); confirmation.name = "IdentityPasswordConfirmation"; confirmation.placeholder_text = _copy("identity_admin_confirm_password", "Confirm password"); confirmation.secret = true; form.add_child(confirmation)
+	var text_scale := maxf(1.0, float(d.game.settings.get("text_scale", 1.0)))
+	var inline_fields := float(d.windows.browser.size.x) / text_scale >= 550.0
+	var new_password_row := BoxContainer.new(); new_password_row.name = "IdentityNewPasswordRow"; new_password_row.vertical = not inline_fields
+	new_password_row.add_theme_constant_override("separation", 12 if inline_fields else 2)
+	form.add_child(new_password_row)
+	var new_password_label := _label(d, new_password_row, _copy("identity_admin_new_password", "New password"), 12, MUTED); new_password_label.name = "IdentityNewPasswordLabel"
+	var password := LineEdit.new(); password.name = "IdentityPassword"; password.placeholder_text = _copy("identity_admin_new_password", "New password"); password.secret = true; password.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if inline_fields:
+		new_password_label.custom_minimum_size.x = 160.0 * text_scale
+		new_password_label.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		new_password_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	new_password_row.add_child(password)
+	var confirmation_row := BoxContainer.new(); confirmation_row.name = "IdentityConfirmPasswordRow"; confirmation_row.vertical = not inline_fields
+	confirmation_row.add_theme_constant_override("separation", 12 if inline_fields else 2)
+	form.add_child(confirmation_row)
+	var confirmation_label := _label(d, confirmation_row, _copy("identity_admin_confirm_password", "Confirm password"), 12, MUTED); confirmation_label.name = "IdentityConfirmPasswordLabel"
+	var confirmation := LineEdit.new(); confirmation.name = "IdentityPasswordConfirmation"; confirmation.placeholder_text = _copy("identity_admin_confirm_password", "Confirm password"); confirmation.secret = true; confirmation.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if inline_fields:
+		confirmation_label.custom_minimum_size.x = 160.0 * text_scale
+		confirmation_label.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		confirmation_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	confirmation_row.add_child(confirmation)
 	var temporary := CheckBox.new(); temporary.name = "IdentityPasswordTemporary"; temporary.text = _copy("identity_admin_temporary", "Temporary"); temporary.button_pressed = true; form.add_child(temporary)
 	var actions := HBoxContainer.new(); actions.add_theme_constant_override("separation", 8); form.add_child(actions)
 	var save := _button(d, actions, _copy("identity_admin_set_password", "Save"), func():

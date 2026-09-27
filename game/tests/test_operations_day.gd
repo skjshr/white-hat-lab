@@ -19,12 +19,25 @@ func select(id: String,index: int) -> void:
 	var node=control(id);check(node is OptionButton,"select "+id)
 	if node is OptionButton:node.select(index);node.item_selected.emit(index)
 func capture(name: String) -> void:
-	if not capture_enabled:return
+	if not capture_enabled or DisplayServer.get_name() == "headless":return
 	await create_timer(0.2).timeout;await frames(3);await RenderingServer.frame_post_draw
 	if ui.current_kind=="board":
 		check(ui.modal_body.get_global_rect().end.y<=root.size.y and ui.modal_footer.get_global_rect().end.y<=root.size.y,"dispatch content and footer fit viewport")
 		check(is_equal_approx(ui.text_scale,1.3 if narrow else 1.0),"native text scale applied")
-	var folder:=ProjectSettings.globalize_path("res://../artifacts/simulator/dispatch/ui");DirAccess.make_dir_recursive_absolute(folder)
+		var staff_list = control("DispatchStaffScroll")
+		if staff_list is ScrollContainer and staff_list.scroll_vertical == 0:
+			for member in game.team_members().slice(0,3):
+				var staff_select = control("DispatchStaffSelect_"+str(member.id))
+				check(staff_select is Control and staff_list.get_global_rect().encloses(staff_select.get_global_rect()), "three staff choices visible " + str(member.id))
+	var summary = control("CloseoutSummary")
+	if name == "closeout":
+		var warnings = control("CloseoutWarnings")
+		check(warnings is Control and ui.modal_scroll.get_global_rect().encloses(warnings.get_global_rect()), "unfinished work warning visible before settlement")
+	if summary is Control:
+		for amount in summary.find_children("*", "Label", true, false):
+			if str(amount.text).begins_with("¥"):
+				check(amount.autowrap_mode == TextServer.AUTOWRAP_OFF and amount.size.y <= amount.get_theme_font("font").get_height(amount.get_theme_font_size("font_size")) + 2, "currency stays on one line " + amount.text)
+	var folder:=ProjectSettings.globalize_path("res://../artifacts/simulator/ui-refinement-20260922/operations" if "--refinement-capture" in OS.get_cmdline_user_args() else "res://../artifacts/simulator/v220/operations" if "--v220-capture" in OS.get_cmdline_user_args() else "res://../artifacts/simulator/dispatch/ui");DirAccess.make_dir_recursive_absolute(folder)
 	check(root.get_texture().get_image().save_png(folder.path_join(name+("-narrow" if narrow else "-wide")+".png"))==OK,"capture")
 func solve_firewall() -> void:
 	game.vm_run("ssh client");check(game.capture_baseline(),"real baseline")
@@ -43,7 +56,8 @@ func run() -> void:
 	# the normal offer builder so market gating remains exercised.
 	game.state.market_day=int(game.state.day);game.state.market_leads=["service-2-case-1","service-2-case-2"];game._make_offers()
 	check(game.hire_staff("mio"),"actual employee hired in equipped fixture")
-	game.set_settings({"resolution":"960x600" if narrow else "1280x720","window_mode":"windowed","text_scale":1.3 if narrow else 1.0,"volume":0},false);root.size=Vector2i(960,600) if narrow else Vector2i(1280,720)
+	var wide_size := Vector2i(1920,1080) if "--v220-capture" in OS.get_cmdline_user_args() or "--refinement-capture" in OS.get_cmdline_user_args() else Vector2i(1280,720)
+	game.set_settings({"resolution":"960x600" if narrow else "%dx%d" % [wide_size.x,wide_size.y],"window_mode":"windowed","text_scale":1.3 if narrow else 1.0,"volume":0},false);root.size=Vector2i(960,600) if narrow else wide_size
 	ui._set_text_scale(1.3 if narrow else 1.0)
 	ui.open_panel("board");await frames();check(control("OperationsView_contracts")!=null,"board exposes local contract view")
 	check(control("OperationsSalesEmpty")!=null,"empty contracts view keeps contextual sales entry")
@@ -84,6 +98,18 @@ func run() -> void:
 	var preview: Dictionary=game.day_preview();check(int(preview.contract_net)>0 and int(preview.open_contracts)==1,"profit and unfinished client visible")
 	press("OperationsCloseDay");await frames();check(ui.current_kind=="door" and control("DaySettle")!=null,"review precedes day settlement")
 	await capture("closeout")
+	for group in ["CloseoutOperating", "CloseoutCash"]:
+		var disclosure: Button = control(group + "Disclosure")
+		disclosure.button_pressed = true; disclosure.pressed.emit(); await frames()
+		var rows: Control = control(group + "Rows")
+		check(rows.visible, group + " opens actual detail")
+		for amount in rows.find_children(group + "Value*", "Label", true, false):
+			check(amount.get_line_count() == 1, group + " amount stays on one line")
+			check(amount.get_global_rect().end.x <= ui.modal_scroll.get_global_rect().end.x, group + " amount fits width")
+		ui.modal_scroll.ensure_control_visible(rows.get_child(0)); await frames()
+		await capture("closeout-" + group)
+		disclosure.button_pressed = false; disclosure.pressed.emit(); await frames()
+	ui.modal_scroll.scroll_vertical = 0
 	var before_state: Dictionary=game.state.duplicate(true);var valid_path:=str(game.save_path)
 	game.save_path="user://missing-operations-day/save.json";check(not game.end_day(),"failed day save rejected");game.save_path=valid_path
 	check(game.state==before_state,"failed close rolls back ledger cash and day")

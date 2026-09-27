@@ -15,6 +15,51 @@ static func scale(d) -> float:
 static func copy(key: String) -> String:
 	return UI.copy(key)
 
+static func _is_compact(d) -> bool:
+	return float(d.windows.browser.size.x) < 1100 and not bool(d.edr_ui.get("nav_expanded", false))
+
+static func _apply_live_layout(d, root: Control) -> void:
+	if not is_instance_valid(root): return
+	var compact := _is_compact(d)
+	var compact_changed := bool(root.get_meta("edr_compact_applied", not compact)) != compact
+	if compact_changed:
+		root.set_meta("edr_compact_applied", compact)
+		var nav_panel := root.find_child("EdrNavigationPanel", true, false) as Control
+		if nav_panel != null: nav_panel.custom_minimum_size.x = 48 if compact else 204
+		for item in ["devices", "actions"]:
+			var nav_label := root.find_child("EdrNavLabel_" + item, true, false) as Control
+			if nav_label != null: nav_label.visible = not compact
+		var body := root.find_child("EdrBody", true, false) as VBoxContainer
+		var panel := root.find_child("EdrPanel", true, false) as PanelContainer
+		if body != null: body.add_theme_constant_override("separation", 8 if compact else 16)
+		if panel != null: panel.add_theme_stylebox_override("panel", UI.style(Color.WHITE, Color.TRANSPARENT, 16 if compact else 28, 20, 0))
+		var header := root.find_child("EdrDeviceHeader", true, false) as HBoxContainer
+		var back := root.find_child("EdrBackDevices", true, false) as Button
+		if header != null and back != null and body != null:
+			back.text = "‹" if compact else "‹  " + copy("edr_devices")
+			var target: Node = header if compact else body
+			if back.get_parent() != target:
+				back.get_parent().remove_child(back)
+				target.add_child(back)
+			if compact: header.move_child(back, 0)
+			else: body.move_child(back, 0)
+	var timeline_split := root.find_child("EdrEventSplit", true, false) as BoxContainer
+	if timeline_split != null:
+		var stacked := float(d.windows.browser.size.x) < 1280 * scale(d)
+		timeline_split.vertical = stacked
+		var detail_frame := timeline_split.find_child("EdrDetailsPane", false, false) as Control
+		if detail_frame != null:
+			detail_frame.custom_minimum_size = Vector2(0, 0) if stacked else Vector2(370, 0)
+			detail_frame.size_flags_horizontal = Control.SIZE_EXPAND_FILL if stacked else Control.SIZE_FILL
+	var file_profile := root.find_child("EdrRecoveryFileProfile", true, false) as BoxContainer
+	if file_profile != null:
+		var stacked := (float(d.windows.browser.size.x) - 80) / scale(d) < 580.0
+		file_profile.vertical = stacked
+		var metadata_frame := file_profile.find_child("EdrRecoveryFileMetadata", false, false) as Control
+		if metadata_frame != null:
+			metadata_frame.get_parent().custom_minimum_size.x = 0 if stacked else 260
+			metadata_frame.get_parent().size_flags_stretch_ratio = 1.0 if stacked else 0.55
+
 static func rcopy(key: String, fallback: String) -> String:
 	return UI.copy(key, fallback)
 
@@ -51,19 +96,20 @@ static func button(d, parent: Node, text: String, name: String, callback: Callab
 static func render(d, parent: VBoxContainer) -> void:
 	var state: Dictionary=d.edr_ui
 	var snap: Dictionary=d.game._vm().edr_snapshot()
-	var compact := float(d.windows.browser.size.x) < 1100 and not bool(state.get("nav_expanded",false))
+	var compact := _is_compact(d)
 	var root:=VBoxContainer.new()
+	root.name="EdrRoot"
 	root.size_flags_horizontal=Control.SIZE_EXPAND_FILL
 	root.custom_minimum_size.y=maxf(300,float(d.windows.browser.size.y)-140)
 	root.add_theme_constant_override("separation",0); parent.add_child(root)
 	var masthead:=PanelContainer.new();masthead.name="EdrMasthead"
 	masthead.add_theme_stylebox_override("panel",UI.style(Color("292827"),Color.TRANSPARENT,16,8,0));root.add_child(masthead)
-	var brand:=HBoxContainer.new();brand.custom_minimum_size.y=32;brand.add_theme_constant_override("separation",12);masthead.add_child(brand)
+	var brand:=HBoxContainer.new();brand.name="EdrBrand";brand.custom_minimum_size.y=32;brand.add_theme_constant_override("separation",12);masthead.add_child(brand)
 	Glyph.add_to(brand,"network",24,Color.WHITE)
 	label(d,brand,"Microsoft Defender",16,Color.WHITE)
 	var host:=label(d,brand,str(d.game.vm_info().host),12,Color("e1dfdd"));host.horizontal_alignment=HORIZONTAL_ALIGNMENT_RIGHT
-	var layout:=HBoxContainer.new();layout.add_theme_constant_override("separation",0);layout.size_flags_vertical=Control.SIZE_EXPAND_FILL;root.add_child(layout)
-	var nav_panel:=PanelContainer.new()
+	var layout:=HBoxContainer.new();layout.name="EdrLayout";layout.add_theme_constant_override("separation",0);layout.size_flags_vertical=Control.SIZE_EXPAND_FILL;root.add_child(layout)
+	var nav_panel:=PanelContainer.new();nav_panel.name="EdrNavigationPanel"
 	nav_panel.custom_minimum_size.x=48 if compact else 204
 	nav_panel.add_theme_stylebox_override("panel",UI.style(NAV,Color.TRANSPARENT,0,8,0));layout.add_child(nav_panel)
 	var nav:=VBoxContainer.new();nav.add_theme_constant_override("separation",2);nav_panel.add_child(nav)
@@ -83,10 +129,10 @@ static func render(d, parent: VBoxContainer) -> void:
 		var nav_row:=HBoxContainer.new();nav_row.mouse_filter=Control.MOUSE_FILTER_IGNORE;nav_row.add_theme_constant_override("separation",12);node.add_child(nav_row)
 		nav_row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT);nav_row.offset_left=12;nav_row.offset_right=-8
 		Glyph.add_to(nav_row,"device" if item=="devices" else "file",24,INK)
-		if not compact:label(d,nav_row,copy("edr_"+item),13).mouse_filter=Control.MOUSE_FILTER_IGNORE
-	var panel:=PanelContainer.new();panel.size_flags_horizontal=Control.SIZE_EXPAND_FILL
+		var nav_label:=label(d,nav_row,copy("edr_"+item),13);nav_label.name="EdrNavLabel_"+item;nav_label.mouse_filter=Control.MOUSE_FILTER_IGNORE;nav_label.visible=not compact
+	var panel:=PanelContainer.new();panel.name="EdrPanel";panel.size_flags_horizontal=Control.SIZE_EXPAND_FILL
 	panel.add_theme_stylebox_override("panel",UI.style(Color.WHITE,Color.TRANSPARENT,16 if compact else 28,20,0));layout.add_child(panel)
-	var body:=VBoxContainer.new();body.add_theme_constant_override("separation",8 if compact else 16);panel.add_child(body)
+	var body:=VBoxContainer.new();body.name="EdrBody";body.add_theme_constant_override("separation",8 if compact else 16);panel.add_child(body)
 	if view=="actions":
 		if bool(snap.get("recovery_enabled",false)):
 			recovery_actions(d,body,snap)
@@ -99,6 +145,8 @@ static func render(d, parent: VBoxContainer) -> void:
 		var message:=recovery_error(d,error) if bool(snap.get("recovery_enabled",false)) else copy("edr_error_"+error)
 		label(d,body,message if not message.is_empty() else copy("edr_operation_failed"),14,UI.RED)
 	var space:=Control.new();space.size_flags_vertical=Control.SIZE_EXPAND_FILL;body.add_child(space)
+	root.resized.connect(func():_apply_live_layout(d,root))
+	_apply_live_layout(d,root)
 
 static func run(d, command: String) -> void:
 	var raw: String=d._endpoint_command("edr "+command)
@@ -351,7 +399,7 @@ static func recovery_file_profile(d, body: VBoxContainer, state: Dictionary, sna
 		quarantine.size_flags_horizontal=Control.SIZE_SHRINK_BEGIN
 		var publisher:=str(file.get("publisher",""))
 		quarantine.disabled=bool(file.get("protected",file.get("trusted",false))) or publisher.to_lower().contains("microsoft")
-	var split: BoxContainer = HBoxContainer.new() if (float(d.windows.browser.size.x)-80)/scale(d)>=580.0 else VBoxContainer.new()
+	var split:=BoxContainer.new();split.vertical=(float(d.windows.browser.size.x)-80)/scale(d)<580.0
 	split.name="EdrRecoveryFileProfile"
 	split.size_flags_horizontal=Control.SIZE_EXPAND_FILL
 	body.add_child(split)
@@ -468,8 +516,8 @@ static func devices(d, body: VBoxContainer, state: Dictionary, snap: Dictionary)
 	if bool(snap.get("recovery_enabled",false)):
 		recovery_device(d,body,state,snap,current)
 		return
-	var header := HBoxContainer.new();header.add_theme_constant_override("separation",12);body.add_child(header)
-	var compact:=float(d.windows.browser.size.x)<1100
+	var header := HBoxContainer.new();header.name="EdrDeviceHeader";header.add_theme_constant_override("separation",12);body.add_child(header)
+	var compact:=_is_compact(d)
 	var back:=button(d,header if compact else body,"‹" if compact else "‹  "+copy("edr_devices"),"EdrBackDevices",func():state.erase("device");d._render_endpoint())
 	back.size_flags_horizontal=Control.SIZE_SHRINK_BEGIN;back.tooltip_text=copy("edr_devices")
 	if not compact:body.move_child(back,0)
@@ -511,9 +559,13 @@ static func timeline_rows(d, parent: VBoxContainer, current: Dictionary, state: 
 	var selected:=int(state.get("event_index",0))
 	if selected not in indices:selected=indices[0]
 	state["event_index"]=selected
-	var compact := float(d.windows.browser.size.x)<1180
-	var split:=HBoxContainer.new()
+	var compact := float(d.windows.browser.size.x)<1280*scale(d)
+	var split:=BoxContainer.new();split.name="EdrEventSplit"
+	split.vertical=compact
 	split.add_theme_constant_override("separation",16);parent.add_child(split)
+	var update_direction:=func():split.vertical=float(d.windows.browser.size.x)<1280*scale(d)
+	split.resized.connect(update_direction)
+	update_direction.call()
 	var list:=VBoxContainer.new();list.size_flags_horizontal=Control.SIZE_EXPAND_FILL;list.add_theme_constant_override("separation",1);split.add_child(list)
 	var head:=table_row(list,Color("faf9f8"))
 	for pair in [["edr_time",52*scale(d)],["edr_event",92*scale(d)],["edr_process",0]]:
@@ -522,7 +574,11 @@ static func timeline_rows(d, parent: VBoxContainer, current: Dictionary, state: 
 		title.size_flags_horizontal=Control.SIZE_EXPAND_FILL if int(pair[1])==0 else Control.SIZE_FILL
 	for index in indices:
 		var event: Dictionary=events[index]
-		var row:=button(d,list,"","EdrEvent_"+str(index),func():state["event_index"]=index;state["details_open"]=true;timeline_rows(d,parent,current,state,recovery_snap))
+		var row:=button(d,list,"","EdrEvent_"+str(index),func():
+			state["event_index"]=index
+			state["details_open"]=true
+			timeline_rows(d,parent,current,state,recovery_snap)
+			_scroll_selected_event_details(d,parent))
 		row.custom_minimum_size.y=50*scale(d);row.size_flags_horizontal=Control.SIZE_EXPAND_FILL
 		var selected_style:=UI.style(Color("deecf9") if selected==index else Color.WHITE,LINE,10,6,0);selected_style.set_border_width_all(0);selected_style.border_width_bottom=1
 		row.add_theme_stylebox_override("normal",selected_style)
@@ -537,13 +593,19 @@ static func timeline_rows(d, parent: VBoxContainer, current: Dictionary, state: 
 			text.autowrap_mode=TextServer.AUTOWRAP_OFF;text.text_overrun_behavior=TextServer.OVERRUN_TRIM_ELLIPSIS;text.mouse_filter=Control.MOUSE_FILTER_IGNORE
 	if not bool(state.get("details_open",true)):return
 	var details:=frame(split)
-	details.get_parent().name="EdrDetailsPane"
-	details.get_parent().custom_minimum_size.x=300 if compact else 370
-	details.get_parent().size_flags_horizontal=Control.SIZE_FILL
+	var details_frame: Control=details.get_parent()
+	details_frame.name="EdrDetailsPane"
+	var update_details_layout:=func():
+		var stacked:=float(d.windows.browser.size.x)<1280*scale(d)
+		details_frame.custom_minimum_size=Vector2(0,0) if stacked else Vector2(370,0)
+		details_frame.size_flags_horizontal=Control.SIZE_EXPAND_FILL if stacked else Control.SIZE_FILL
+	details_frame.resized.connect(update_details_layout)
+	split.resized.connect(update_details_layout)
+	update_details_layout.call()
 	var detail_style:=UI.style(Color.WHITE,Color("d2d0ce"),16,14,0)
 	detail_style.set_border_width_all(0);detail_style.border_width_left=1;detail_style.shadow_color=Color(0,0,0,0.06);detail_style.shadow_size=4
 	details.get_parent().add_theme_stylebox_override("panel",detail_style)
-	var detail_title:=HBoxContainer.new();details.add_child(detail_title)
+	var detail_title:=HBoxContainer.new();detail_title.name="EdrDetailsHeading";details.add_child(detail_title)
 	label(d,detail_title,copy("experience_event_details"),18)
 	var close:=button(d,detail_title,"×","EdrCloseDetails",func():state["details_open"]=false;timeline_rows(d,parent,current,state,recovery_snap))
 	close.tooltip_text=copy("portal_close");close.add_theme_stylebox_override("normal",UI.style(Color.WHITE,Color.TRANSPARENT,8,3,0))
@@ -560,6 +622,25 @@ static func timeline_rows(d, parent: VBoxContainer, current: Dictionary, state: 
 		if not event_file.is_empty():
 			button(d,fields,str(event_file.get("name",event_file_id)),"RecoveryEventFile_"+event_file_id,func():state["file_id"]=event_file_id;state["recovery_tab"]="files";d._render_endpoint())
 	entity_graph(d,details,current,event)
+
+static func _scroll_selected_event_details(d, timeline_parent: Control) -> void:
+	if float(d.windows.browser.size.x)>=1280*scale(d):return
+	if not d.widgets.has("browser") or not is_instance_valid(d.widgets.browser.page):return
+	var page: VBoxContainer=d.widgets.browser.page
+	var scroll: ScrollContainer=page.get_parent() as ScrollContainer
+	var heading: Control=timeline_parent.find_child("EdrDetailsHeading",true,false) as Control
+	if scroll==null or heading==null:return
+	var tree: SceneTree=d.get_tree()
+	var heading_ref: WeakRef = weakref(heading)
+	var scroll_ref: WeakRef = weakref(scroll)
+	tree.process_frame.connect(func():
+		tree.process_frame.connect(func():
+			var current_scroll = scroll_ref.get_ref()
+			var current_heading = heading_ref.get_ref()
+			if is_instance_valid(current_scroll) and is_instance_valid(current_heading):
+				current_scroll.scroll_vertical += roundi(current_heading.global_position.y - current_scroll.global_position.y)
+		,CONNECT_ONE_SHOT)
+	,CONNECT_ONE_SHOT)
 
 static func entity_graph(d, parent: VBoxContainer, device: Dictionary, event: Dictionary) -> void:
 	label(d,parent,copy("experience_related_entities"),12,MUTED)

@@ -54,6 +54,10 @@ func _init() -> void:
 	var catalog_checked := 0
 	for item in Catalog.all():
 		if item.get("targets", []).size() > 0: continue
+		# Endpoint recovery is an advanced multi-probe contract, not a
+		# maintenance incident catalog entry; its real checks are covered by the
+		# endpoint recovery contract tests.
+		if str(item.get("id", "")) == "endpoint-recovery": continue
 		var chapter := int(item.get("chapter", -1))
 		var machine = VM.new(); machine.setup(chapter, {}, item)
 		machine.run("ssh client")

@@ -276,4 +276,25 @@ func run() -> void:
 	check(game.state.get("delivery_orders", []).is_empty(), "customer stock never enters legacy delivery orders")
 	for failure in failures: push_error("STOCK_WORLD: "+failure)
 	print("STOCK_WORLD failures=", failures.size(), " ids=", ids)
+	# Stop the world audio before freeing the fixture.  Soundscape is an
+	# autoload, so its players outlive `office` unless the mounted streams are
+	# explicitly detached at the end of this isolated world test.
+	if root.has_node("Soundscape"):
+		var soundscape: Node = root.get_node("Soundscape")
+		soundscape.set_workspace(false)
+		soundscape.set_title_active(false)
+		soundscape.unmount_world(office)
+		var ambient: Variant = soundscape.get("_ambient")
+		if ambient is AudioStreamPlayer:
+			ambient.stop(); ambient.stream = null
+		var music: Variant = soundscape.get("_music")
+		if music is AudioStreamPlayer:
+			music.stop(); music.stream = null
+		var effect_players: Variant = soundscape.get("_players")
+		if effect_players is Array:
+			for player in effect_players:
+				if player is AudioStreamPlayer:
+					player.stop(); player.stream = null
+	if is_instance_valid(office): office.queue_free()
+	await create_timer(0.15).timeout
 	quit(0 if failures.is_empty() else 1)

@@ -6,24 +6,25 @@ extends RefCounted
 const UI = preload("res://scripts/ui_theme.gd")
 const THEME = preload("res://scripts/game_theme.gd")
 const SALES_CHART = preload("res://scripts/sales_chart.gd")
+const M = preload("res://scripts/management_ui.gd")
 
 const HEADER := THEME.HEADER
-const TAB_BAR := THEME.TAB_BAR
-const TAB := THEME.TAB
-const FILTER := THEME.FILTER
-const CANVAS := THEME.CANVAS
-const CARD_FRAME := THEME.CARD_FRAME
-const CARD := THEME.CARD
-const ACTION := THEME.ACTION
-const SUCCESS := THEME.SUCCESS
-const TEXT := THEME.TEXT
-const FOOTER := THEME.FOOTER
-const YELLOW := Color("ffd65b")
-const PAPER := CANVAS
-const COLUMN := CARD_FRAME
-const INK := TEXT
-const MUTED := Color("c6e8ef")
-const BORDER := TAB_BAR
+const TAB_BAR := M.LINE
+const TAB := M.ACCENT
+const FILTER := M.CANVAS
+const CANVAS := M.CANVAS
+const CARD_FRAME := M.CANVAS
+const CARD := M.PAPER
+const ACTION := M.SELECTED
+const SUCCESS := M.ACCENT
+const TEXT := M.INK
+const FOOTER := M.CANVAS
+const YELLOW := M.WARNING
+const PAPER := M.PAPER
+const COLUMN := M.PAPER
+const INK := M.INK
+const MUTED := M.MUTED
+const BORDER := M.LINE
 
 static var _mail_entries: Dictionary = {}
 
@@ -52,18 +53,21 @@ static func build(ui) -> void:
 		view = "inquiries"
 		ui.set("sales_view", "inquiries")
 		ui.set("sales_stage", "accepted")
-	if view not in ["inquiries", "summary", "catalog"]: view = "inquiries"
-	var inquiries := _tab(ui, "SalesInquiriesTab", "board_list", "inquiries", "inbox")
+	if view not in ["inquiries", "summary", "catalog", "pricing"]: view = "inquiries"
+	var inquiries := _tab(ui, "SalesInquiriesTab", "market_new_today", "inquiries", "inbox")
 	var summary := _tab_text(ui, "SalesSummaryTab", "概要", "summary", "chart")
 	var catalog := _tab(ui, "SalesCatalogTab", "market_catalog", "catalog", "grid")
-	for tab in [inquiries, summary, catalog]: toolbar.add_child(tab)
-	var selected_tab: Button = {"inquiries": inquiries, "summary": summary, "catalog": catalog}[view]
+	var pricing := _tab_text(ui, "SalesPricingTab", UI.copy("v220_pricing"), "pricing", "money")
+	for tab in [inquiries, summary, catalog, pricing]: toolbar.add_child(tab)
+	var selected_tab: Button = {"inquiries": inquiries, "summary": summary, "catalog": catalog, "pricing": pricing}[view]
 	selected_tab.button_pressed = true
+	for tab in [inquiries, summary, catalog, pricing]: M.button(tab, "tab", tab == selected_tab)
 	if view in ["inquiries", "catalog"]:
 		_add_filters(ui,g,body)
 	match view:
 		"catalog": _render_catalog(ui,g,body)
 		"summary": _render_summary(ui,g,body)
+		"pricing": _render_pricing(ui,g,body)
 		_: _render_board(ui,g,body)
 	_scale_text(body, float(ui.text_scale))
 	_fit_content(frame,body)
@@ -84,11 +88,8 @@ static func _add_filters(ui, g, body: VBoxContainer) -> void:
 	search.text = str(ui.get("sales_search"))
 	search.placeholder_text = UI.copy("market_search")
 	search.clear_button_enabled = true
-	_apply_text(search, 14, CARD)
-	search.add_theme_stylebox_override("normal", UI.style(THEME.WHITE, UI.MUTED, 6, 5, 1))
-	search.add_theme_stylebox_override("focus", UI.style(THEME.WHITE, TAB_BAR, 6, 5, 2))
-	search.add_theme_color_override("font_color", CARD)
-	search.add_theme_color_override("font_placeholder_color", UI.MUTED)
+	_apply_text(search, 14, INK)
+	M.field(search)
 	search.text_changed.connect(func(value: String): ui.set("sales_search", value))
 	search.text_submitted.connect(func(value: String): ui.set("sales_search", value); ui._refresh_sales_panel(true))
 	filters.add_child(search)
@@ -97,7 +98,7 @@ static func _add_filters(ui, g, body: VBoxContainer) -> void:
 	var count_text := UI.copy("market_count")
 	if not count_text.is_empty(): count_text = count_text % count
 	else: count_text = str(count)
-	var count_label := _label(count_text, 13, UI.MUTED)
+	var count_label := _label(count_text, 13, MUTED)
 	count_label.name = "SalesCount"
 	count_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	if str(ui.get("sales_view")) != "catalog":
@@ -111,8 +112,8 @@ static func _add_filter_items(control: OptionButton, specs: Array, selected: Var
 		control.add_item(UI.copy(str(spec[1])))
 		var index:=control.item_count-1;control.set_item_metadata(index,str(spec[0]))
 		if str(spec[0])==selected_value:control.select(index)
-	control.add_theme_font_size_override("font_size",14);control.add_theme_color_override("font_color",CARD);control.add_theme_color_override("font_hover_color",CARD);control.add_theme_color_override("font_pressed_color",THEME.WHITE)
-	control.add_theme_stylebox_override("normal",UI.style(THEME.WHITE,UI.MUTED,6,5,1));control.add_theme_stylebox_override("hover",UI.style(THEME.WHITE,TAB_BAR,6,5,1));control.add_theme_stylebox_override("pressed",UI.style(TAB,TAB_BAR,6,5,1));control.add_theme_stylebox_override("focus",UI.style(THEME.WHITE,TAB_BAR,6,5,2))
+	control.add_theme_font_size_override("font_size",14)
+	M.field(control)
 	control.item_selected.connect(func(index:int):ui.set(state_key,str(control.get_item_metadata(index)));ui.set("sales_expanded_id","");ui._refresh_sales_panel(true))
 
 static func _scale_text(node: Node, scale: float) -> void:
@@ -135,14 +136,8 @@ static func _tab_text(ui, node_name: String, value: String, view: String, icon_i
 		button.icon = UI.symbol(icon_id)
 		button.add_theme_constant_override("icon_max_width", 18)
 	button.pressed.connect(func(): ui.set("sales_view", view); ui.set("sales_expanded_id", ""); ui._refresh_sales_panel(true))
-	_apply_control(button, 14)
-	button.add_theme_stylebox_override("normal", UI.style(THEME.WHITE, UI.MUTED, 6, 6, 1))
-	button.add_theme_stylebox_override("hover", UI.style(THEME.WHITE, TAB_BAR, 6, 6, 1))
-	button.add_theme_stylebox_override("pressed", UI.style(TAB, TAB_BAR, 6, 6, 1))
-	button.add_theme_stylebox_override("focus", UI.style(THEME.WHITE, TAB_BAR, 6, 6, 2))
-	button.add_theme_color_override("font_color", CARD)
-	button.add_theme_color_override("font_hover_color", CARD)
-	button.add_theme_color_override("font_pressed_color", THEME.WHITE)
+	button.add_theme_font_size_override("font_size", 14)
+	M.button(button, "tab", false)
 	return button
 
 static func _render_board(ui, g, body: VBoxContainer) -> void:
@@ -164,7 +159,7 @@ static func _render_board(ui, g, body: VBoxContainer) -> void:
 		lane.visible=stage=="all" or stage==str(spec[0])
 		board.add_child(lane)
 	if _visible_count(g,ui) == 0:
-		board.add_child(_label(UI.copy("market_no_matching"),14,UI.MUTED))
+		board.add_child(_label(UI.copy("market_no_matching"),14,MUTED))
 
 static func _stage_tab(ui, stage: String, value: String, selected: bool) -> Button:
 	var button:=Button.new();button.name="SalesStage_"+stage;button.text=value;button.toggle_mode=true;button.button_pressed=selected;button.custom_minimum_size=Vector2(122,34);_apply_control(button,13)
@@ -188,32 +183,31 @@ static func _offer_card(ui, g, lane_id: String, item: Dictionary) -> PanelContai
 	var amount:=int(item.get("fee",item.get("reward",0)))
 	if item.has("offer") and lane_id!="accepted":
 		var quote: Dictionary=g.contract_quote(item.offer)
-		amount=int(quote.reference_fee if lane_id=="new" else quote.quoted_fee)
+		amount=int(quote.quoted_fee)
 	var contact := _contact_for(item)
-	var card:=PanelContainer.new();card.name="SalesCard_"+_node_id(id);card.size_flags_horizontal=Control.SIZE_EXPAND_FILL;card.add_theme_stylebox_override("panel",UI.style(Color.TRANSPARENT,Color.TRANSPARENT,0,0,0))
+	var card:=PanelContainer.new();card.name="SalesCard_"+_node_id(id);card.size_flags_horizontal=Control.SIZE_EXPAND_FILL;card.add_theme_stylebox_override("panel",M.surface(Color.TRANSPARENT,0))
 	var header:=Button.new();header.name="SalesOffer_"+_node_id(id);header.custom_minimum_size.y=60;header.size_flags_horizontal=Control.SIZE_EXPAND_FILL
 	_list_row_style(header)
 	card.add_child(header)
 	var row:=HBoxContainer.new();row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT);row.offset_left=10;row.offset_right=-10;row.offset_top=4;row.offset_bottom=-4;row.add_theme_constant_override("separation",12);header.add_child(row)
 	var identity:=VBoxContainer.new();identity.size_flags_horizontal=Control.SIZE_EXPAND_FILL;identity.add_theme_constant_override("separation",0);row.add_child(identity)
-	var title:=_label(str(item.get("title","")),15,CARD);title.add_theme_font_override("font",UI.font(700));title.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART;title.max_lines_visible=2;title.tooltip_text=title.text;identity.add_child(title)
+	var title:=_label(str(item.get("title","")),15,INK);title.add_theme_font_override("font",UI.font(700));title.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART;title.max_lines_visible=2;title.tooltip_text=title.text;identity.add_child(title)
 	var client_text := str(contact.get("company",item.get("client","")))
-	var client:=_label(client_text,12,UI.MUTED);client.autowrap_mode=TextServer.AUTOWRAP_OFF;client.text_overrun_behavior=TextServer.OVERRUN_TRIM_ELLIPSIS;client.tooltip_text=client_text;identity.add_child(client)
+	var client:=_label(client_text,12,MUTED);client.autowrap_mode=TextServer.AUTOWRAP_OFF;client.text_overrun_behavior=TextServer.OVERRUN_TRIM_ELLIPSIS;client.tooltip_text=client_text;identity.add_child(client)
 	var value:=VBoxContainer.new();value.custom_minimum_size.x=150;value.add_theme_constant_override("separation",0);row.add_child(value)
-	var price:=_label("¥%d" % amount,17,CARD);price.horizontal_alignment=HORIZONTAL_ALIGNMENT_RIGHT;price.add_theme_font_override("font",UI.font(700));value.add_child(price)
+	var price:=_label("¥%d" % amount,17,INK);price.horizontal_alignment=HORIZONTAL_ALIGNMENT_RIGHT;price.add_theme_font_override("font",UI.font(700));value.add_child(price)
 	var state_key: String = str({"new": "market_new_today", "draft": "market_quoted", "requote": "market_requote", "accepted": "market_accepted"}.get(lane_id, "market_detail"))
 	if lane_id == "accepted" and bool(item.get("completed", false)):
 		state_key = "market_delivered"
-	var state:=_label(UI.copy(state_key),12,UI.MUTED);state.horizontal_alignment=HORIZONTAL_ALIGNMENT_RIGHT;value.add_child(state)
+	var state:=_label(UI.copy(state_key),12,MUTED);state.horizontal_alignment=HORIZONTAL_ALIGNMENT_RIGHT;value.add_child(state)
 	row.minimum_size_changed.connect(func(): header.custom_minimum_size.y=maxf(60,row.get_combined_minimum_size().y+8))
 	header.tooltip_text=title.text + " / " + client_text
 	_ignore_mouse(row)
-	if lane_id=="accepted":header.pressed.connect(func():ui._operations_open(id,-1,"receipt" if bool(item.get("completed",false)) else "browser"))
-	else:header.pressed.connect(func():ui._select_contract(id))
+	header.pressed.connect(func():ui._select_contract(id))
 	return card
 
 static func _fact(host: Node, icon_id: String, value: String, color: Color) -> void:
-	var panel:=PanelContainer.new();panel.add_theme_stylebox_override("panel",UI.style(ACTION,BORDER,7,4,1));host.add_child(panel)
+	var panel:=PanelContainer.new();panel.add_theme_stylebox_override("panel",M.surface(M.SELECTED,6,true));host.add_child(panel)
 	var row:=HBoxContainer.new();row.add_theme_constant_override("separation",5);panel.add_child(row)
 	var icon:=TextureRect.new();icon.texture=UI.symbol(icon_id);icon.custom_minimum_size=Vector2(17,17);icon.expand_mode=TextureRect.EXPAND_IGNORE_SIZE;icon.stretch_mode=TextureRect.STRETCH_KEEP_ASPECT_CENTERED;icon.modulate=color;row.add_child(icon)
 	var text:=_label(value,12,color);text.autowrap_mode=TextServer.AUTOWRAP_OFF;row.add_child(text)
@@ -224,7 +218,7 @@ static func _render_summary(ui, g, body: VBoxContainer) -> void:
 	_metric(metrics,"新規",Array(lanes.new).size(),YELLOW,"inbox")
 	_metric(metrics,"見積中",Array(lanes.draft).size()+Array(lanes.requote).size(),TAB,"money")
 	_metric(metrics,"受注",Array(lanes.accepted).size(),SUCCESS,"check")
-	var mix_panel:=PanelContainer.new();mix_panel.name="SalesStageDonut";mix_panel.custom_minimum_size=Vector2(242,92);mix_panel.add_theme_stylebox_override("panel",UI.style(CARD,BORDER,10,8,1));metrics.add_child(mix_panel)
+	var mix_panel:=PanelContainer.new();mix_panel.name="SalesStageDonut";mix_panel.custom_minimum_size=Vector2(242,92);mix_panel.add_theme_stylebox_override("panel",M.surface(PAPER,10,true));metrics.add_child(mix_panel)
 	var mix_row:=HBoxContainer.new();mix_row.add_theme_constant_override("separation",10);mix_panel.add_child(mix_row)
 	var donut:=SALES_CHART.new();donut.name="SalesStageDonutGraphic";donut.custom_minimum_size=Vector2(72,72);donut.configure("donut",[Array(lanes.new).size(),Array(lanes.draft).size()+Array(lanes.requote).size(),Array(lanes.accepted).size()],[YELLOW,TAB,SUCCESS]);mix_row.add_child(donut)
 	var mix_copy:=VBoxContainer.new();mix_copy.add_theme_constant_override("separation",2);mix_copy.size_flags_vertical=Control.SIZE_SHRINK_CENTER;mix_row.add_child(mix_copy)
@@ -248,19 +242,19 @@ static func _render_summary(ui, g, body: VBoxContainer) -> void:
 		var label:=_label("●  %s %d" % [_category_name(category),int(counts.get(category,0))],11,_category_color(category));legend.add_child(label)
 
 static func _metric(host: Node, title: String, value: int, color: Color, icon_id: String) -> void:
-	var panel:=PanelContainer.new();panel.custom_minimum_size=Vector2(190,72);panel.add_theme_stylebox_override("panel",UI.style(CARD,BORDER,10,8,1));host.add_child(panel)
+	var panel:=PanelContainer.new();panel.custom_minimum_size=Vector2(190,72);panel.add_theme_stylebox_override("panel",M.surface(PAPER,10,true));host.add_child(panel)
 	var row:=HBoxContainer.new();row.add_theme_constant_override("separation",10);panel.add_child(row)
 	var icon:=TextureRect.new();icon.texture=UI.symbol(icon_id);icon.custom_minimum_size=Vector2(32,32);icon.expand_mode=TextureRect.EXPAND_IGNORE_SIZE;icon.stretch_mode=TextureRect.STRETCH_KEEP_ASPECT_CENTERED;icon.modulate=color;row.add_child(icon)
 	var stack:=VBoxContainer.new();row.add_child(stack);stack.add_child(_label(title,12,MUTED));var number:=_label(str(value),26,color);number.add_theme_font_override("font",UI.font(700));stack.add_child(number)
 
 static func _chart_panel(host: Node, title: String, name: String) -> VBoxContainer:
-	var panel:=PanelContainer.new();panel.add_theme_stylebox_override("panel",UI.style(COLUMN,BORDER,10,10,1));host.add_child(panel)
+	var panel:=PanelContainer.new();panel.add_theme_stylebox_override("panel",M.surface(PAPER,10,true));host.add_child(panel)
 	var stack:=VBoxContainer.new();stack.name=name;stack.add_theme_constant_override("separation",8);panel.add_child(stack);var heading:=_label(title,16,TEXT);heading.add_theme_font_override("font",UI.font(700));stack.add_child(heading);return stack
 
 static func _chart_bar(host: Node, title: String, value: int, maximum: int, color: Color) -> void:
 	var row:=HBoxContainer.new();row.add_theme_constant_override("separation",10);host.add_child(row)
 	var label:=_label(title,12,TEXT);label.custom_minimum_size.x=130;label.autowrap_mode=TextServer.AUTOWRAP_OFF;row.add_child(label)
-	var bar:=ProgressBar.new();bar.custom_minimum_size=Vector2(0,14);bar.size_flags_horizontal=Control.SIZE_EXPAND_FILL;bar.max_value=maxi(1,maximum);bar.value=value;bar.show_percentage=false;bar.add_theme_stylebox_override("fill",UI.style(color,Color.TRANSPARENT,4,0,0));row.add_child(bar)
+	var bar:=ProgressBar.new();bar.custom_minimum_size=Vector2(0,14);bar.size_flags_horizontal=Control.SIZE_EXPAND_FILL;bar.max_value=maxi(1,maximum);bar.value=value;bar.show_percentage=false;bar.add_theme_stylebox_override("background",M.surface(M.LINE,0));bar.add_theme_stylebox_override("fill",M.surface(color,0));row.add_child(bar)
 	var count:=_label(str(value),13,TEXT);count.custom_minimum_size.x=28;count.horizontal_alignment=HORIZONTAL_ALIGNMENT_RIGHT;row.add_child(count)
 
 static func _render_catalog(ui, g, body: VBoxContainer) -> void:
@@ -270,10 +264,116 @@ static func _render_catalog(ui, g, body: VBoxContainer) -> void:
 	body.add_child(list)
 	var offers: Array = _filtered_offers(g, ui, true)
 	if offers.is_empty():
-		list.add_child(_label(UI.copy("market_no_matching"), 14, TAB))
+		list.add_child(_label(UI.copy("market_no_matching"), 14, MUTED))
 		return
 	for offer in offers:
 		list.add_child(_catalog_row(ui, g, offer))
+
+static func _render_pricing(ui, g, body: VBoxContainer) -> void:
+	var panel := PanelContainer.new()
+	panel.name = "SalesPricingPanel"
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", M.surface(PAPER, 10, true))
+	body.add_child(panel)
+	var content := VBoxContainer.new()
+	content.add_theme_constant_override("separation", 4)
+	panel.add_child(content)
+	var title := _label(UI.copy("v220_price_policy"), 15, INK)
+	title.add_theme_font_override("font", UI.font(700))
+	content.add_child(title)
+	content.add_child(_pricing_row_header())
+	var drafts: Dictionary = ui.get("pricing_drafts") if ui.get("pricing_drafts") is Dictionary else {}
+	var policy: Dictionary = g.pricing_policy() if g.has_method("pricing_policy") else {}
+	for category in ["advisory", "operations", "response"]:
+		var value := int(drafts.get(category, policy.get(category, 100)))
+		value = clampi(50 + roundi(float(value - 50) / 5.0) * 5, 50, 150)
+		content.add_child(_pricing_row(ui, g, category, value))
+
+static func _pricing_row_header() -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.name = "PricingHeader"
+	row.add_theme_constant_override("separation", 5)
+	var category := _label(UI.copy("board_category"), 12, MUTED)
+	category.custom_minimum_size.x = 145
+	row.add_child(category)
+	var rate := _label(UI.copy("v220_price_percent"), 12, MUTED)
+	rate.custom_minimum_size.x = 140
+	row.add_child(rate)
+	var reference := _label(UI.copy("v220_reference_price") + " / " + UI.copy("v220_policy_price"), 12, MUTED)
+	reference.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(reference)
+	return row
+
+static func _pricing_row(ui, g, category: String, value: int) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.name = "PricingRow_" + category
+	row.add_theme_constant_override("separation", 5)
+	var name := _label(UI.copy("market_" + category), 12, INK)
+	name.custom_minimum_size.x = 145
+	name.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(name)
+	var rate_box := HBoxContainer.new()
+	rate_box.custom_minimum_size.x = 140
+	rate_box.add_theme_constant_override("separation", 4)
+	row.add_child(rate_box)
+	var rate := SpinBox.new()
+	rate.name = "PricingRate_" + category
+	rate.min_value = 50
+	rate.max_value = 150
+	rate.step = 5
+	rate.value = value
+	rate.suffix = "%"
+	rate.custom_minimum_size.x = 112
+	_apply_control(rate, 12)
+	rate.get_line_edit().add_theme_font_size_override("font_size",14)
+	rate_box.add_child(rate)
+	var examples := _label(_pricing_examples(g, category, value), 14, TEXT)
+	examples.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	examples.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	examples.autowrap_mode = TextServer.AUTOWRAP_OFF
+	row.add_child(examples)
+	var apply := Button.new()
+	apply.name = "PricingApply_" + category
+	apply.text = UI.copy("v220_price_apply")
+	apply.custom_minimum_size.x = 68
+	apply.custom_minimum_size.y = 36
+	apply.add_theme_font_size_override("font_size", 13)
+	M.button(apply, "secondary")
+	row.add_child(apply)
+	var update := func(next_value: float) -> void:
+		var next := clampi(50 + roundi((next_value - 50.0) / 5.0) * 5, 50, 150)
+		ui.pricing_drafts[category] = next
+		apply.tooltip_text = UI.copy("v220_price_apply")
+		rate.value = next
+		examples.text = _pricing_examples(g, category, next)
+		apply.disabled = int(g.pricing_policy().get(category,100)) == next
+	rate.value_changed.connect(update)
+	apply.pressed.connect(func():
+		rate.apply()
+		var next := int(rate.value)
+		if g.has_method("set_pricing_policy") and bool(g.set_pricing_policy(category, next)):
+			ui.pricing_drafts.erase(category)
+			apply.tooltip_text = UI.copy("v220_price_saved")
+			apply.disabled = true
+		elif g.has_method("set_pricing_policy"):
+			apply.tooltip_text = UI.copy("stock_error_save")
+			examples.text = UI.copy("stock_error_save")
+			examples.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			apply.disabled = false
+	)
+	apply.disabled = int(g.pricing_policy().get(category,100)) == value
+	return row
+
+static func _pricing_examples(g, category: String, percent: int) -> String:
+	var examples: PackedStringArray = []
+	for offer in g.state.get("offers", []):
+		if not offer is Dictionary or str(offer.get("category", "")) != category: continue
+		var quote: Dictionary = g.contract_quote(offer)
+		var reference := int(quote.get("reference_fee", offer.get("reward", 0)))
+		examples.append("¥%d  →  ¥%d" % [reference, roundi(float(reference) * percent / 100.0)])
+		if examples.size() >= 1: break
+	if examples.is_empty(): return UI.copy("v220_reference_price")
+	return "　".join(examples)
 
 static func _catalog_row(ui, g, offer: Dictionary) -> Button:
 	var id := str(offer.get("id", ""))
@@ -286,16 +386,16 @@ static func _catalog_row(ui, g, offer: Dictionary) -> Button:
 	if not contract.is_empty(): state_text=UI.copy("market_delivered" if bool(contract.get("completed",false)) else "market_accepted")
 	row.custom_minimum_size = Vector2(0, 72 * float(ui.text_scale))
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_apply_control(row, 14)
 	_list_row_style(row)
 	var margin:=MarginContainer.new();margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT);margin.offset_left=12;margin.offset_right=-12;margin.offset_top=8;margin.offset_bottom=-8;row.add_child(margin)
 	var columns:=HBoxContainer.new();columns.add_theme_constant_override("separation",12);margin.add_child(columns)
 	var contact:=_contact_for(offer)
 	var details:=VBoxContainer.new();details.size_flags_horizontal=Control.SIZE_EXPAND_FILL;details.add_theme_constant_override("separation",4);columns.add_child(details)
-	var title:=_label(str(offer.get("title","")),15,CARD);title.add_theme_font_override("font",UI.font(700));title.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART;title.max_lines_visible=2;title.tooltip_text=str(offer.get("title",""));details.add_child(title)
-	var client_text:=str(contact.get("company",offer.get("client","")));var client:=_label(client_text,12,UI.MUTED);client.clip_text=true;client.tooltip_text=client_text;details.add_child(client)
-	var price:=_label("¥%d" % int(quote.reference_fee),16,CARD);price.custom_minimum_size.x=124;price.horizontal_alignment=HORIZONTAL_ALIGNMENT_RIGHT;price.vertical_alignment=VERTICAL_ALIGNMENT_CENTER;columns.add_child(price)
-	var state:=_label(state_text,12,UI.MUTED if not available else CARD);state.custom_minimum_size.x=160;state.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART;state.vertical_alignment=VERTICAL_ALIGNMENT_CENTER;columns.add_child(state)
+	var title:=_label(str(offer.get("title","")),15,INK);title.add_theme_font_override("font",UI.font(700));title.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART;title.max_lines_visible=2;title.tooltip_text=str(offer.get("title",""));details.add_child(title)
+	var client_text:=str(contact.get("company",offer.get("client","")));var client:=_label(client_text,12,MUTED);client.clip_text=true;client.tooltip_text=client_text;details.add_child(client)
+	var displayed_fee := int(contract.get("contract", {}).get("agreed_fee", quote.quoted_fee))
+	var price:=_label("¥%d" % displayed_fee,16,INK);price.name="CatalogPrice_"+_node_id(id);price.custom_minimum_size.x=124;price.horizontal_alignment=HORIZONTAL_ALIGNMENT_RIGHT;price.vertical_alignment=VERTICAL_ALIGNMENT_CENTER;columns.add_child(price)
+	var state:=_label(state_text,12,MUTED if not available else INK);state.custom_minimum_size.x=160;state.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART;state.vertical_alignment=VERTICAL_ALIGNMENT_CENTER;columns.add_child(state)
 	columns.minimum_size_changed.connect(func(): row.custom_minimum_size.y=maxf(68,columns.get_combined_minimum_size().y+16))
 	row.tooltip_text=title.text + " / " + client_text
 	_ignore_mouse(margin)
@@ -303,14 +403,26 @@ static func _catalog_row(ui, g, offer: Dictionary) -> Button:
 	return row
 
 static func _list_row_style(button: Button) -> void:
-	var normal := UI.style(THEME.WHITE, UI.BORDER, 8, 6, 0)
-	normal.border_width_left=0; normal.border_width_right=0; normal.border_width_top=0
-	button.add_theme_stylebox_override("normal",normal)
-	button.add_theme_stylebox_override("hover",UI.style(CANVAS,TAB,8,6,0))
-	button.add_theme_stylebox_override("pressed",UI.style(FILTER,TAB,8,6,0))
-	var focus := UI.style(Color.TRANSPARENT,TAB,8,6,0); focus.set_border_width_all(2)
-	button.add_theme_stylebox_override("focus",focus)
-	for color in ["font_color","font_hover_color","font_pressed_color"]: button.add_theme_color_override(color,CARD)
+	var normal := M.surface(M.PAPER, 8, false)
+	normal.set_corner_radius_all(0)
+	normal.border_width_bottom = 1
+	normal.border_color = M.LINE
+	var selected := M.surface(M.SELECTED, 8, false)
+	selected.set_corner_radius_all(0)
+	selected.border_width_bottom = 1
+	selected.border_color = M.LINE
+	button.add_theme_stylebox_override("normal", normal)
+	button.add_theme_stylebox_override("hover", selected)
+	button.add_theme_stylebox_override("pressed", selected)
+	var focus := M.surface(M.PAPER, 8, true)
+	focus.set_corner_radius_all(0)
+	focus.border_color = M.ACCENT
+	focus.set_border_width_all(2)
+	button.add_theme_stylebox_override("focus", focus)
+	for color in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
+		button.add_theme_color_override(color, M.INK)
+	button.add_theme_color_override("font_disabled_color", M.MUTED)
+	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 
 static func _ignore_mouse(node: Node) -> void:
 	if node is Control: node.mouse_filter=Control.MOUSE_FILTER_IGNORE
@@ -452,14 +564,11 @@ static func _apply_text(control: Control, size: int, color: Color) -> void:
 	control.add_theme_font_size_override("font_size", size)
 	control.add_theme_color_override("font_color", color)
 	control.add_theme_color_override("font_unselected_color", color)
-	control.add_theme_color_override("font_placeholder_color", TAB)
+	control.add_theme_color_override("font_placeholder_color", MUTED)
 
 static func _apply_control(control: Control, size: int) -> void:
 	_apply_text(control, size, INK)
-	control.add_theme_stylebox_override("normal", UI.style(FILTER, TAB, 8, 5, 2))
-	control.add_theme_stylebox_override("hover", UI.style(TAB_BAR, TAB, 8, 5, 2))
-	control.add_theme_stylebox_override("pressed", UI.style(ACTION, TAB_BAR, 8, 5, 2))
-	control.add_theme_color_override("font_color", TAB)
-	control.add_theme_color_override("font_hover_color", TAB)
-	control.add_theme_color_override("font_pressed_color", TEXT)
-	control.add_theme_color_override("font_focus_color", TAB)
+	if control is Button:
+		M.button(control, "secondary")
+	else:
+		M.field(control)

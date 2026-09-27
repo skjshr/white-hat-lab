@@ -24,6 +24,10 @@ var _turn := 0.0
 var _scale := -1.0
 var _target_id := 0
 var _probe_id := ""
+var _details: Button
+var _expanded := false
+var _reserved: Control
+var _original_top := 0.0
 
 func setup(owner_ui) -> void:
 	ui = owner_ui; game = ui._game()
@@ -31,17 +35,21 @@ func setup(owner_ui) -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_card = PanelContainer.new(); _card.name="GuidedTutorialCard"; add_child(_card)
-	var style := UI.style(Color.WHITE, UI.PRIMARY, 14, 12, 8)
-	style.set_border_width_all(2); style.shadow_color=Color(0,0,0,0.16); style.shadow_size=6
+	var style := UI.style(Color.WHITE, UI.BORDER, 12, 7, 0)
+	style.border_width_bottom = 2
 	_card.add_theme_stylebox_override("panel",style)
 	var box := VBoxContainer.new(); box.add_theme_constant_override("separation",5); _card.add_child(box)
-	_progress = Label.new(); _progress.add_theme_color_override("font_color",UI.PRIMARY); box.add_child(_progress)
-	_title = Label.new(); _title.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART; _title.add_theme_color_override("font_color",UI.INK); box.add_child(_title)
+	var row := HBoxContainer.new(); row.add_theme_constant_override("separation",10); box.add_child(row)
+	var heading := VBoxContainer.new(); heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL; row.add_child(heading)
+	_progress = Label.new(); _progress.add_theme_color_override("font_color",UI.PRIMARY); heading.add_child(_progress)
+	_title = Label.new(); _title.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART; _title.add_theme_color_override("font_color",UI.INK); heading.add_child(_title)
 	_body = Label.new(); _body.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART; _body.add_theme_color_override("font_color",UI.INK); box.add_child(_body)
 	_keys = Label.new(); _keys.add_theme_color_override("font_color",UI.PRIMARY); box.add_child(_keys)
-	var row := HBoxContainer.new(); row.add_theme_constant_override("separation",10); box.add_child(row)
 	_locate=Button.new(); _locate.name="GuidedTutorialLocate"; _locate.text=UI.copy("guide_locate"); _locate.pressed.connect(_locate_target); row.add_child(_locate)
+	_details = Button.new(); _details.name = "GuidedTutorialDetails"; _details.text = UI.copy("next_hint"); _details.toggle_mode = true
+	_details.toggled.connect(func(value): _expanded = value; _render(false)); row.add_child(_details)
 	_skip=Button.new(); _skip.name="GuidedTutorialSkip"; _skip.text=UI.copy("guide_skip"); _skip.flat=true; _skip.pressed.connect(skip); row.add_child(_skip)
+	_card.minimum_size_changed.connect(_fit_card.call_deferred)
 	hide()
 
 func _data() -> Dictionary:
@@ -69,7 +77,7 @@ func resume() -> void:
 	if _persist({"enabled":true}): refresh(0.2)
 
 func skip() -> void:
-	if _persist({"enabled":false,"completed":current_step=="done"}): hide()
+	if _persist({"enabled":false,"completed":current_step=="done"}): hide(); _reserve(null, 0)
 
 func _desktop():
 	return ui.desktop if ui.current_kind=="terminal" and is_instance_valid(ui.desktop) else null
@@ -93,9 +101,9 @@ func _observe_motion() -> void:
 	if not changes.is_empty(): _persist(changes)
 
 func refresh(delta: float = 0.2) -> void:
-	if not active(): hide(); return
+	if not active(): hide(); _reserve(null, 0); return
 	if ui.controls.menu.visible or ui.current_kind in ["pause","settings","confirm_display","help","profile","credits"]:
-		hide(); _motion_sampled=false; return
+		hide(); _reserve(null, 0); _motion_sampled=false; return
 	show(); _observe_motion()
 	_elapsed+=delta
 	if _elapsed<0.12: return
@@ -200,6 +208,7 @@ func _render(changed: bool) -> void:
 	_progress.text=UI.copy("guide_progress")+"  ·  %02d / %02d" % [STEPS.find(current_step)+1,STEPS.size()]
 	_title.text=UI.copy("guide_"+current_step+"_title")
 	_body.text=UI.copy("guide_"+current_step+"_body")
+	_body.visible = _expanded or ui.current_kind.is_empty()
 	_keys.visible=current_step in ["walk","desk"]
 	_keys.text=(("✓  " if bool(_data().get("moved",false)) else "")+"W  A  S  D   ·   "+("✓  " if bool(_data().get("looked",false)) else "")+"↔") if current_step=="walk" else "E   /   F"
 	_skip.text=UI.copy("guide_finish" if current_step=="done" else "guide_skip")
@@ -214,10 +223,34 @@ func _render(changed: bool) -> void:
 	var elsewhere: bool=not _route().is_empty() and (desktop==null or desktop.current_app!=_route())
 	_locate.visible=(elsewhere or not target_rect.has_area()) and (current_step!="walk" or not ui.current_kind.is_empty()) and (current_step!="done" or elsewhere)
 	_locate.text=UI.copy("guide_return" if current_step=="walk" else "guide_locate")
-	var width:=minf(360.0*_scale,get_viewport_rect().size.x-24)
+	var surface: Control = _desktop()
+	if surface == null and ui._is_management_panel(ui.current_kind): surface = ui.modal
+	var width: float = surface.size.x if is_instance_valid(surface) else minf(520.0*_scale,get_viewport_rect().size.x-24)
 	_card.size=Vector2(width,0)
-	_card.position=_card_position(_card.size)
+	_fit_card.call_deferred()
 	queue_redraw()
+
+func _fit_card() -> void:
+	if not visible or not is_instance_valid(_card): return
+	_card.size.y = _card.get_combined_minimum_size().y
+	var surface: Control = _desktop()
+	if surface == null and ui._is_management_panel(ui.current_kind): surface = ui.modal
+	_reserve(surface, _card.size.y + 4.0)
+	if is_instance_valid(surface):
+		_card.position = surface.get_global_rect().position - Vector2(0, _card.size.y + 4.0)
+	else:
+		_card.position = _card_position(_card.size)
+
+func _reserve(surface: Control, height: float) -> void:
+	if _reserved != surface:
+		if is_instance_valid(_reserved): _reserved.offset_top = _original_top
+		if is_instance_valid(surface) and is_instance_valid(ui.next_task_guide):
+			# Resume can happen while the ordinary guide still owns the top inset.
+			ui.next_task_guide._reserve(null, 0)
+		_reserved = surface
+		if is_instance_valid(surface): _original_top = surface.offset_top
+	if is_instance_valid(surface) and not is_equal_approx(surface.offset_top, _original_top + height):
+		surface.offset_top = _original_top + height
 
 func _world_target() -> void:
 	var player=_player()

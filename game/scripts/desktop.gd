@@ -1,5 +1,6 @@
 extends Control
 signal close_requested
+signal return_requested
 signal company_requested
 signal staffing_requested
 signal contracts_requested
@@ -46,9 +47,8 @@ var task_scroll: ScrollContainer
 var app_dock: HBoxContainer
 var taskbar_offset: Control
 var launcher_search: LineEdit
+var launcher_apps: GridContainer
 var heading_font: Font
-var notification: PanelContainer
-var notification_label: Label
 var windows: Dictionary = {}
 var task_buttons: Dictionary = {}
 var widgets: Dictionary = {}
@@ -119,6 +119,7 @@ var desktop_shortcuts: Dictionary = {}
 var selected_shortcut := ""
 var desktop_hidden_windows: Array[String] = []
 var desktop_hidden_active := ""
+var configured_return_label := ""
 
 func browser_identities() -> Array:
 	var identities: Array = BROWSER_IDENTITIES.duplicate(true)
@@ -191,12 +192,13 @@ func _build() -> void:
 	app_dock=HBoxContainer.new(); app_dock.add_theme_constant_override("separation",2); task_scroll.add_child(app_dock)
 	for id in PINNED_APPS: _add_task_button(id)
 	var task_tail:=Control.new(); task_tail.size_flags_horizontal=Control.SIZE_EXPAND_FILL; taskbar.add_child(task_tail)
-	status=_label("",12); status.hide(); taskbar.add_child(status)
+	status=_label("",12); status.hide(); status.size_flags_horizontal=Control.SIZE_SHRINK_BEGIN; status.custom_maximum_size.x=148; status.clip_text=true; status.autowrap_mode=TextServer.AUTOWRAP_OFF; status.text_overrun_behavior=TextServer.OVERRUN_TRIM_ELLIPSIS; taskbar.add_child(status)
 	var target_slot := Control.new(); target_slot.name="TargetSelectorSlot"; target_slot.custom_minimum_size=Vector2(116,42); target_slot.size_flags_horizontal=Control.SIZE_SHRINK_BEGIN; target_slot.clip_contents=true; taskbar.add_child(target_slot)
 	target_selector = OptionButton.new(); target_selector.fit_to_longest_item=false; target_selector.custom_minimum_size=Vector2.ZERO; target_selector.size_flags_horizontal=Control.SIZE_EXPAND_FILL; target_selector.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); target_selector.clip_text=true; target_selector.item_selected.connect(_select_target); target_slot.add_child(target_selector)
 	_refresh_target_selector()
 	tray=_label("",11); tray.autowrap_mode=TextServer.AUTOWRAP_OFF; tray.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER; tray.custom_minimum_size.x=78; taskbar.add_child(tray)
-	var exit_button := _tool_button("external","オフィスへ戻る  Esc",_close); exit_button.name="ExitDesktop"; _task_style(exit_button,false); taskbar.add_child(exit_button)
+	var return_button := _button("",_return_to_source); return_button.name="DesktopReturn"; return_button.icon=UI.symbol("back"); return_button.tooltip_text=UI.copy("board_list","案件一覧"); return_button.visible=false; return_button.custom_minimum_size=Vector2(0,36); taskbar.add_child(return_button)
+	var exit_button := _button(UI.copy("os_office","オフィスへ戻る"),_close); exit_button.name="ExitDesktop"; exit_button.icon=UI.symbol("external"); exit_button.tooltip_text=UI.copy("os_office","オフィスへ戻る"); exit_button.custom_minimum_size=Vector2(0,36); _task_style(exit_button,false); taskbar.add_child(exit_button)
 	var show_desktop := _tool_button("grid","デスクトップを表示",_show_desktop); show_desktop.name="ShowDesktop"; show_desktop.icon=null; show_desktop.custom_minimum_size=Vector2(12,42); _task_style(show_desktop,false); taskbar.add_child(show_desktop)
 	show_desktop.add_theme_stylebox_override("normal",UI.style(Color("dae1e8"),Color("cbd3dc"),0,0,2))
 	start_menu=PanelContainer.new(); start_menu.name="StartMenu"; start_menu.set_anchors_preset(Control.PRESET_TOP_LEFT); start_menu.size=Vector2(600,478); start_menu.add_theme_stylebox_override("panel",UI.style(Color("f2f5fa"),Color("cdd4df"),26,22,8)); add_child(start_menu)
@@ -204,20 +206,22 @@ func _build() -> void:
 	var menu:=_box(start_menu,16)
 	launcher_search=LineEdit.new(); launcher_search.name="LauncherSearch"; launcher_search.placeholder_text=UI.copy("fidelity_start_search"); launcher_search.right_icon=UI.symbol("search"); launcher_search.clear_button_enabled=true; launcher_search.custom_minimum_size.y=34; menu.add_child(launcher_search)
 	menu.add_child(_label(UI.copy("fidelity_all_apps"),13))
-	var apps:=GridContainer.new(); apps.columns=6; apps.add_theme_constant_override("h_separation",6); apps.add_theme_constant_override("v_separation",8); menu.add_child(apps)
-	for id in APPS: apps.add_child(_app_tile(id,false))
+	var app_scroll:=ScrollContainer.new(); app_scroll.name="LauncherAppScroll"; app_scroll.size_flags_vertical=Control.SIZE_EXPAND_FILL; app_scroll.custom_minimum_size.y=150; app_scroll.horizontal_scroll_mode=ScrollContainer.SCROLL_MODE_DISABLED; menu.add_child(app_scroll)
+	launcher_apps=GridContainer.new(); launcher_apps.columns=6; launcher_apps.add_theme_constant_override("h_separation",6); launcher_apps.add_theme_constant_override("v_separation",8); app_scroll.add_child(launcher_apps)
+	for id in APPS: launcher_apps.add_child(_app_tile(id,false))
+	for tile in launcher_apps.get_children(): tile.focus_entered.connect(app_scroll.ensure_control_visible.bind(tile))
 	launcher_search.text_changed.connect(func(query):
-		for tile in apps.get_children():
+		for tile in launcher_apps.get_children():
 			var app: String=String(tile.name).trim_prefix("StartApp_")
 			tile.visible=query.is_empty() or (str(APPS[app][0])+" "+app).to_lower().contains(query.to_lower()))
 	launcher_search.text_submitted.connect(func(_query):
-		for tile in apps.get_children():
+		for tile in launcher_apps.get_children():
 			if tile.visible: tile.pressed.emit(); break)
 	var menu_fill:=Control.new(); menu_fill.size_flags_vertical=Control.SIZE_EXPAND_FILL; menu.add_child(menu_fill)
 	var user_row:=_row(menu,8); user_row.add_child(_icon("team",26)); player_name_label=_label(_player_display_name(),14); player_name_label.size_flags_horizontal=Control.SIZE_EXPAND_FILL; user_row.add_child(player_name_label); user_row.add_child(_tool_button("close",UI.copy("fidelity_close"),func():start_menu.hide()))
 	system_company=_label(_company_name(),12,UI.MUTED); system_company.hide(); menu.add_child(system_company)
 	menu.add_child(HSeparator.new()); var bottom:=_row(menu,4)
-	bottom.add_child(_button("会社",_company)); bottom.add_child(_button("案件",_contracts)); bottom.add_child(_button("設備購入",_request_equipment)); var spacer:=Control.new(); spacer.size_flags_horizontal=Control.SIZE_EXPAND_FILL; bottom.add_child(spacer)
+	bottom.add_child(_button("案件",_contracts)); var spacer:=Control.new(); spacer.size_flags_horizontal=Control.SIZE_EXPAND_FILL; bottom.add_child(spacer)
 	var windows_menu := MenuButton.new(); windows_menu.text="ウィンドウ"; bottom.add_child(windows_menu)
 	var window_popup := windows_menu.get_popup(); window_popup.add_item(UI.copy("os_tile"),1); window_popup.add_item(UI.copy("os_cascade"),2); window_popup.add_separator(); window_popup.add_item("開いているアプリ",3)
 	window_popup.id_pressed.connect(func(id):
@@ -226,8 +230,6 @@ func _build() -> void:
 		elif id==2: _cascade_windows_desktop()
 		else: _toggle_overview())
 	start_menu.hide()
-	notification=PanelContainer.new(); notification.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT); notification.offset_left=-378; notification.offset_right=-14; notification.offset_top=-130; notification.offset_bottom=-62; add_child(notification)
-	var notice_row:=_row(notification); notification_label=_label("",13); notification_label.size_flags_horizontal=Control.SIZE_EXPAND_FILL; notice_row.add_child(notification_label); notice_row.add_child(_tool_button("close","閉じる",func(): notification.hide())); notification.hide()
 	overview=PanelContainer.new(); overview.set_anchors_preset(Control.PRESET_BOTTOM_WIDE); overview.offset_left=10; overview.offset_right=-10; overview.offset_top=-230; overview.offset_bottom=-58; overview.add_theme_stylebox_override("panel",UI.style(UI.SURFACE,UI.BORDER,12,10)); add_child(overview); overview.hide()
 	_state_changed()
 	_layout_shell()
@@ -369,9 +371,16 @@ func _layout_taskbar() -> void:
 		target_slot.custom_minimum_size.x=92.0 if narrow else 116.0
 	var exit_button: Button = taskbar.find_child("ExitDesktop", true, false) as Button
 	if exit_button != null:
-		exit_button.text=""
-		exit_button.custom_minimum_size.x=34.0 if narrow else 0.0
+		exit_button.text="" if narrow else UI.copy("os_office","オフィスへ戻る")
+		exit_button.custom_minimum_size.x=38.0 if narrow else 132.0
 		exit_button.size_flags_horizontal=Control.SIZE_SHRINK_BEGIN
+	var return_button: Button = taskbar.find_child("DesktopReturn", true, false) as Button
+	if return_button != null:
+		return_button.visible=not configured_return_label.is_empty()
+		return_button.text="" if narrow else configured_return_label
+		return_button.tooltip_text=configured_return_label
+		return_button.custom_minimum_size.x=38.0 if narrow else 148.0
+		return_button.size_flags_horizontal=Control.SIZE_SHRINK_BEGIN
 	var show_desktop: Button = taskbar.find_child("ShowDesktop", true, false) as Button
 	if show_desktop != null: show_desktop.custom_minimum_size.x=10.0 if narrow else 12.0
 	if is_instance_valid(tray):
@@ -386,8 +395,13 @@ func _layout_taskbar() -> void:
 
 func _layout_launcher() -> void:
 	if not is_instance_valid(start_menu): return
-	start_menu.size=Vector2(600,maxf(478,start_menu.get_combined_minimum_size().y))
-	start_menu.position=Vector2((size.x-start_menu.size.x)*0.5,maxf(8,size.y-62-start_menu.size.y))
+	var menu_width:=minf(600.0,maxf(360.0,size.x-24.0))
+	var safe_top:=8.0
+	var available_height:=maxf(250.0,size.y-52.0-safe_top-8.0)
+	start_menu.clip_contents=true
+	start_menu.size=Vector2(menu_width,minf(maxf(478.0,start_menu.get_combined_minimum_size().y),available_height))
+	start_menu.position=Vector2((size.x-start_menu.size.x)*0.5,maxf(safe_top,size.y-62.0-start_menu.size.y))
+	if is_instance_valid(launcher_apps): launcher_apps.columns=3 if menu_width<500.0 else 6
 
 func _icon(app: String, pixels := 24) -> TextureRect:
 	var image := TextureRect.new(); image.texture=UI.icon(app); image.expand_mode=TextureRect.EXPAND_IGNORE_SIZE; image.stretch_mode=TextureRect.STRETCH_KEEP_ASPECT_CENTERED; image.custom_minimum_size=Vector2(pixels,pixels); image.mouse_filter=Control.MOUSE_FILTER_IGNORE
@@ -889,15 +903,17 @@ func _process(delta: float) -> void:
 	_save_timer += delta
 	if _save_timer > 10: _save_timer = 0; _save_session()
 func _notify(text: String) -> void:
-	if not is_instance_valid(notification_label): return
+	if not is_instance_valid(status): return
 	notice_serial += 1
 	var serial := notice_serial
 	var failed := "失敗" in text or "できません" in text or "エラー" in text or "読み込め" in text
-	notification_label.text = text
-	notification.add_theme_stylebox_override("panel",_style(UI.SURFACE,UI.RED if failed else UI.BORDER,14,10)); notification.show()
+	status.text = text
+	status.tooltip_text = text
+	status.add_theme_color_override("font_color",UI.RED if failed else UI.INK)
+	status.show()
 	if failed: _trace("error",text.left(240)); return
 	get_tree().create_timer(3).timeout.connect(func():
-		if is_instance_valid(notification) and serial == notice_serial: notification.hide())
+		if is_instance_valid(status) and serial == notice_serial: status.hide(); status.remove_theme_color_override("font_color"))
 
 func _money(value) -> String:
 	var n := str(absi(int(value))); var out := ""
@@ -906,6 +922,15 @@ func _money(value) -> String:
 func _close() -> void:
 	_trace("leave_desktop",current_app)
 	if _save_session(): close_requested.emit()
+
+func configure_return(label: String) -> void:
+	configured_return_label=label.strip_edges()
+	if is_instance_valid(taskbar): _layout_taskbar()
+
+func _return_to_source() -> void:
+	if configured_return_label.is_empty(): return
+	_trace("return_to_source",current_app)
+	if _save_session(): return_requested.emit()
 func _company() -> void:
 	if _save_session(): company_requested.emit()
 
@@ -925,7 +950,8 @@ func _input(event: InputEvent) -> void:
 	if event.keycode == KEY_ESCAPE:
 		get_viewport().set_input_as_handled()
 		if current_app == "editor" and widgets.has("editor") and widgets.editor.get("find_panel") != null and widgets.editor.find_panel.visible: EDITOR.hide_find(self)
-		elif start_menu.visible: start_menu.hide()
+		elif is_instance_valid(overview) and overview.visible: overview.hide()
+		elif is_instance_valid(start_menu) and start_menu.visible: start_menu.hide()
 		else: _close()
 		return
 	var focus_owner := get_viewport().gui_get_focus_owner()
@@ -1084,14 +1110,46 @@ func _open_file_item(_index: int = -1) -> void:
 func _paste_file() -> void:
 	if bool(samba_ui.get("network_open",false)): return
 	if clipboard_path.is_empty() or clipboard_path.ends_with("/"): return
-	if file_remote and not clipboard_path.begins_with("workstation:"):
-		var target := file_directory.path_join(clipboard_path.get_file())
-		if target == clipboard_path: target = file_directory.path_join("copy-"+clipboard_path.get_file())
-		_notify(game.vm_run('cp "%s" "%s"' % [clipboard_path,target])); _list_files()
-	elif not file_remote:
-		var contents: String = game.state.os_files.get(clipboard_path.trim_prefix("workstation:"),"") if clipboard_path.begins_with("workstation:") else game.vm_read(clipboard_path)
-		game.state.os_files[file_directory.path_join("copy-"+clipboard_path.get_file())] = contents; game.save_game(); _list_files()
-	else: _notify("この場所には貼り付け不可")
+	var source_is_local := clipboard_path.begins_with("workstation:")
+	var source_path := clipboard_path.trim_prefix("workstation:") if source_is_local else clipboard_path
+	if source_is_local and not game.state.os_files.has(source_path):
+		_notify(UI.copy("save_failed")); return
+	var existing_paths: Array = game.vm_list(file_directory) if file_remote else game.state.os_files.keys()
+	var target := FILES._copy_target(file_directory, source_path, existing_paths)
+	if file_remote:
+		if source_is_local:
+			var info: Dictionary = game.vm_info()
+			var local_contents: String = str(game.state.os_files[source_path])
+			if not game.vm_write(target, local_contents):
+				_notify("顧客端末: 未接続" if not bool(info.get("connected",false)) else UI.copy("save_failed")); return
+			_list_files()
+			return
+		var output: String = game.vm_run('cp "%s" "%s"' % [source_path,target])
+		if not output.is_empty():
+			var result_json := JSON.new()
+			if result_json.parse(output) == OK and result_json.data is Dictionary and str(result_json.data.get("error", "")) == "save_failed":
+				_notify(UI.copy("save_failed"))
+			else:
+				_notify(output)
+		_list_files()
+		return
+	if not source_is_local:
+		var info: Dictionary = game.vm_info()
+		if not bool(info.get("connected",false)):
+			_notify("顧客端末: 未接続"); return
+		if not game.vm_list(source_path.get_base_dir()).has(source_path):
+			_notify(UI.copy("save_failed")); return
+	var contents: String = str(game.state.os_files[source_path]) if source_is_local else game.vm_read(source_path)
+	if game.state.os_files.has(target):
+		target = FILES._copy_target(file_directory, source_path, game.state.os_files.keys())
+	var had_previous: bool = game.state.os_files.has(target)
+	var previous_content: String = str(game.state.os_files.get(target,""))
+	game.state.os_files[target] = contents
+	if not game.save_game():
+		if had_previous: game.state.os_files[target]=previous_content
+		else: game.state.os_files.erase(target)
+		_notify(UI.copy("save_failed")); return
+	_list_files()
 
 func _editor(parent: VBoxContainer) -> void:
 	EDITOR.build(self,parent)

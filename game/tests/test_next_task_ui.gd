@@ -39,6 +39,12 @@ func run() -> void:
 	game.state.strategy = "operations"
 	check(not bool(game.state.get("accepted", false)), "story starts before acceptance")
 	panel.refresh(1.0)
+	if ui._is_management_panel(ui.current_kind):
+		check(not panel.visible, "management guide starts closed")
+		var guide_action = ui.modal.find_child("ManagementGuide", true, false)
+		check(guide_action is Button, "management guide has an explicit action")
+		if guide_action is Button: guide_action.pressed.emit()
+		await frames(3)
 	check(panel.visible, "story guide visible")
 	check(panel.task.get("id", "") == "accept", "story next action is acceptance")
 	check(panel.find_child("NextTaskLocate", true, false) is Button, "locate control is named")

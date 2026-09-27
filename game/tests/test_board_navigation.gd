@@ -31,13 +31,15 @@ func visible_action(id: String, rightmost := false) -> void:
 	if not control is Control: return
 	var rect: Rect2 = control.get_global_rect()
 	check(Rect2(Vector2.ZERO, Vector2(root.size)).encloses(rect), "viewport contains " + id)
-	if rightmost: check(rect.end.x > root.size.x - 70, "right edge " + id)
+	if rightmost:
+		var action_area: Rect2 = ui.modal.get_global_rect() if is_instance_valid(ui.modal) else Rect2(Vector2.ZERO, Vector2(root.size))
+		check(rect.end.x > action_area.end.x - 70, "right edge " + id)
 
 func capture(label: String) -> void:
 	await frames(8)
 	if DisplayServer.get_name() == "headless": return
 	await RenderingServer.frame_post_draw
-	var folder := ProjectSettings.globalize_path("res://../artifacts/simulator/board-navigation/" + ("before" if before else "after"))
+	var folder := ProjectSettings.globalize_path("res://../artifacts/simulator/v220/navigation" if "--v220-capture" in OS.get_cmdline_user_args() else "res://../artifacts/simulator/board-navigation/" + ("before" if before else "after"))
 	DirAccess.make_dir_recursive_absolute(folder)
 	var path := folder.path_join(label + ("-narrow" if narrow else "-wide") + ".png")
 	check(root.get_texture().get_image().save_png(path) == OK, "capture " + label)
@@ -93,14 +95,34 @@ func run() -> void:
 			check(ui.modal_footer.get_global_rect().encloses(node("AcceptContract").get_global_rect()), "quote submit stays outside scrolling content")
 			press("AcceptContract"); await frames()
 			check(bool(game.state.accepted) and str(game.state.current_contract_id) == str(offers[0].id), "visible quote action accepts the selected real contract")
+	var board_open_state: Dictionary = game.state.duplicate(true)
 	ui.open_panel("board"); await capture("04-board-active")
 	if not before and not offers.is_empty():
+		var auto_selected: Dictionary = ui.operations_choices.get("dispatch_selected", {})
+		check(str(auto_selected.get("id", "")) == str(game.state.current_contract_id), "board auto-selects the player's active contract")
+		check(game.state == board_open_state, "auto-selection leaves business data untouched")
+		check(node("DispatchControls") != null and not node("DispatchControls").visible, "dispatch details start closed")
+		var active_scroll: Node = node("DispatchTicketScroll")
+		var selected_action: Node = node("DispatchSelectedWork")
+		check(active_scroll is Control and selected_action is Control and active_scroll.get_global_rect().end.y <= selected_action.get_global_rect().position.y + 8, "selected work follows the bounded list")
 		visible_action("DispatchTicket_" + str(offers[0].id))
 		press("DispatchTicket_" + str(offers[0].id)); await frames()
 		visible_action("DispatchOpen")
+		visible_action("DispatchReport")
+		var dispatch_disclosure = node("DispatchControlsDisclosure")
+		dispatch_disclosure.button_pressed = true
+		press("DispatchControlsDisclosure"); await frames()
+		check(node("DispatchControls").visible, "dispatch details open on request")
+		for id in ["DispatchMemberSelector", "DispatchEnqueue"]: visible_action(id)
+		check(not node("DispatchForecastStrip").visible, "schedule forecast stays hidden until staff is chosen")
+		var delegated_open_state: Dictionary = game.state.duplicate(true)
+		ui._refresh_operations(); await frames()
+		check(node("DispatchControls").visible, "dispatch disclosure remains open after refresh")
+		check(game.state == delegated_open_state, "opening dispatch details leaves business data untouched")
 		var member = node("DispatchMemberSelector")
 		if member is OptionButton:
 			member.select(1); member.item_selected.emit(1)
+		check(node("DispatchForecastStrip").visible, "schedule forecast appears after staff is chosen")
 		var selected: Dictionary = ui.operations_choices.get("dispatch_selected", {}).duplicate(true)
 		press("OperationsView_staff"); await frames()
 		press("OperationsView_contracts"); await frames()

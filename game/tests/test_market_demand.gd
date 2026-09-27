@@ -11,10 +11,23 @@ func _init() -> void:
 	var initial_leads: Array = game.state.market_leads.duplicate()
 	_assert(initial_leads.size() > 0 and initial_leads.size() <= 9, "initial leads bounded")
 	_assert(_category_counts_are_bounded(game), "initial category caps")
+	var quoted_initial: Dictionary = _find_lead(game)
+	var quoted_case_id := str(quoted_initial.get("case_id", ""))
+	_assert(not quoted_initial.is_empty() and game.set_offer_quote(str(quoted_initial.get("id", "")), int(quoted_initial.get("reward", 0))), "same-day quote fixture")
 	game.state.skills.advisory = 10; game.state.skills.operations = 10; game.state.skills.response = 10
 	game.state.profit = 1000000; game._update_growth(); game._make_offers()
 	for lead in initial_leads: _assert(lead in game.state.market_leads, "same-day lead retained")
 	_assert(_category_counts_are_bounded(game), "filled category caps")
+	_assert(quoted_case_id in game.state.market_leads, "same-day quoted lead retained after skill refresh")
+	var completed_case := ""
+	for candidate_case in game.state.market_leads:
+		if str(candidate_case) != quoted_case_id:
+			completed_case = str(candidate_case); break
+	if not completed_case.is_empty():
+		game.state.history.append({"day":int(game.state.day),"case_id":completed_case,"id":"completed-market-fixture"})
+		game._make_offers()
+		_assert(completed_case not in game.state.market_leads, "completed case does not occupy a fresh market lead")
+		_assert(quoted_case_id in game.state.market_leads, "quoted completed lead remains visible")
 	var hidden_offer: Dictionary = _find_unrequested(game)
 	_assert(not hidden_offer.is_empty(), "unlocked non-lead exists")
 	if not hidden_offer.is_empty():
@@ -39,10 +52,14 @@ func _init() -> void:
 	var old_unlocked: Array = []
 	for old_offer in restored.state.offers:
 		if bool(old_offer.get("unlocked", false)): old_unlocked.append(str(old_offer.get("case_id", "")))
-	for case_id in old_unlocked: _assert(case_id in restored.state.market_leads, "legacy unlocked offer preserved")
+	var legacy_completed: Dictionary = {}
+	for receipt in restored.state.history:
+		if receipt is Dictionary and not str(receipt.get("case_id", "")).is_empty(): legacy_completed[str(receipt.case_id)] = true
+	for case_id in old_unlocked:
+		_assert((case_id in restored.state.market_leads) == (not legacy_completed.has(case_id)), "legacy lead migration excludes completed case only")
 	var legacy_available := 0
 	for summary in restored.market_summary().values(): legacy_available += int(summary.get("available", 0))
-	_assert(legacy_available == old_unlocked.size(), "legacy market summary preserves available offers")
+	_assert(legacy_available == old_unlocked.size() - legacy_completed.size(), "legacy market summary preserves available offers")
 	_assert(restored.end_day(), "legacy next day"); _assert(_category_counts_are_bounded(restored), "next-day legacy rotation bounded")
 	var active: Node = await _new_game("active-"+qa_id)
 	_assert(active.choose_strategy("advisory") and active.start_free_career(), "active career setup")

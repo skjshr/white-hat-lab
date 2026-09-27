@@ -16,6 +16,9 @@ const RED := Color("d92d2d")
 static func copy(key: String, fallback: String = "") -> String:
 	return UI.copy("samba_" + key, fallback)
 
+static func compact(d) -> bool:
+	return float(d.windows.browser.size.x) < 1100.0 * float(d.game.settings.get("text_scale", 1.0))
+
 static func _state(d) -> Dictionary:
 	if not d.samba_ui is Dictionary: d.samba_ui = {}
 	var s: Dictionary = d.samba_ui
@@ -77,6 +80,13 @@ static func _remember(d, name: String, values: Dictionary) -> void:
 	s["share_drafts"] = drafts
 	if d.has_method("_save_session"): d._save_session(false)
 
+static func _has_draft(d, name: String) -> bool:
+	var draft: Dictionary = _state(d).get("share_drafts", {}).get(name, {})
+	var saved: Dictionary = _config(d).get("values", {}).get("shares", {}).get(name, {})
+	for key in draft:
+		if draft[key] != saved.get(key): return true
+	return false
+
 static func render(d, parent: VBoxContainer) -> void:
 	var s: Dictionary = _state(d)
 	var parsed: Dictionary = _config(d)
@@ -103,12 +113,13 @@ static func render(d, parent: VBoxContainer) -> void:
 		_button(d, parent, copy("open_config", "Open configuration"), "SambaOpenConfig", d._open_config)
 		return
 	var live: Dictionary = d.game._vm().state
-	_label(d, parent, UI.copy("os_status", "Status") + ": " + ("active" if bool(live.get("active", false)) else "failed"), 13, MUTED)
 	_pending(d, parent)
 	var nav: HBoxContainer = HBoxContainer.new(); nav.add_theme_constant_override("separation", 6); parent.add_child(nav)
 	var shares_button: Button = _button(d, nav, "Samba", "SambaTabShares", func(): s["tab"] = "shares"; d._render_samba(), s.get("tab") == "shares")
 	var global_button: Button = _button(d, nav, copy("global_settings", "Global settings"), "SambaGlobal", func(): s["tab"] = "global"; d._render_samba())
 	var refresh: Button = _button(d, nav, copy("refresh", "Refresh"), "SambaRefresh", func(): d._render_samba())
+	var status := _label(d, nav, UI.copy("os_status", "Status") + ": " + ("active" if bool(live.get("active", false)) else "failed"), 13, MUTED)
+	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	if s.get("tab") == "global":
 		_global(d, parent, parsed)
 	else:
@@ -116,20 +127,31 @@ static func render(d, parent: VBoxContainer) -> void:
 	var output: String = str(s.get("output", ""))
 	if not output.is_empty():
 		var result: VBoxContainer = _box(parent, Color("f7f8f9"))
-		_label(d, result, copy("result", "Result"), 15, MUTED)
-		var text: Label = _label(d, result, output, 13, INK);text.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART
+		var summary := _label(d, result, output.get_slice("\n", 0), 13, INK)
+		summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		var details: VBoxContainer = d._disclosure(result, UI.copy("realism_show_response"))
+		var text: Label = _label(d, details, output, 13, INK);text.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART
 		text.add_theme_font_override("font", UI.font(400))
 
 static func _shares(d, parent: VBoxContainer, parsed: Dictionary) -> void:
 	var shares: Dictionary = parsed.get("values", {}).get("shares", {})
-	var workspace: BoxContainer = HBoxContainer.new() if float(d.windows.browser.size.x) >= 1100.0 else VBoxContainer.new();workspace.name="SambaSharesWorkspace";workspace.add_theme_constant_override("separation",12);workspace.size_flags_horizontal=Control.SIZE_EXPAND_FILL;parent.add_child(workspace)
+	var s: Dictionary = _state(d)
+	var selected: String = str(s.get("selected_share", ""))
+	var has_selection := not selected.is_empty() and shares.has(selected)
+	var is_compact := compact(d)
+	var workspace := BoxContainer.new(); workspace.vertical = is_compact; workspace.name="SambaSharesWorkspace";workspace.add_theme_constant_override("separation",12);workspace.size_flags_horizontal=Control.SIZE_EXPAND_FILL;parent.add_child(workspace)
 	var panel: VBoxContainer = _box(workspace)
 	panel.get_parent().size_flags_horizontal=Control.SIZE_EXPAND_FILL
+	panel.get_parent().size_flags_stretch_ratio = 0.85 if has_selection else 1.0
 	panel.get_parent().custom_minimum_size.x=320
+	panel.get_parent().visible = not (is_compact and has_selection)
+	workspace.resized.connect(func():
+		workspace.vertical = compact(d)
+		panel.get_parent().visible = not (compact(d) and has_selection)
+	)
 	var heading: HBoxContainer = HBoxContainer.new(); panel.add_child(heading)
 	_label(d, heading, copy("shares", "Share management"), 19, INK).size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var open_config: Button = _button(d, heading, copy("open_config", "Open config"), "SambaOpenConfig", d._open_config)
-	var s: Dictionary = _state(d)
 	var columns: HBoxContainer = HBoxContainer.new(); columns.add_theme_constant_override("separation", 10); panel.add_child(columns)
 	var icon_space:=Control.new();icon_space.custom_minimum_size.x=20;columns.add_child(icon_space)
 	var name_header: Label = _label(d, columns, copy("name", "Name"), 12, MUTED); name_header.custom_minimum_size.x = 100; name_header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -144,14 +166,14 @@ static func _shares(d, parent: VBoxContainer, parsed: Dictionary) -> void:
 		var select: Button = d._button(name, func(): s["selected_share"] = name; s["tab"] = "shares"; d._render_samba())
 		select.name = "SambaShare_" + name;select.custom_minimum_size.x=100
 		select.alignment = HORIZONTAL_ALIGNMENT_LEFT; select.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		select.add_theme_color_override("font_color", INK);select.add_theme_stylebox_override("normal",UI.style(Color.WHITE,Color.TRANSPARENT,0,7,0));row.add_child(select)
+		select.add_theme_color_override("font_color", BLUE if name == selected else INK);select.add_theme_stylebox_override("normal",UI.style(Color("e7f1fa") if name == selected else Color.WHITE,Color.TRANSPARENT,8,7,0));row.add_child(select)
 		var path_cell:=_label(d,row,str(settings.get("path","")),13,MUTED);path_cell.custom_minimum_size.x=100;path_cell.size_flags_horizontal=Control.SIZE_EXPAND_FILL
 		var edit: Button = _button(d, row, copy("edit_share", "Edit"), "SambaEdit_" + name, func(): s["selected_share"] = name; s["tab"] = "shares"; d._render_samba(), true)
 		var open: Button = _button(d, row, copy("access_share", "Open share"), "SambaOpenShare_" + name, func(): d._open_samba_share(name))
 		action_header.custom_minimum_size.x=maxf(action_header.custom_minimum_size.x,edit.get_combined_minimum_size().x+open.get_combined_minimum_size().x+10)
-	var selected: String = str(s.get("selected_share", ""))
-	if not selected.is_empty() and shares.has(selected):
+	if has_selection:
 		var editor_pane:=_box(workspace, Color("ffffff"));editor_pane.name="SambaShareEditorPane";editor_pane.get_parent().size_flags_horizontal=Control.SIZE_EXPAND_FILL
+		editor_pane.get_parent().size_flags_stretch_ratio = 1.15
 		_share_editor(d, editor_pane, selected, _draft(d, selected, shares[selected]))
 
 static func _field(d, parent: Node, label_text: String, name: String, value: String) -> LineEdit:
@@ -169,11 +191,19 @@ static func _check(d, parent: Node, label_text: String, name: String, value: boo
 	return check
 
 static func _share_editor(d, parent: VBoxContainer, name: String, original: Dictionary) -> void:
-	var holder:=HBoxContainer.new();parent.add_child(holder)
-	var editor: VBoxContainer = _box(holder, Color.WHITE)
-	editor.get_parent().custom_minimum_size.x=minf(500,maxf(300,float(d.windows.browser.size.x)-390))
-	editor.get_parent().size_flags_horizontal=Control.SIZE_FILL
-	_label(d, editor, name, 18, INK)
+	var editor := parent
+	var heading := HBoxContainer.new(); heading.add_theme_constant_override("separation", 8); editor.add_child(heading)
+	var back := _button(d, heading, copy("shares", "Shares"), "SambaBackToShares", func(): _state(d)["selected_share"] = ""; d._render_samba())
+	back.icon = UI.symbol("back")
+	back.tooltip_text = UI.copy("realism_back_to_shares")
+	back.visible = compact(d)
+	editor.resized.connect(func(): back.visible = compact(d))
+	_label(d, heading, name, 18, INK)
+	var actions: HBoxContainer = HBoxContainer.new(); actions.add_theme_constant_override("separation", 8); heading.add_child(actions)
+	var draft_status := _label(d, editor, UI.copy("realism_unsaved_changes"), 12, Color("805b00"))
+	draft_status.name = "SambaDraftStatus"
+	draft_status.visible = _has_draft(d, name)
+	editor.add_child(HSeparator.new())
 	var path: LineEdit = _field(d, editor, copy("path", "Path"), "SambaPath", str(original.get("path", "")))
 	var available: CheckBox = _check(d, editor, copy("available", "Available"), "SambaAvailable", bool(original.get("available", true)))
 	var read_only: CheckBox = _check(d, editor, copy("read_only", "Read only"), "SambaReadOnly", bool(original.get("read only", true)))
@@ -184,9 +214,9 @@ static func _share_editor(d, parent: VBoxContainer, name: String, original: Dict
 	var reads: LineEdit = _field(d, editor, copy("read_list", "Read list"), "SambaReadList", str(original.get("read list", "")))
 	var remember_text := func(_value: String):
 		_remember(d, name, {"path":path.text,"available":available.button_pressed,"read only":read_only.button_pressed,"guest ok":guest.button_pressed,"valid users":valid.text,"invalid users":invalid.text,"write list":writes.text,"read list":reads.text})
+		draft_status.visible = _has_draft(d, name)
 	path.text_changed.connect(remember_text); valid.text_changed.connect(remember_text); invalid.text_changed.connect(remember_text); writes.text_changed.connect(remember_text); reads.text_changed.connect(remember_text)
 	available.toggled.connect(func(_value: bool): remember_text.call("")); read_only.toggled.connect(func(_value: bool): remember_text.call("")); guest.toggled.connect(func(_value: bool): remember_text.call(""))
-	var actions: HBoxContainer = HBoxContainer.new(); actions.add_theme_constant_override("separation", 8); editor.add_child(actions)
 	_button(d, actions, copy("save", "Save"), "SambaSave", func():
 		var values: Dictionary = {"path":path.text.strip_edges(),"available":available.button_pressed,"read only":read_only.button_pressed,"guest ok":guest.button_pressed,"valid users":valid.text.strip_edges(),"invalid users":invalid.text.strip_edges(),"write list":writes.text.strip_edges(),"read list":reads.text.strip_edges()}
 		var saved: bool = bool(d._samba_save(name, values))
@@ -220,7 +250,9 @@ static func _pending(d, parent: VBoxContainer) -> void:
 	var live: Dictionary = d.game._vm().state
 	if not bool(live.get("dirty", false)): return
 	var bar: VBoxContainer = _box(parent, Color("fff8e6"))
-	_label(d, bar, copy("pending", "Pending configuration"), 14, Color("805b00"))
-	var actions: HBoxContainer = HBoxContainer.new(); bar.add_child(actions)
-	_button(d, actions, copy("test_config", "Test configuration"), "SambaTest", func(): d._samba_command("testparm -s"); d._render_samba(), true)
+	var actions := HFlowContainer.new(); actions.add_theme_constant_override("h_separation", 8); actions.add_theme_constant_override("v_separation", 6); bar.add_child(actions)
+	var status := _label(d, actions, UI.copy("realism_apply_pending"), 14, Color("805b00"))
+	status.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	status.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_button(d, actions, copy("test_config", "Test configuration"), "SambaTest", func(): d._samba_command("testparm -s"); d._render_samba())
 	_button(d, actions, copy("apply_restart", "Restart Samba"), "SambaRestart", func(): d._samba_command("systemctl restart samba"); d._render_samba(), true)

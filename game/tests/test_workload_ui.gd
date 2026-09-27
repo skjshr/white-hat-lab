@@ -74,6 +74,12 @@ func run() -> void:
 	await frames(6)
 	var load:=find_name(ui.modal_body,"DispatchLoad_aya")
 	check(load is ProgressBar,"staff workload bar")
+	var staff_scroll = ui.modal_body.find_child("DispatchStaffScroll", true, false)
+	for member in game.team_members().slice(0, 2):
+		var selector = ui.modal_body.find_child("DispatchStaffSelect_" + str(member.id), true, false)
+		check(selector is Control and staff_scroll.get_global_rect().encloses(selector.get_global_rect()), "base staff visible together " + str(member.id))
+	var load_text = ui.modal_body.find_child("DispatchLoadText_aya", true, false)
+	check(load_text is Label and not load_text.clip_text, "workload number is not clipped")
 	var queue_nodes: Array[Node]=ui.modal_body.find_children("DispatchJob_*","VBoxContainer",true,false)
 	check(queue_nodes.size()>=1,"queued work visible")
 	if queue_nodes.size()>0:

@@ -41,8 +41,11 @@ static func build(d, parent: VBoxContainer) -> void:
 	var tally = d._label("", 13, BLUE)
 	tally.add_theme_color_override("font_color", DIAG_ACCENT)
 	header.add_child(tally)
-	var split = d._row(p, 6)
+	var split := BoxContainer.new()
+	split.add_theme_constant_override("separation", 6)
 	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	split.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	p.add_child(split)
 	var rail := PanelContainer.new()
 	rail.custom_minimum_size.x = 220
 	rail.size_flags_horizontal = Control.SIZE_FILL
@@ -51,9 +54,18 @@ static func build(d, parent: VBoxContainer) -> void:
 	var left = d._scroll(rail)
 	left.add_theme_constant_override("separation", 2)
 	var right = d._scroll(split)
+	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right.size_flags_stretch_ratio = 3
-	var footer = d._row(p, 4)
-	d.widgets.verify = {"left": left, "right": right, "body": right, "footer": footer, "selected": "", "tally": tally, "signature": "", "raw_visible": false}
+	var reflow := func() -> void:
+		var scale := float(d.game.settings.get("text_scale", 1.0))
+		var stacked := split.size.x < 880.0 * scale
+		split.vertical = stacked
+		rail.custom_minimum_size = Vector2(0, 160) if stacked else Vector2(220, 0)
+		left.size_flags_vertical = Control.SIZE_SHRINK_BEGIN if stacked else Control.SIZE_EXPAND_FILL
+		right.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	split.resized.connect(reflow)
+	reflow.call_deferred()
+	d.widgets.verify = {"left": left, "right": right, "body": right, "footer": null, "selected": "", "tally": tally, "signature": "", "raw_visible": false}
 	refresh(d)
 
 static func _status(probe: Dictionary) -> String:
@@ -80,10 +92,8 @@ static func refresh(d) -> void:
 	w.signature = signature
 	var left: VBoxContainer = w.left
 	var right: VBoxContainer = w.right
-	var footer: HBoxContainer = w.footer
 	d._clear(left)
 	d._clear(right)
-	d._clear(footer)
 	var passed_count := 0
 	for item in probes:
 		if item.get("passed", false) and item.get("fresh", false): passed_count += 1
@@ -91,7 +101,6 @@ static func refresh(d) -> void:
 	left.add_child(d._label("検証項目", 12, DIAG_ACCENT))
 	if probes.is_empty():
 		right.add_child(d._label(_copy("os_result_none", "未実行"), 14, MUTED))
-		footer.add_child(_tool(d, "inbox", "メール表示", d._show_app.bind("mail"), "メール表示"))
 		return
 	var selected := str(w.selected)
 	if not probes.any(func(probe): return str(probe.id) == selected):
@@ -153,10 +162,13 @@ static func refresh(d) -> void:
 	top.add_child(status)
 	var host = d.game.vm_info()
 	right.add_child(d._label(("顧客端末  ·  " + str(host.get("host", ""))) if bool(host.get("connected", false)) else "顧客端末  ·  未接続", 12, MUTED))
-	var details = d._disclosure(right, "検査詳細")
-	var expectation = d._label(str(current.get("description", current.get("expectation", ""))), 13, INK)
-	expectation.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	details.add_child(expectation)
+	var expectation := str(current.get("expectation", current.get("description", "")))
+	var description := str(current.get("description", ""))
+	if not description.is_empty() and description != expectation:
+		var details = d._disclosure(right, "検査詳細")
+		var description_label = d._label(description, 13, INK)
+		description_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		details.add_child(description_label)
 	var command_row = d._row(right, 5)
 	var requires_login := bool(current.get("requires_login",false))
 	var command_text := UI.copy("identity_username")+": "+str(current.get("user","")) if requires_login else _copy("os_command", "コマンド")+"  $ " + str(current.command)
@@ -181,33 +193,44 @@ static func refresh(d) -> void:
 	var summary := "未実行"
 	if not result_text.is_empty(): summary = result_text.get_slice("\n", 0)
 	var result_panel := PanelContainer.new()
+	result_panel.name = "DiagnosticResult"
 	result_panel.add_theme_stylebox_override("panel", d._style(DIAG_PANEL, DIAG_ACCENT, 5, 6))
 	right.add_child(result_panel)
-	var result_row = d._row(result_panel, 6)
-	result_row.add_child(d._label(_copy("os_response", "結果"), 12, MUTED))
+	var result_content = d._box(result_panel, 5)
+	var result_header = d._row(result_content, 6)
+	result_header.add_child(d._label(UI.copy("identity_flow_requirement", "条件"), 12, MUTED))
+	var expected = d._label(expectation, 13, INK)
+	expected.name = "DiagnosticExpected"
+	expected.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	expected.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	result_header.add_child(expected)
+	result_content.add_child(HSeparator.new())
+	var response_header = d._row(result_content, 6)
+	response_header.add_child(d._label(_copy("os_response", "結果"), 12, MUTED))
+	var result_state = d._label(_status(current), 12, state_color)
+	result_state.name = "DiagnosticResultStatus"
+	response_header.add_child(result_state)
 	var result_label = d._label(summary, 13, INK)
+	result_label.name = "DiagnosticActual"
 	result_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	result_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	result_label.clip_text = true
-	result_row.add_child(result_label)
+	result_label.tooltip_text = result_text
+	result_content.add_child(result_label)
 	var compare_label := UI.copy("compare_close" if bool(w.raw_visible) else "compare_results")
 	var raw_toggle: Button = _tool(d, "code", compare_label, func(): w.raw_visible = not bool(w.raw_visible); refresh(d), compare_label)
 	raw_toggle.name = "DiagnosticCompare"
 	raw_toggle.disabled = not bool(current.get("recorded", false))
-	result_row.add_child(raw_toggle)
+	result_content.add_child(raw_toggle)
 	if bool(w.raw_visible):
-		_build_comparison(d, right, current)
+		_build_comparison(d, result_content, current)
 
-	footer.add_child(_tool(d, "settings", "設定編集", d._open_config, "設定編集"))
-	footer.add_child(_tool(d, "grid", "サービス管理", d._show_app.bind("monitor"), "サービス管理"))
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	footer.add_child(spacer)
 	var report = d._primary("納品条件確認", func(): d._trace("validate_delivery", ""); d.game.verify(); d._show_app("receipt"))
 	report.name = "DiagnosticValidate"
 	UI.os_primary(report, DIAG_ACCENT)
 	report.disabled = probes.is_empty()
-	footer.add_child(report)
+	report.size_flags_horizontal = Control.SIZE_SHRINK_END
+	right.add_child(report)
 
 static func _select(d, id: String) -> void:
 	d.widgets.verify.selected = id

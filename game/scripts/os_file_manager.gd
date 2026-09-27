@@ -79,10 +79,17 @@ static func build(d, parent: VBoxContainer) -> void:
 	var places_panel := PanelContainer.new()
 	places_panel.add_theme_stylebox_override("panel", UI.style(UI.OS_NAV,Color.TRANSPARENT,4,8,0))
 	split.add_child(places_panel)
-	var places: VBoxContainer = d._box(places_panel, 1)
+	var places_scroll := ScrollContainer.new()
+	places_scroll.name = "FilePlacesScroll"
+	places_scroll.custom_minimum_size.x = 150
+	places_scroll.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	places_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	places_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	places_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	places_panel.add_child(places_scroll)
+	var places: VBoxContainer = d._box(places_scroll, 1)
 	var place_buttons: Array = []
-	places.custom_minimum_size.x = 150
-	places.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	places.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_section(d, places, UI.copy("fidelity_folders", "場所"))
 	for place in [["このPC", false, "/home/operator/Documents", "grid"], ["顧客の端末", true, "/", "folder"], ["設定", true, "/etc", "settings"], ["ログ", true, "/var/log", "archive"], ["調査報告", true, "/home/operator", "file"]]:
 		var button: Button = _tool(d, str(place[3]), str(place[0]), func(): _navigate(d, str(place[2]), bool(place[1])), str(place[0]))
@@ -163,7 +170,7 @@ static func build(d, parent: VBoxContainer) -> void:
 	var status_row: HBoxContainer = d._row(status_bar, 4)
 	status_row.add_child(status)
 	p.add_child(status_bar)
-	d.widgets.files = {"path": path, "search": search, "list": tree, "tree": tree, "open": open_button, "copy": copy_button, "paste": paste_button, "places": places, "place_buttons":place_buttons, "breadcrumb_scroll":breadcrumb_scroll, "host": host, "status": status, "history": [], "forward_history": [], "backing": false, "location": {"path": d.file_directory, "remote": d.file_remote}, "back": back, "forward": forward, "breadcrumb": breadcrumb, "empty": empty}
+	d.widgets.files = {"path": path, "search": search, "list": tree, "tree": tree, "open": open_button, "copy": copy_button, "paste": paste_button, "places": places, "places_scroll": places_scroll, "place_buttons":place_buttons, "breadcrumb_scroll":breadcrumb_scroll, "host": host, "status": status, "history": [], "forward_history": [], "backing": false, "location": {"path": d.file_directory, "remote": d.file_remote}, "back": back, "forward": forward, "breadcrumb": breadcrumb, "empty": empty}
 	d.path_edit = path
 	d.file_list = tree
 	var network: VBoxContainer=d._scroll(right)
@@ -245,6 +252,19 @@ static func _forward(d) -> void:
 
 static func _selected_item(d):
 	return d.widgets.files.tree.get_selected()
+
+static func _copy_target(directory: String, source_path: String, existing_paths: Array) -> String:
+	var filename := source_path.get_file()
+	var extension := filename.get_extension()
+	var stem := filename.trim_suffix("." + extension) if not extension.is_empty() else filename
+	var candidate_name := "copy-" + filename
+	var candidate := directory.path_join(candidate_name)
+	var suffix := 2
+	while existing_paths.any(func(path): return str(path).nocasecmp_to(candidate) == 0):
+		var numbered_name := "copy-" + stem + " (" + str(suffix) + ")" + ("." + extension if not extension.is_empty() else "")
+		candidate = directory.path_join(numbered_name)
+		suffix += 1
+	return candidate
 
 static func _copy_selected(d) -> void:
 	var item = _selected_item(d)

@@ -1,5 +1,6 @@
 extends RefCounted
 const UI = preload("res://scripts/ui_theme.gd")
+const CASES = preload("res://scripts/case_catalog.gd")
 const INK := UI.INK
 const MUTED := UI.MUTED
 const TEAL := UI.GREEN
@@ -81,14 +82,25 @@ static func _history_items(g) -> Array:
 	for index in g.state.history.size():
 		var item: Dictionary = g.state.history[index]
 		if str(item.get("id", "")).begins_with("retainer-day-") or str(item.get("kind","delivery")) != "delivery": continue
-		items.append({"item": item, "index": index})
+		# Older delivery entries omit client/brief. Read their own retained
+		# contract before the catalog fallback; never borrow the active client.
+		var display_item := item.duplicate(true)
+		var context: Dictionary = g.state.get("contract_contexts", {}).get(str(item.get("id", "")), {})
+		var contract: Dictionary = context.get("contract", {})
+		var definition: Dictionary = CASES.by_id(str(item.get("case_id", "")))
+		if definition.is_empty(): definition = CASES.by_id(str(item.get("copy_id", "")))
+		for key in ["client", "brief"]:
+			if str(display_item.get(key, "")).is_empty():
+				var value := str(contract.get(key, ""))
+				display_item[key] = value if not value.is_empty() else str(definition.get(key, ""))
+		items.append({"item": display_item, "index": index})
 	return items
 
-static func _mail_row(d, list: VBoxContainer, sender: String, subject: String, snippet: String, date: String, callback: Callable) -> void:
+static func _mail_row(d, list: VBoxContainer, sender: String, subject: String, snippet: String, date: String, callback: Callable, selected_item := true) -> void:
 	var compact: bool=not bool(d.widgets.mail.get("wide",false))
 	var button: Button = d._button("", func(): d.widgets.mail["selected_subject"]=subject; callback.call()); button.custom_minimum_size.y=(62 if compact else 78)*float(d.game.settings.get("text_scale",1.0)); button.size_flags_horizontal=Control.SIZE_EXPAND_FILL
 	if not bool(d.game.state.get("career_mode",false)) and d.widgets.mail.get("folder","inbox")=="inbox": button.name="GuideMailMessage"
-	var selected: bool=bool(d.widgets.mail.get("reading",false)) and str(d.widgets.mail.get("selected_subject",""))==subject
+	var selected: bool=selected_item and bool(d.widgets.mail.get("reading",false)) and str(d.widgets.mail.get("selected_subject",""))==subject
 	var row_style:=UI.style(Color("cfe4fa") if selected else Color.WHITE,Color("edebe9"),10,8,0); row_style.set_border_width_all(0); row_style.border_width_bottom=1
 	button.add_theme_stylebox_override("normal",row_style)
 	button.add_theme_stylebox_override("hover",UI.style(Color("eff6fc"),Color.TRANSPARENT,10,8,0))
@@ -169,7 +181,7 @@ static func _add_case_review(d, parent: VBoxContainer, footer: HBoxContainer, co
 			actions.add_child(d._label("記録不可 · 変更済み" if g.vm_info().connected else "未接続",13,MUTED))
 
 static func build_mail(d, parent: VBoxContainer) -> void:
-	var p=d._pad(parent,0); p.add_theme_constant_override("separation",0)
+	var p=d._pad(parent,0); p.size_flags_vertical=Control.SIZE_EXPAND_FILL; p.add_theme_constant_override("separation",0)
 	var g=d.game
 	var masthead:=PanelContainer.new(); masthead.add_theme_stylebox_override("panel",UI.style(Color("f3f3f3"),Color.TRANSPARENT,12,8,0)); p.add_child(masthead)
 	var header: HBoxContainer=d._row(masthead,12)
@@ -230,6 +242,16 @@ static func _layout_mail(d) -> void:
 	w.paper.visible=wide or bool(w.get("reading",false))
 	w.list_panel.visible=wide or not bool(w.get("reading",false))
 	w.list.visible=true
+	for content_name in ["MailReadingContent", "MailHistoryContent", "MailEmptyContent"]:
+		var content: Control=w.body.find_child(content_name,true,false) as Control
+		if is_instance_valid(content): content.custom_maximum_size.x=_mail_reading_width(d,w,d.game)
+
+static func _mail_reading_width(d, w: Dictionary, g) -> float:
+	var scale:=float(g.settings.get("text_scale",1.0))
+	var reserved:=64.0
+	if is_instance_valid(w.get("nav_frame",null)) and w.nav_frame.visible: reserved+=198.0
+	if bool(w.get("wide",false)): reserved+=340.0*scale
+	return maxf(320.0,minf(960.0*scale,float(d.windows.mail.size.x)-reserved))
 
 static func refresh_mail(d) -> void:
 	var w: Dictionary = d.widgets.mail; var body: VBoxContainer = w.body; var footer: HBoxContainer = w.footer; var list: VBoxContainer = w.list
@@ -244,20 +266,29 @@ static func refresh_mail(d) -> void:
 	if is_instance_valid(w.get("list_panel",null)): w.list_panel.visible=wide or not reading
 	if is_instance_valid(w.get("folder_picker",null)): w.folder_picker.select(0 if w.get("folder","inbox") == "inbox" else 1)
 	if is_instance_valid(w.get("inbox_nav",null)): UI.os_navigation(w.inbox_nav,w.get("folder","inbox") == "inbox",_mail_accent())
-	if is_instance_valid(w.get("done_nav",null)): UI.os_navigation(w.done_nav,w.get("folder","inbox") == "history",_mail_accent())
+	if is_instance_valid(w.get("done_nav",null)):
+		w.done_nav.text = "完了 %d" % _history_items(g).size()
+		UI.os_navigation(w.done_nav,w.get("folder","inbox") == "history",_mail_accent())
 	var queue: Array = g.contract_queue() if g.has_method("contract_queue") else []
 	if reading:
 		var selected_subject: String = str(w.get("selected_subject", ""))
 		var selection_valid := false
 		if w.get("folder", "inbox") == "history":
 			var history_entries_for_selection: Array = _history_items(g)
+			var remembered_index := int(w.get("history_index", -1))
+			var matching_index := -1
 			for history_position in history_entries_for_selection.size():
 				var history_entry: Dictionary = history_entries_for_selection[history_position]
 				var history_item: Dictionary = history_entry.item
 				var history_mail: Dictionary = _mail_for(history_item)
 				if selected_subject == str(history_mail.get("subject", history_item.get("title", ""))):
-					selection_valid = true
-					w.history_index = history_position
+					if matching_index < 0: matching_index = history_position
+					if history_position == remembered_index:
+						matching_index = history_position
+						break
+			if matching_index >= 0:
+				selection_valid = true
+				w.history_index = matching_index
 		else:
 			for queue_item in queue:
 				var queue_subject: String = str(queue_item.get("title", ""))
@@ -278,13 +309,16 @@ static func refresh_mail(d) -> void:
 		return
 	if w.get("folder","inbox") == "inbox":
 		for item in queue:
-			var queue_id := str(item.get("id", "")); var queue_client := str(item.get("client", "")); var queue_title := str(item.get("title", "")); var queue_status := _copy("queue_current" if bool(item.get("active", false)) else "queue_done" if bool(item.get("completed", false)) else "queue_open", "")
+			var queue_id := str(item.get("id", "")); var queue_client := str(item.get("client", "")); var queue_title := str(item.get("title", "")); var queue_status := _copy("queue_done" if bool(item.get("completed", false)) else "queue_current" if bool(item.get("active", false)) else "queue_open", "")
 			var queue_deadline := _queue_deadline(str(item.get("deadline_text", "")))
 			var queue_subject := queue_title
 			var queue_snippet := "%s  ·  %s" % [queue_status, queue_deadline]
-			var queue_haystack := (queue_subject + " " + queue_snippet).to_lower()
+			var queue_context: Dictionary = g.state.get("contract_contexts", {}).get(queue_id, {})
+			var queue_contract: Dictionary = queue_context.get("contract", {})
+			var queue_mail := _mail_for(queue_contract)
+			var queue_haystack := (queue_client + " " + queue_subject + " " + queue_snippet + " " + str(queue_mail.get("sender", "")) + " " + _mail_body(queue_mail) + " " + str(queue_contract.get("brief", ""))).to_lower()
 			if query.is_empty() or queue_haystack.contains(query):
-				_mail_row(d, list, queue_client, queue_subject, queue_snippet, queue_status, _switch_contract_from_mail.bind(d, queue_id))
+				_mail_row(d, list, queue_client, queue_subject, queue_snippet, queue_status, _switch_contract_from_mail.bind(d, queue_id), bool(item.get("active", false)))
 		var haystack := (str(mail.get("company",m.client))+" "+str(mail.get("sender",""))+" "+str(mail.get("subject",m.title))+" "+mail_body).to_lower()
 		if queue.is_empty() and (query.is_empty() or haystack.contains(query)):
 			_mail_row(d,list,str(mail.get("company",m.client)),str(mail.get("subject",m.title)),mail_body,"納品済み" if g.current_done() else "対応中" if g.state.accepted else "新着",func(): w.reading=true; refresh_mail(d))
@@ -292,7 +326,7 @@ static func refresh_mail(d) -> void:
 		var history_items_for_list := _history_items(g)
 		for filtered_index in history_items_for_list.size():
 			var item: Dictionary = history_items_for_list[filtered_index].item; var history_mail := _mail_for(item); var history_body := _mail_body(history_mail); var history_text := str(history_mail.get("company",item.get("client",""))+" "+str(history_mail.get("sender",""))+" "+str(history_mail.get("subject",item.get("title","完了した依頼")))+" "+history_body); if not query.is_empty() and not history_text.to_lower().contains(query): continue
-			_mail_row(d,list,str(history_mail.get("company",item.get("client",""))),str(history_mail.get("subject",item.get("title",""))),history_body,"DAY %02d" % int(item.get("day",0)),func(): w.history_index=filtered_index; w.reading=true; refresh_mail(d))
+			_mail_row(d,list,str(history_mail.get("company",item.get("client",""))),str(history_mail.get("subject",item.get("title",""))),history_body,"DAY %02d" % int(item.get("day",0)),func(): w.history_index=filtered_index; w.reading=true; refresh_mail(d), filtered_index == int(w.get("history_index", -1)))
 	if not reading:
 		if list.get_child_count() == 1:
 			var empty: VBoxContainer=d._box(list,12); empty.add_child(d._icon("mail",80)); empty.add_child(d._label("メールなし" if query.is_empty() else "該当メールなし",14,MUTED))
@@ -309,27 +343,33 @@ static func refresh_mail(d) -> void:
 		if not history_items.is_empty():
 			var index := clampi(int(w.get("history_index", history_items.size()-1)), 0, history_items.size()-1); w.history_index = index
 			var item: Dictionary = history_items[index].item; var history_mail := _mail_for(item); var history_body := _mail_body(history_mail)
-			body.add_child(d._label(str(history_mail.get("subject",item.get("title","完了した依頼"))),20,INK))
-			body.add_child(d._label("%s  <%s>  ·  DAY %02d" % [str(history_mail.get("sender",item.get("client",m.client))),str(history_mail.get("company",item.get("client",m.client))),int(item.get("day",0))],15,BLUE))
-			body.add_child(HSeparator.new()); body.add_child(d._label(history_body if not history_body.is_empty() else str(item.get("brief","")),15,INK))
-			body.add_child(d._label("納品済み  ·  利益 ¥%s  ·  評価 %s" % [d._money(item.get("profit",item.get("net",0))),str(item.get("grade","-"))],15,TEAL))
-			footer.add_child(d._button("受信トレイへ",func(): w.folder="inbox"; w.reading=false; refresh_mail(d)))
+			var history_content: VBoxContainer=d._box(body,14); history_content.name="MailHistoryContent"; history_content.size_flags_horizontal=Control.SIZE_SHRINK_BEGIN; history_content.custom_maximum_size.x=_mail_reading_width(d,w,g)
+			history_content.add_child(d._label(str(history_mail.get("subject",item.get("title","完了した依頼"))),20,INK))
+			history_content.add_child(d._label("%s  <%s>  ·  DAY %02d" % [str(history_mail.get("sender",item.get("client",m.client))),str(history_mail.get("company",item.get("client",m.client))),int(item.get("day",0))],15,BLUE))
+			history_content.add_child(HSeparator.new()); history_content.add_child(d._label(history_body if not history_body.is_empty() else str(item.get("brief","")),15,INK))
+			history_content.add_child(d._label("納品済み  ·  利益 ¥%s  ·  評価 %s" % [d._money(item.get("profit",item.get("net",0))),str(item.get("grade","-"))],15,TEAL))
+			history_content.add_child(d._button("受信トレイへ",func(): w.folder="inbox"; w.reading=false; refresh_mail(d)))
 		return
 	if g.state.get("awaiting_contract",false):
-		body.add_child(d._label("未受注",24)); footer.add_child(d._primary("契約一覧",d._contracts)); return
-	body.add_child(d._label(str(mail.get("subject",m.title)),20,INK))
-	var sender_row = d._row(body,12)
+		var empty_content: VBoxContainer=d._box(body,14); empty_content.name="MailEmptyContent"; empty_content.size_flags_horizontal=Control.SIZE_SHRINK_BEGIN; empty_content.custom_maximum_size.x=_mail_reading_width(d,w,g)
+		empty_content.add_child(d._label("未受注",24)); empty_content.add_child(d._primary("契約一覧",d._contracts)); return
+	var reading_content: VBoxContainer=d._box(body,8); reading_content.name="MailReadingContent"
+	reading_content.size_flags_horizontal=Control.SIZE_SHRINK_BEGIN
+	reading_content.custom_maximum_size.x=_mail_reading_width(d,w,g)
+	reading_content.add_child(d._label(str(mail.get("subject",m.title)),20,INK))
+	var sender_row = d._row(reading_content,12)
 	var avatar := PanelContainer.new(); avatar.custom_minimum_size=Vector2(34,34); avatar.add_theme_stylebox_override("panel",UI.style(Color("b7d7d3"),Color.TRANSPARENT,8,4,20)); sender_row.add_child(avatar)
 	var initial = d._label(str(m.client).left(1),16,UI.INK); initial.autowrap_mode=TextServer.AUTOWRAP_OFF; initial.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER; initial.vertical_alignment=VERTICAL_ALIGNMENT_CENTER; avatar.add_child(initial)
 	var destination = d._label("%s  ·  %s" % [str(mail.get("company",m.client)),str(mail.get("sender","担当者"))],13,INK); destination.size_flags_horizontal=Control.SIZE_EXPAND_FILL; destination.autowrap_mode=TextServer.AUTOWRAP_OFF; destination.clip_text=true; sender_row.add_child(destination); w.destination=destination
 	sender_row.add_child(d._label("DAY %02d" % int(g.state.day),13,MUTED))
-	var headers: VBoxContainer = d._disclosure(body, _copy("os_mail_headers", "メッセージヘッダー"))
+	var actions:=HFlowContainer.new(); actions.name="MailMessageActions"; actions.size_flags_horizontal=Control.SIZE_EXPAND_FILL; actions.add_theme_constant_override("h_separation",8); actions.add_theme_constant_override("v_separation",6); reading_content.add_child(actions)
+	var message: Label=d._label(mail_body,14,INK); message.name="MailMessageBody"; message.add_theme_constant_override("line_spacing",6); reading_content.add_child(message)
+	var headers: VBoxContainer = d._disclosure(reading_content, _copy("os_mail_headers", "メッセージヘッダー"))
 	headers.add_child(d._label("送信者  /  %s" % str(mail.get("sender", "担当者")), 13, MUTED))
 	var recipient: Label = d._label(UI.copy("mail_recipient") % (_company_name(g)+" / "+g.player_name()),12,MUTED)
 	headers.add_child(recipient); w.recipient_details = recipient; w.recipient = recipient
 	headers.add_child(d._label("案件  /  %s" % str(mail.get("case_id", m.get("case_id", ""))), 13, MUTED))
-	var message: Label=d._label(mail_body,14,INK); message.add_theme_constant_override("line_spacing",6); body.add_child(message)
-	var attachment: VBoxContainer = d._disclosure(body,_copy("os_attachments", "添付ファイル")+" · "+_copy("os_details", "詳細"))
+	var attachment: VBoxContainer = d._disclosure(reading_content,_copy("os_attachments", "添付ファイル")+" · "+_copy("os_details", "詳細"))
 	var chips := HFlowContainer.new(); chips.size_flags_horizontal = Control.SIZE_EXPAND_FILL; chips.add_theme_constant_override("h_separation",6); attachment.add_child(chips)
 	_mail_chip(d, chips, str(m.service))
 	var attached_file: Button = d._button(str(m.asset).get_file(), d._open_config)
@@ -345,10 +385,10 @@ static func refresh_mail(d) -> void:
 			var optional: VBoxContainer = d._disclosure(attachment,"変更前の記録"); _add_case_review(d,optional,footer,true)
 	attachment.add_child(d._button("接続情報・リファレンス表示",d._show_app.bind("manual")))
 	if g.current_done():
-		footer.add_child(d._label("✓ 納品済み",15,TEAL)); footer.add_child(d._primary("精算明細",d._show_app.bind("receipt"))); footer.add_child(d._button("退勤",d._contracts)); return
+		footer.add_child(d._label("✓ 納品済み",15,TEAL)); actions.add_child(d._primary("精算明細",d._show_app.bind("receipt"))); return
 	var work: Dictionary = g.work_status()
 	if not g.state.accepted:
-		body.add_child(d._label("契約条件", 12, MUTED))
+		reading_content.add_child(d._label("契約条件", 12, MUTED))
 		var plan := OptionButton.new(); plan.name="MailContractPlan"; var plans: Array = g.contract_plans()
 		for item in plans: plan.add_item(item.label)
 		var selected_plan := str(g.offer_plan()) if bool(g.state.career_mode) else str(g.state.contract_plan)
@@ -370,18 +410,18 @@ static func refresh_mail(d) -> void:
 			if bool(g.state.career_mode): g.set_offer_plan(str(plans[i].id))
 			else: g.set_contract_plan(plans[i].id)
 			refresh_care_note.call(i); refresh_mail(d))
-		footer.add_child(plan)
-		var estimate = d._box(footer, 1); estimate.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		actions.add_child(plan)
+		var estimate = d._box(actions, 1); estimate.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		estimate.add_child(d._label("報酬 ¥%s   /   納期 %d 分\n経費 ¥%s" % [d._money(work.estimated_fee),work.budget,d._money(work.costs)],12,MUTED))
 		estimate.add_child(care_note)
 		refresh_care_note.call(plan.selected)
-		var accept = d._primary("引き受ける",d._accept); accept.name="GuideMailAccept"; accept.icon=UI.symbol("reply"); accept.add_theme_constant_override("icon_max_width",18); accept.disabled = str(g.state.strategy).is_empty() or (selected_plan == "care" and g.has_method("care_eligibility") and not g.care_eligibility(str(m.client)).is_empty()); footer.add_child(accept)
-		if str(g.state.strategy).is_empty(): footer.add_child(d._button("会社方針決定",d._company))
+		var accept = d._primary("引き受ける",d._accept); accept.name="GuideMailAccept"; accept.icon=UI.symbol("reply"); accept.add_theme_constant_override("icon_max_width",18); accept.disabled = str(g.state.strategy).is_empty() or (selected_plan == "care" and g.has_method("care_eligibility") and not g.care_eligibility(str(m.client)).is_empty()); actions.add_child(accept)
+		if str(g.state.strategy).is_empty(): actions.add_child(d._button("会社方針決定",d._company))
 	else:
 		var info: Dictionary = g.vm_info()
 		var phase := "未接続" if not info.connected else ("完了" if g.current_done() else "接続中")
 		var progress = d._label(phase,13,TEAL); progress.size_flags_horizontal = Control.SIZE_EXPAND_FILL; footer.add_child(progress)
-		footer.add_child(d._button("ターミナル",d._show_app.bind("terminal"))); var report = d._button("納品",d._show_app.bind("receipt")); footer.add_child(report)
+		actions.add_child(d._button("ターミナル",d._show_app.bind("terminal"))); var report = d._button("納品",d._show_app.bind("receipt")); actions.add_child(report)
 		w.progress = progress; w.report = report
 
 static func refresh_mail_status(d) -> void:
@@ -475,15 +515,34 @@ static func refresh_receipt(d) -> void:
 	if not g.current_done():
 		body.add_child(d._label(_company_name(g)+"  /  DELIVERY STATEMENT",12,MUTED))
 		body.add_child(d._label("納品前確認",27)); body.add_child(d._label(g.mission().title,17))
-		_add_case_review(d, body, footer, true)
 		var work: Dictionary = g.work_status()
 		body.add_child(d._label("作業時間 %d / %d 分  ·  報酬 ¥%s  ·  経費 ¥%s" % [work.minutes,work.budget,d._money(work.estimated_fee),d._money(work.costs)],14,MUTED))
-		for check in g.state.checks: body.add_child(d._label(("✓  " if check.passed else "×  ")+str(check.label),15,TEAL if check.passed else ORANGE))
-		if g.state.checks.is_empty(): body.add_child(d._label("未検証",15,MUTED))
+		if g.state.checks.is_empty():
+			body.add_child(d._label("未検証",15,MUTED))
+		else:
+			var passed := 0
+			for item in g.state.checks:
+				if bool(item.passed): passed += 1
+			var stale: bool = int(g.state.get("validated_revision", -1)) != int(g.state.get("revision", 0))
+			if bool(g.state.get("diagnostics_required", false)):
+				stale = stale or g.diagnostic_probes().any(func(probe): return bool(probe.get("recorded", false)) and probe.has("fresh") and not bool(probe.fresh))
+			var summary := UI.copy("adv_results") + "  %d / %d" % [passed, g.state.checks.size()]
+			if stale: summary += "  ·  " + UI.copy("os_result_stale")
+			var details: VBoxContainer = d._disclosure(body, summary) if passed > 0 else d._box(body, 0)
+			if passed == 0: body.add_child(d._label(summary,15,ORANGE))
+			details.name = "DeliveryCheckDetails"
+			for item in g.state.checks:
+				if bool(item.passed): details.add_child(d._label("✓  "+str(item.label),15,MUTED if stale else TEAL))
+				else: body.add_child(d._label("×  "+str(item.label),15,ORANGE))
+		if bool(g.case_review().get("available", false)):
+			var baseline: VBoxContainer = d._disclosure(body, "変更前の記録")
+			_add_case_review(d, baseline, footer, true)
 		footer.add_child(d._button("設定編集",d._open_config)); footer.add_child(d._button("再判定",func():
 			if g.has_method("verify"): g.verify()
 			refresh_receipt(d)
-		)); footer.add_child(d._button("診断ラボ表示",d._show_app.bind("verify"))); var report = d._primary("納品・精算",d._report); report.name="GuideDeliver"; report.disabled = not g.can_deliver(); footer.add_child(report); return
+		)); footer.add_child(d._button("診断ラボ表示",d._show_app.bind("verify")))
+		var spacer := Control.new(); spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL; footer.add_child(spacer)
+		var report = d._primary("納品・精算",d._report); report.name="GuideDeliver"; report.disabled = not g.can_deliver(); footer.add_child(report); return
 	var receipt: Dictionary = g.completion_receipt()
 	if receipt.has("maintenance_incident_id"):
 		var client := str(receipt.get("client", ""))

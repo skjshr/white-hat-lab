@@ -12,12 +12,27 @@ var frame: StyleBoxFlat
 var title_text := ""
 var titlebar_row: HBoxContainer
 var chrome_buttons: Array[Button] = []
+var title_drag_handle: Control
 var maximized := false
 var restore_rect := Rect2()
 var _dragging := false
 var _resizing := false
 var _origin := Vector2.ZERO
 var _initial := Rect2()
+var _desktop_host: Control
+
+func _enter_tree() -> void:
+	_connect_desktop_host()
+
+func _exit_tree() -> void:
+	if is_instance_valid(_desktop_host) and _desktop_host.resized.is_connected(_parent_resized):
+		_desktop_host.resized.disconnect(_parent_resized)
+	_desktop_host = null
+
+func _connect_desktop_host() -> void:
+	_desktop_host = get_parent_control()
+	if is_instance_valid(_desktop_host) and not _desktop_host.resized.is_connected(_parent_resized):
+		_desktop_host.resized.connect(_parent_resized)
 
 func _chrome_color(active: bool = true) -> Color:
 	if app_id in ["editor", "terminal"]: return Color("323233") if active else Color("282828")
@@ -55,6 +70,7 @@ func configure(id: String, title: String, _accent: Color) -> void:
 		else: b.pressed.connect(func(): hide(); dismissed.emit(app_id))
 	content = VBoxContainer.new(); content.size_flags_vertical = Control.SIZE_EXPAND_FILL; content.add_theme_constant_override("separation",0); layout.add_child(content)
 	titlebar.gui_input.connect(_title_input)
+	_connect_desktop_host()
 	gui_input.connect(func(e):
 		if e is InputEventMouseButton and e.pressed: focused.emit(app_id))
 	var grip := Control.new(); grip.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT); grip.offset_left = -18; grip.offset_top = -18; grip.mouse_default_cursor_shape = Control.CURSOR_FDIAGSIZE; add_child(grip)
@@ -62,7 +78,21 @@ func configure(id: String, title: String, _accent: Color) -> void:
 	grip.draw.connect(func():
 		grip.draw_line(Vector2(7,15),Vector2(15,7),Color("a2acb5"),1)
 		grip.draw_line(Vector2(11,15),Vector2(15,11),Color("a2acb5"),1))
-	var handle := Control.new(); handle.set_anchors_preset(Control.PRESET_TOP_WIDE); handle.offset_left = 2; handle.offset_right = -134; handle.offset_top = 3; handle.offset_bottom = 31; handle.mouse_default_cursor_shape = Control.CURSOR_MOVE; add_child(handle); handle.gui_input.connect(_title_input)
+	title_drag_handle = Control.new(); title_drag_handle.name = "TitleDragHandle"; title_drag_handle.mouse_default_cursor_shape = Control.CURSOR_MOVE; title_drag_handle.mouse_filter = Control.MOUSE_FILTER_STOP; add_child(title_drag_handle)
+	title_drag_handle.gui_input.connect(_title_input)
+	titlebar.resized.connect(_sync_chrome_hit_region)
+	titlebar_row.resized.connect(_sync_chrome_hit_region)
+	resized.connect(_sync_chrome_hit_region)
+	call_deferred("_sync_chrome_hit_region")
+
+func _sync_chrome_hit_region() -> void:
+	if not is_instance_valid(title_drag_handle) or not is_instance_valid(titlebar) or chrome_buttons.is_empty(): return
+	var bar_rect := titlebar.get_global_rect()
+	var first_button_rect := chrome_buttons[0].get_global_rect()
+	var right_edge := maxf(0.0, first_button_rect.position.x - bar_rect.position.x - 2.0)
+	var height := maxf(0.0, bar_rect.size.y - 6.0)
+	title_drag_handle.global_position = Vector2(bar_rect.position.x + 2.0, bar_rect.position.y + 3.0)
+	title_drag_handle.size = Vector2(right_edge, height)
 
 func _title_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
@@ -94,23 +124,61 @@ func _move_to(point: Vector2) -> void:
 	position = _initial.position + point - _origin; clamp_to_desktop()
 
 func _resize_to(point: Vector2) -> void:
-	size = (_initial.size + point - _origin).max(custom_minimum_size).min(get_parent_control().size - position); queue_redraw()
+	if get_parent_control() == null: return
+	var area := get_parent_control().size
+	var available := Vector2(maxf(0.0, area.x - _initial.position.x), maxf(0.0, area.y - _initial.position.y))
+	var minimum := Vector2(minf(custom_minimum_size.x, available.x), minf(custom_minimum_size.y, available.y))
+	var requested := _initial.size + point - _origin
+	size = Vector2(clampf(requested.x, minimum.x, available.x), clampf(requested.y, minimum.y, available.y))
+	clamp_to_desktop()
+	queue_redraw()
 
 func clamp_to_desktop() -> void:
+	if get_parent_control() == null: return
 	var area := get_parent_control().size
-	position.x = clampf(position.x,0,maxf(0,area.x - 160))
-	position.y = clampf(position.y,0,maxf(0,area.y - 42))
+	var bounded := _constrain_rect(Rect2(position, size), area)
+	position = bounded.position
+	size = bounded.size
+
+func _constrain_rect(rect: Rect2, area: Vector2) -> Rect2:
+	if area.x <= 0.0 or area.y <= 0.0: return rect
+	var bounded_size := Vector2(
+		clampf(rect.size.x, minf(custom_minimum_size.x, area.x), area.x),
+		clampf(rect.size.y, minf(custom_minimum_size.y, area.y), area.y))
+	var max_x := maxf(0.0, area.x - bounded_size.x)
+	var max_y := maxf(0.0, area.y - bounded_size.y)
+	var bounded_position := Vector2(clampf(rect.position.x, 0.0, max_x), clampf(rect.position.y, 0.0, max_y))
+	return Rect2(bounded_position, bounded_size)
+
+func _parent_resized() -> void:
+	if get_parent_control() == null: return
+	var area := get_parent_control().size
+	if area.x <= 0.0 or area.y <= 0.0: return
+	if maximized:
+		restore_rect = _constrain_rect(restore_rect, area)
+		position = Vector2.ZERO
+		size = area
+	else:
+		var bounded := _constrain_rect(Rect2(position, size), area)
+		position = bounded.position
+		size = bounded.size
+	call_deferred("_sync_chrome_hit_region")
+	queue_redraw()
 
 func toggle_maximize() -> void:
+	if get_parent_control() == null: return
 	_dragging = false; _resizing = false
 	focused.emit(app_id)
 	if maximized:
-		position = restore_rect.position; size = restore_rect.size
+		var bounded_restore := _constrain_rect(restore_rect, get_parent_control().size)
+		position = bounded_restore.position; size = bounded_restore.size
 	else:
-		restore_rect = Rect2(position,size); position = Vector2.ZERO; size = get_parent_control().size
+		restore_rect = _constrain_rect(Rect2(position,size), get_parent_control().size)
+		position = Vector2.ZERO; size = get_parent_control().size
 	maximized = not maximized
 	chrome_buttons[1].text="❐" if maximized else "□"
 	frame.set_corner_radius_all(0 if maximized else 7)
+	call_deferred("_sync_chrome_hit_region")
 
 func set_active(active: bool) -> void:
 	# Keep the document readable in background windows; use the titlebar and border

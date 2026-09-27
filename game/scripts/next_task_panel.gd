@@ -21,6 +21,12 @@ var _scale := -1.0
 var _reserved: Control
 var _original_top := 0.0
 var _identity := ""
+var management_open := false
+
+func open_management() -> void:
+	management_open = not management_open
+	expanded = management_open
+	refresh(1.0)
 
 func setup(owner_ui) -> void:
 	ui = owner_ui; game = ui._game(); name = "NextTaskGuide"
@@ -74,7 +80,13 @@ func refresh(delta := 0.2) -> void:
 	if _elapsed < 0.2: return
 	_elapsed = 0.0
 	var intro: bool = is_instance_valid(ui.guided_intro) and ui.guided_intro.active()
-	if ui.controls.menu.visible or intro or ui.current_kind not in ["", "terminal", "board", "sales", "shop"]:
+	var management: bool = ui._is_management_panel(ui.current_kind)
+	if not enabled() and not (management and management_open):
+		hide(); _reserve(null, 0); target_rect = Rect2(); queue_redraw(); return
+	task = GUIDE.resolve(game) if enabled() else {}
+	if management and not management_open:
+		hide(); _reserve(null, 0); target_rect = Rect2(); queue_redraw(); return
+	if ui.controls.menu.visible or intro or (not management and ui.current_kind not in ["", "terminal"]):
 		hide(); _reserve(null, 0); target_rect = Rect2(); queue_redraw(); return
 	show()
 	if _scale != float(ui.text_scale):
@@ -97,6 +109,9 @@ func refresh(delta := 0.2) -> void:
 	var bounds := get_viewport_rect().size
 	card.size = Vector2(bounds.x, 0)
 	card.position = Vector2.ZERO
+	if management:
+		card.size.x = minf(740, ui.modal.size.x - 32)
+		card.position = ui.modal.position + Vector2(ui.modal.size.x - card.size.x - 16, 72)
 	if ui.current_kind.is_empty():
 		# Office input is captured. Keep this as a compact, non-blocking reminder.
 		locate.hide(); details.hide(); toggle.hide(); hint_scroll.hide()
@@ -106,7 +121,7 @@ func refresh(delta := 0.2) -> void:
 	else:
 		toggle.show()
 	var surface: Control = _desktop() if ui.current_kind == "terminal" else (ui.modal if ui.current_kind in ["board", "sales", "shop"] else null)
-	_reserve(surface, card.size.y if visible else 0.0)
+	_reserve(null if management else surface, card.size.y if visible and not management else 0.0)
 	_fit_card.call_deferred()
 	target_rect = Rect2()
 	if _highlight_seconds > 0:
@@ -119,6 +134,7 @@ func _fit_card() -> void:
 	# Wrapped labels settle after their new width/theme is assigned. Use that
 	# measured height before reserving board space, including the first frame.
 	card.size.y = card.get_combined_minimum_size().y
+	if ui._is_management_panel(ui.current_kind): return
 	if ui.current_kind.is_empty():
 		card.position.y = get_viewport_rect().size.y - card.size.y - 54
 	else:
@@ -144,6 +160,7 @@ func locate_task() -> void:
 	task = GUIDE.resolve(game)
 	var route := str(task.get("route", ""))
 	if route.is_empty(): return
+	management_open = false
 	if route == "board":
 		var destination := "sales" if str(task.get("id", "")) == "board" else "board"
 		if ui.current_kind != destination: ui.open_panel(destination)

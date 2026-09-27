@@ -127,35 +127,74 @@ static func _execute_restore(d, s: Dictionary, snapshot: Dictionary, repo: Strin
 	persist(d)
 	d._render_backup()
 
+static func _set_panel_padding(panel: Control, horizontal: int, vertical: int) -> void:
+	var style := panel.get_theme_stylebox("panel") as StyleBoxFlat
+	if style == null: return
+	if not is_equal_approx(style.content_margin_left, horizontal): style.content_margin_left = horizontal
+	if not is_equal_approx(style.content_margin_right, horizontal): style.content_margin_right = horizontal
+	if not is_equal_approx(style.content_margin_top, vertical): style.content_margin_top = vertical
+	if not is_equal_approx(style.content_margin_bottom, vertical): style.content_margin_bottom = vertical
+
+static func _reflow(d, shell: Control, nav_panel: Control, nav_toggle: Button, main_panel: Control, panes: BoxContainer, inventory_panel: Control, chosen: Dictionary, tree: Tree) -> void:
+	var text_scale := maxf(1.0, float(d.game.settings.get("text_scale", 1.0)))
+	var compact := float(d.windows.browser.size.x) / text_scale < 1100.0
+	var compact_nav := compact and not bool(d.backup_ui.get("nav_expanded", false))
+	var desired_height := maxf(450.0, float(d.windows.browser.size.y) - 155.0)
+	if not is_equal_approx(shell.custom_minimum_size.y, desired_height): shell.custom_minimum_size.y = desired_height
+	var nav_width := 152.0 if compact_nav else (184.0 if compact else 248.0)
+	if not is_equal_approx(nav_panel.custom_minimum_size.x, nav_width): nav_panel.custom_minimum_size.x = nav_width
+	nav_toggle.visible = compact
+	nav_toggle.text = "›" if compact_nav else "‹"
+	_set_panel_padding(nav_panel, 12 if compact else 16, 12 if compact else 16)
+	_set_panel_padding(main_panel, 12 if compact else 18, 12 if compact else 18)
+	if panes.vertical != compact: panes.vertical = compact
+	var separation := 12 if compact else 16
+	if panes.get_theme_constant("separation") != separation: panes.add_theme_constant_override("separation", separation)
+	var inventory_width := 0.0 if compact else 360.0
+	if not is_equal_approx(inventory_panel.custom_minimum_size.x, inventory_width): inventory_panel.custom_minimum_size.x = inventory_width
+	inventory_panel.size_flags_horizontal = Control.SIZE_FILL if not compact else Control.SIZE_EXPAND_FILL
+	inventory_panel.visible = not compact or chosen.is_empty()
+	if is_instance_valid(tree):
+		var tree_height := 310.0 if compact else 270.0
+		if not is_equal_approx(tree.custom_minimum_size.y, tree_height): tree.custom_minimum_size.y = tree_height
+
 static func render(d, parent: VBoxContainer) -> void:
 	var s: Dictionary = d.backup_ui
 	var live: Dictionary = d.game._vm().state
 	if not s.has("repository"):s["repository"] = str(live.applied.get("repository", "local"))
 	if not s.has("plan_open"):s["plan_open"] = false
 	var repo := str(s.get("repository", "local"))
-	var compact := float(d.windows.browser.size.x) < 1100.0
+	var text_scale := maxf(1.0, float(d.game.settings.get("text_scale", 1.0)))
+	var compact := float(d.windows.browser.size.x) / text_scale < 1100.0
+	var compact_nav := compact and not bool(s.get("nav_expanded", false))
 	var masthead := box(parent, Color("1c252d"), 12)
 	var top := HBoxContainer.new();top.custom_minimum_size.y = 34;top.add_theme_constant_override("separation", 12);masthead.add_child(top)
 	Glyph.add_to(top, "process", 30, INK)
 	var brand:=label(d, top, "Backrest", 24);brand.clip_text=false;brand.custom_minimum_size.x=160;brand.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	var host := label(d, top, str(live.host), 13, MUTED);host.tooltip_text=str(live.host);host.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	var shell := HBoxContainer.new();shell.add_theme_constant_override("separation", 0);shell.custom_minimum_size.y = maxf(450.0, float(d.windows.browser.size.y) - 155.0);parent.add_child(shell)
-	var nav := box(shell, NAV, 16);nav.get_parent().custom_minimum_size.x = 184 if compact else 248;nav.get_parent().size_flags_horizontal = Control.SIZE_FILL
+	var shell := HBoxContainer.new();shell.name = "BackupResponsiveShell";shell.add_theme_constant_override("separation", 0);shell.custom_minimum_size.y = maxf(450.0, float(d.windows.browser.size.y) - 155.0);parent.add_child(shell)
+	var nav := box(shell, NAV, 12 if compact_nav else (12 if compact else 16));nav.get_parent().custom_minimum_size.x = 152 if compact_nav else (184 if compact else 248);nav.get_parent().size_flags_horizontal = Control.SIZE_FILL
+	var nav_toggle := button(d, nav, "›" if compact_nav else "‹", "BackupNavigationToggle", func():s["nav_expanded"] = not bool(s.get("nav_expanded", false));rerender(d))
+	nav_toggle.tooltip_text = "Backrest navigation"
+	nav_toggle.visible = compact
+	nav_toggle.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	label(d, nav, copy("plan", "Plans"), 14)
 	var plan_link := button(d, nav, "/srv/data", "BackupPlan", func():s["plan_open"] = not bool(s.get("plan_open", false));rerender(d));plan_link.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	plan_link.tooltip_text = copy("plan", "Plans") + "  /srv/data"
 	label(d, nav, copy("repositories", "Repositories"), 14)
 	for repository in ["local", "offsite"]:
 		var item := button(d, nav, repository, "BackupRepo_" + repository, func():s["repository"] = repository;s.erase("snapshot");s.erase("path");s.erase("preview");s.erase("restore_plan");run(d, "restic -r " + repository + " snapshots");rerender(d))
 		item.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		item.tooltip_text = copy("repositories", "Repositories") + " · " + repository
 		item.add_theme_stylebox_override("normal", UI.style(Color("25272a") if repository == repo else NAV, Color.TRANSPARENT, 10, 10, 3))
 	var nav_fill := Control.new();nav_fill.size_flags_vertical = Control.SIZE_EXPAND_FILL;nav.add_child(nav_fill)
-	var main := box(shell, Color("090909"), 18);main.get_parent().size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var main := box(shell, Color("090909"), 12 if compact else 18);main.get_parent().size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var title := HBoxContainer.new();title.add_theme_constant_override("separation", 8);main.add_child(title)
 	label(d, title, repo, 22)
 	button(d, title, copy("refresh", "Refresh"), "BackupRefresh", func():run(d, "restic -r " + repo + " snapshots");rerender(d))
 	button(d, title, copy("backup_now", "Backup now"), "BackupNow", func():run(d, "restic -r " + repo + " backup /srv/data");rerender(d))
 	_plan(d, main, s, live)
-	var panes: BoxContainer = VBoxContainer.new() if compact else HBoxContainer.new();panes.add_theme_constant_override("separation", 16);main.add_child(panes)
+	var panes := BoxContainer.new();panes.name = "BackupSnapshotPanes";panes.vertical = compact;panes.add_theme_constant_override("separation", 16);panes.size_flags_horizontal = Control.SIZE_EXPAND_FILL;panes.size_flags_vertical = Control.SIZE_EXPAND_FILL;main.add_child(panes)
 	var inventory := box(panes);inventory.get_parent().custom_minimum_size.x = 0 if compact else 360;inventory.get_parent().size_flags_horizontal = Control.SIZE_FILL if not compact else Control.SIZE_EXPAND_FILL
 	label(d, inventory, copy("snapshots", "Snapshots"), 16)
 	var snapshot_table := VBoxContainer.new();snapshot_table.name = "BackupSnapshotTable";snapshot_table.size_flags_horizontal = Control.SIZE_EXPAND_FILL;snapshot_table.add_theme_constant_override("separation", 18);inventory.add_child(snapshot_table)
@@ -178,6 +217,14 @@ static func render(d, parent: VBoxContainer) -> void:
 	inventory.get_parent().visible = not compact or chosen.is_empty()
 	if chosen.is_empty():label(d, details, copy("select_snapshot", "Select a snapshot"), 14, MUTED)
 	else:_snapshot(d, details, s, chosen, repo)
+	var nav_panel := nav.get_parent() as Control
+	var main_panel := main.get_parent() as Control
+	var inventory_panel := inventory.get_parent() as Control
+	var tree := main.find_child("BackupSnapshotTree", true, false) as Tree
+	shell.resized.connect(func():
+		if is_instance_valid(shell): _reflow(d, shell, nav_panel, nav_toggle, main_panel, panes, inventory_panel, chosen, tree)
+	)
+	_reflow(d, shell, nav_panel, nav_toggle, main_panel, panes, inventory_panel, chosen, tree)
 	var output := str(s.get("output", ""))
 	if not output.is_empty():
 		button(d,main,("▾  " if bool(s.get("output_open",false)) else "▸  ")+copy("result"),"BackupOutputToggle",func():s["output_open"]=not bool(s.get("output_open",false));rerender(d)).alignment=HORIZONTAL_ALIGNMENT_LEFT
@@ -189,7 +236,7 @@ static func render(d, parent: VBoxContainer) -> void:
 		var result_label := label(d, main, copy(result_key, restore_result), 12, GREEN if restore_result == "succeeded" else Color("ef6b6b"));result_label.name = "BackupRestoreResult"
 	var last: Dictionary = live.get("last_restore", {})
 	if not last.is_empty():
-		var footer: BoxContainer = VBoxContainer.new() if compact else HBoxContainer.new();main.add_child(footer);label(d, footer, copy("restored", "Previous restore") + "  " + str(last.get("snapshot", "")) + "  →  " + str(last.get("target", "")), 12, MUTED)
+		var footer := HFlowContainer.new();main.add_child(footer);label(d, footer, copy("restored", "Previous restore") + "  " + str(last.get("snapshot", "")) + "  →  " + str(last.get("target", "")), 12, MUTED)
 		button(d, footer, copy("open_files", "Open restored folder"), "BackupOpenFiles", func():d._show_app("files");d.FILES.navigate(d, str(last.get("target", "/restore")), true))
 
 static func _dark_input(node: Control) -> void:

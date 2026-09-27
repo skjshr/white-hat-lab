@@ -1,0 +1,84 @@
+{
+  "provenance": {
+    "provider": "Gemini Web Flash",
+    "model_visible": "3.8 Flash",
+    "captured": "2026-09-22",
+    "conversation_urls": [
+      "https://gemini.google.com/app/147e8e128169bec4",
+      "https://gemini.google.com/app/e008a36e43cbaca6"
+    ],
+    "selection": "Complete JSON object selected from second response; Japanese values unchanged. Raw text kept separately.",
+    "sources": [
+      {
+        "path": "artifacts/simulator/v220/gemini-copy-01.json",
+        "sha256": "cca0f44a3fbf0cbf3cc31a5ef28da28dec2419f717e9c8a27ef20016e86e6ca3"
+      },
+      {
+        "path": "artifacts/simulator/v220/gemini-copy-02-raw.txt",
+        "sha256": "d0984b5d2188be755cf48f077b81e06bd7aa961bcee36460779500de9215f210"
+      }
+    ],
+    "existing_copy_aliases": {
+      "v220_order_total": "ui_copy_stock.json:stock_total"
+    }
+  },
+  "entries": {
+    "v220_pricing": "サービス価格",
+    "v220_price_policy": "標準見積レート",
+    "v220_price_percent": "基準価格比（%）",
+    "v220_price_apply": "価格を適用",
+    "v220_price_saved": "価格を保存しました",
+    "v220_price_scope": "手動入力のない見積に適用。確定済みの条件は維持されます。",
+    "v220_reference_price": "基準価格",
+    "v220_policy_price": "標準見積",
+    "v220_order_cart": "発注リスト",
+    "v220_cart_empty": "選択中のアイテムなし",
+    "v220_cart_add": "発注に追加",
+    "v220_cart_remove": "削除",
+    "v220_cart_clear": "リストをクリア",
+    "v220_cart_checkout": "発注を確定",
+    "v220_after_purchase": "購入後残高",
+    "v220_stock_available": "利用可能",
+    "v220_stock_inbound": "入荷待ち",
+    "v220_stock_reserved": "割当済",
+    "v220_stock_required": "受注案件の必要数",
+    "v220_stock_shortage": "不足数",
+    "v220_stock_delivered": "納品済",
+    "v220_stock_value": "在庫評価額",
+    "v220_stock_coverage": "備品準備",
+    "v220_stock_required_count": "必要 %d / 利用可能 %d / 入荷待ち %d",
+    "v220_stock_shortage_count": "不足: %d",
+    "v220_purchase_needed": "追加発注",
+    "v220_prepare_stock": "仕入れを開く",
+    "v220_prepare_staff": "チームを開く",
+    "v220_operating_desk": "会社運営",
+    "v220_attention": "要対応",
+    "v220_attention_clear": "保留中の準備なし",
+    "v220_receive_count": "受取待ち荷物: %d",
+    "v220_invoice_count": "請求書下書き: %d",
+    "v220_maintenance_count": "未実施のメンテ: %d",
+    "v220_capacity": "稼働上限",
+    "v220_contract_slots": "有効契約数",
+    "v220_staff_seats": "人員 / 席数",
+    "v220_growth": "事業拡大",
+    "v220_equipment_pending": "配送中の設備",
+    "v220_installed": "設置済み",
+    "v220_cash_flow": "資金推移",
+    "v220_profit_detail": "利益内訳",
+    "v220_cash_open": "期首資金",
+    "v220_cash_in": "入金額",
+    "v220_cash_out": "出金額",
+    "v220_cash_change": "資金増減",
+    "v220_cash_end": "期末資金",
+    "v220_collections": "請求回収",
+    "v220_job_payments": "案件収入",
+    "v220_job_costs": "案件原価",
+    "v220_care_income": "保守収入",
+    "v220_care_costs": "保守原価",
+    "v220_stock_purchases": "在庫仕入",
+    "v220_investment": "設備・拡張投資",
+    "v220_recruitment": "採用費",
+    "v220_wages_paid": "人件費支払",
+    "v220_order_total": "合計"
+  }
+}

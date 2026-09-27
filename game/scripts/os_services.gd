@@ -23,7 +23,9 @@ static func build(d, parent: VBoxContainer) -> void:
 	var split = d._row(p, 0)
 	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var rail := PanelContainer.new()
-	rail.custom_minimum_size.x = 190
+	var compact := float(d.windows.monitor.size.x) < 1100.0 * float(d.game.settings.get("text_scale", 1.0))
+	rail.custom_minimum_size.x = 142 if compact else 190
+	split.resized.connect(func(): rail.custom_minimum_size.x = 142 if split.size.x < 1100.0 * float(d.game.settings.get("text_scale", 1.0)) else 190)
 	rail.add_theme_stylebox_override("panel", UI.style(UI.OS_NAV, Color.TRANSPARENT, 6, 14, 0))
 	split.add_child(rail)
 	var services = d._box(rail, 6)
@@ -37,9 +39,9 @@ static func build(d, parent: VBoxContainer) -> void:
 	services.add_child(service_button)
 	service_button.hide()
 	var service_tree := Tree.new()
-	service_tree.hide_root=true; service_tree.columns=2; service_tree.select_mode=Tree.SELECT_ROW
-	service_tree.set_column_titles_visible(true); service_tree.set_column_title(0,"サービス"); service_tree.set_column_title(1,"状態")
-	service_tree.set_column_expand(1,false); service_tree.set_column_custom_minimum_width(0,80); service_tree.set_column_custom_minimum_width(1,48)
+	service_tree.hide_root=true; service_tree.columns=1; service_tree.select_mode=Tree.SELECT_ROW
+	service_tree.set_column_titles_visible(true); service_tree.set_column_title(0,"サービス")
+	service_tree.set_column_custom_minimum_width(0,80)
 	service_tree.size_flags_vertical=Control.SIZE_EXPAND_FILL
 	services.add_child(service_tree)
 	d.widgets.monitor = {"body":null, "tab":"overview", "tabs":{}, "host":host, "badge":status_badge, "service_button":service_button, "log_search":null, "log_query":"", "log_view":null}
@@ -110,8 +112,7 @@ static func refresh(d) -> void:
 	var tree_root: TreeItem = w.service_tree.create_item()
 	if info.connected:
 		var item: TreeItem = w.service_tree.create_item(tree_root)
-		item.set_text(0,str(info.service)); item.set_text(1,"●")
-		item.set_custom_color(1, UI.GREEN if d.game._vm().state.active else UI.RED)
+		item.set_text(0,str(info.service))
 		item.set_metadata(0,str(info.service)); item.select(0)
 	w.service_tree.set_block_signals(false)
 	if not info.connected:
@@ -154,7 +155,10 @@ static func refresh(d) -> void:
 	box.add_child(d._label(str(info.service)+".service", 24, SERVICE_ACCENT))
 	var state_color := UI.GREEN if bool(live.active) else UI.RED
 	w.badge.text = "●  "+("稼働中" if live.active else "停止中"); w.badge.add_theme_color_override("font_color",state_color)
-	var actions = d._row(box, 6)
+	var actions := HFlowContainer.new()
+	actions.add_theme_constant_override("h_separation", 6)
+	actions.add_theme_constant_override("v_separation", 6)
+	box.add_child(actions)
 	var restart = d._button("再起動", func():
 		d._trace("restart", str(info.service))
 		d.game.vm_run("systemctl restart "+str(info.service))
@@ -165,10 +169,9 @@ static func refresh(d) -> void:
 	restart.name = "ServiceRestart"
 	actions.add_child(restart)
 	var edit_action = d._button("設定を編集", d._open_config)
-	UI.os_primary(edit_action, SERVICE_ACCENT)
+	edit_action.custom_minimum_size.y = restart.custom_minimum_size.y
 	actions.add_child(edit_action)
 	box.add_child(HSeparator.new())
-	_property(d, box, UI.copy("os_status"), "稼働中" if live.active else "停止中", state_color)
 	_property(d, box, UI.copy("os_config_file"), str(info.config_path), SERVICE_ACCENT)
 	_property(d, box, UI.copy("os_configuration"), UI.copy("os_config_pending") if live.get("dirty",false) else UI.copy("os_config_applied"), UI.WARNING if live.get("dirty",false) else UI.INK)
 	if not str(live.get("error", "")).is_empty():

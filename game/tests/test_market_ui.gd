@@ -39,7 +39,7 @@ func capture(label: String) -> void:
 		return
 	await frames(6)
 	await RenderingServer.frame_post_draw
-	var folder := ProjectSettings.globalize_path("res://../artifacts/simulator/market/ui")
+	var folder := ProjectSettings.globalize_path("res://../artifacts/simulator/v220/market" if "--v220-capture" in OS.get_cmdline_user_args() else "res://../artifacts/simulator/market/ui")
 	DirAccess.make_dir_recursive_absolute(folder)
 	var suffix := "-narrow" if narrow else "-wide"
 	check(root.get_texture().get_image().save_png(folder.path_join(label + suffix + ".png")) == OK, "capture " + label)
@@ -215,10 +215,10 @@ func run() -> void:
 	check(visible_rows >= 3, "at least three complete rows visible without scrolling")
 	await capture("market-board")
 
-	# A single accepted-row click opens the actual workspace.
+	# Selecting accepted work shows its operations; starting the PC is explicit.
 	press("SalesOffer_" + str(accepted_offer.id))
 	await frames(10)
-	check(str(game.state.current_contract_id) == str(accepted_offer.id) and ui.current_kind == "terminal", "accepted card opens its contract workspace")
+	check(str(ui.operations_choices.dispatch_selected.id) == str(accepted_offer.id) and ui.current_kind == "board", "accepted card selects its work without opening software")
 	ui.open_panel("sales")
 	await frames(8)
 

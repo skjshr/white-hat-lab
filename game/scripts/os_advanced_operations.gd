@@ -30,13 +30,26 @@ class NetworkMap extends Control:
 		for item in nodes:
 			min_x = minf(min_x, float(item.x)); max_x = maxf(max_x, float(item.x))
 			min_y = minf(min_y, float(item.y)); max_y = maxf(max_y, float(item.y))
-		for item in nodes:
+		var wrapped := size.x < 820.0
+		var columns := mini(2, nodes.size()) if wrapped else maxi(1, nodes.size())
+		if size.x < 440.0: columns = 1
+		var cell_width := size.x / float(maxi(1, columns))
+		var node_width := minf(280.0, maxf(0.0, cell_width - 16.0)) if wrapped else minf(150.0, maxf(105.0, (size.x - 48.0) / 4.0))
+		for node_index in nodes.size():
+			var item: Dictionary = nodes[node_index]
 			var button: Button = positions[str(item.id)]
-			button.custom_minimum_size.x = minf(150, maxf(105, (size.x - 48) / 4))
+			button.custom_minimum_size.x = node_width
 			button.size.x = button.custom_minimum_size.x
-			var nx: float = (float(item.x) - min_x) / maxf(0.01, max_x - min_x)
-			var ny: float = 0.5 if max_y == min_y else 0.18 + 0.64 * (float(item.y) - min_y) / (max_y - min_y)
-			button.position = Vector2(8 + nx * maxf(0, size.x - button.size.x - 16), ny * maxf(0, size.y - button.size.y))
+			if wrapped:
+				var column := node_index % columns
+				var row := node_index / columns
+				var row_count := ceili(float(nodes.size()) / float(columns))
+				var y_ratio := 0.5 if row_count <= 1 else 0.18 + 0.64 * float(row) / float(row_count - 1)
+				button.position = Vector2(cell_width * column + (cell_width - button.size.x) / 2.0, y_ratio * maxf(0, size.y - button.size.y))
+			else:
+				var nx: float = (float(item.x) - min_x) / maxf(0.01, max_x - min_x)
+				var ny: float = 0.5 if max_y == min_y else 0.18 + 0.64 * (float(item.y) - min_y) / (max_y - min_y)
+				button.position = Vector2(8 + nx * maxf(0, size.x - button.size.x - 16), ny * maxf(0, size.y - button.size.y))
 		queue_redraw()
 	func _draw() -> void:
 		for edge in edges:
@@ -89,6 +102,17 @@ static func refresh(d) -> void:
 	var state: Dictionary = d.advanced_ui
 	var data: Dictionary = d.game.advanced_view(str(state.get("selected", "")))
 	var mode := str(state.get("view", "network"))
+	if mode in ["events", "evidence", "records"]:
+		var collection: Array = data.get("records", [])
+		if mode in ["events", "evidence"]:
+			collection = data.get("events", [])
+			if mode == "evidence": collection = collection.filter(func(record: Dictionary): return bool(record.get("pinned", false)))
+		var record_id := str(state.get("record", ""))
+		var previous_view := str(state.get("record_view", ""))
+		var same_collection := previous_view == mode or (previous_view in ["events", "evidence"] and mode in ["events", "evidence"])
+		if not record_id.is_empty() and (not same_collection or not collection.any(func(record: Dictionary): return str(record.get("id", "")) == record_id)):
+			state.record = ""
+		state.record_view = mode
 	var signature := JSON.stringify([data, state, d.game.can_deliver()])
 	if signature == str(w.signature): return
 	w.signature = signature
@@ -148,7 +172,8 @@ static func _records(d, parent: Control, data: Dictionary, mode: String) -> void
 	var titles: Array = ["adv_time", "adv_source", "adv_asset", "adv_event"] if events else ["adv_record", "adv_detail"]
 	for index in range(titles.size()):
 		tree.set_column_title(index, UI.copy(titles[index])); tree.set_column_clip_content(index, true)
-		tree.set_column_custom_minimum_width(index, 68 if index == 0 else 85)
+		var minimum_width := 68 if events and index == 0 else (128 if not events and index == 0 else 85)
+		tree.set_column_custom_minimum_width(index, minimum_width)
 		tree.set_column_expand(index, index == titles.size() - 1)
 	var root := tree.create_item()
 	for record in data.get("events" if events else "records", []):
@@ -156,29 +181,66 @@ static func _records(d, parent: Control, data: Dictionary, mode: String) -> void
 		if events and not str(state.get("source", "")).is_empty() and str(record.get("source", "")) != str(state.source): continue
 		if not _matches(JSON.stringify(record), str(state.get("filter", ""))): continue
 		var row := tree.create_item(root)
-		var values: Array = [record.get("time", ""), record.get("source", ""), record.get("asset", ""), record.get("detail", "")] if events else [record.get("label", record.get("id", "")), record.get("detail", "")]
-		for index in range(values.size()): row.set_text(index, _text(str(values[index]))); row.set_tooltip_text(index, _text(str(values[index])))
+		var values: Array
+		var tooltips: Array
+		if events:
+			values = [record.get("time", ""), record.get("source", ""), record.get("asset", ""), record.get("detail", "")]
+			tooltips = values.duplicate()
+		else:
+			var record_id := str(record.get("id", ""))
+			var record_name := _text(str(record.get("label", record_id)))
+			var identity := record_name if record_name == record_id else record_name + " · " + record_id
+			values = [identity, _preview(str(record.get("detail", "")))]
+			tooltips = [record_id + " · " + record_name, str(record.get("detail", ""))]
+		for index in range(values.size()): row.set_text(index, _text(str(values[index]))); row.set_tooltip_text(index, _text(str(tooltips[index])))
 		row.set_metadata(0, record.duplicate(true))
 		if str(record.get("id", "")) == str(state.get("record", "")): row.select(0)
 	tree.item_selected.connect(func():
 		var item := tree.get_selected()
 		if item == null: return
-		state.record = str(item.get_metadata(0).get("id", "")); refresh(d)
+		state.record = str(item.get_metadata(0).get("id", "")); state.record_view = mode; refresh(d)
 	)
+
+static func _preview(value: String) -> String:
+	var preview := value.strip_edges()
+	var first_line := preview.split("\n", false)[0] if not preview.is_empty() else ""
+	if preview.begins_with("{") or preview.begins_with("["):
+		var parser := JSON.new()
+		if parser.parse(preview) == OK:
+			var parsed = parser.data
+			if parsed is Dictionary and not parsed.is_empty():
+				var keys: Array = parsed.keys(); keys.sort()
+				preview = str(keys[0]) + ": " + JSON.stringify(parsed[keys[0]])
+			elif parsed is Array and not parsed.is_empty():
+				preview = JSON.stringify(parsed[0])
+			else:
+				preview = JSON.stringify(parsed)
+		else:
+			preview = first_line
+	else:
+		preview = first_line
+	if preview.length() > 120: preview = preview.substr(0, 117) + "…"
+	return preview
 
 static func _details(d, parent: VBoxContainer, data: Dictionary) -> void:
 	var state: Dictionary = d.advanced_ui
 	var selected := str(state.get("selected", ""))
 	var record_id := str(state.get("record", ""))
 	var record: Dictionary = {}; var event_selected := false
-	for event in data.get("events", []):
-		if str(event.get("id", "")) == record_id and not record_id.is_empty(): record = event; event_selected = true; break
-	if record.is_empty():
+	var record_view := str(state.get("record_view", ""))
+	if record_view in ["events", "evidence"]:
+		for event in data.get("events", []):
+			if str(event.get("id", "")) == record_id and not record_id.is_empty(): record = event; event_selected = true; break
+	elif record_view == "records":
 		for row in data.get("records", []):
 			if str(row.get("id", "")) == record_id and not record_id.is_empty(): record = row; break
 	if not record.is_empty():
-		var detail: Label = d._label(_text(str(record.get("label", record_id))), 16, UI.INK); detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; parent.add_child(detail)
+		var record_name := _text(str(record.get("label", record_id)))
+		var record_heading := record_name if record_name == record_id else record_name + " · " + record_id
+		var detail: Label = d._label(record_heading, 16, UI.INK); detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; parent.add_child(detail)
 		var raw := TextEdit.new(); raw.name = "AdvancedRawRecord"; raw.editable = false; raw.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY; raw.custom_minimum_size.y = 160
+		raw.add_theme_color_override("font_readonly_color", UI.INK)
+		raw.add_theme_stylebox_override("read_only", UI.style(Color("f8fafc"), UI.BORDER, 6, 8, 4))
 		raw.text = str(record.get("detail", JSON.stringify(record, "  "))); parent.add_child(raw)
 		if (event_selected and bool(record.get("pinnable", true))) or bool(record.get("pinnable", false)):
 			var pin: Button = d._button(UI.copy("adv_pin"), func(): _act(d, "pin", record_id, "")); pin.name = "AdvancedPin"; parent.add_child(pin)

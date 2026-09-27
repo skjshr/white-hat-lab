@@ -32,15 +32,40 @@ static func option(parent: Node,id: String,items: Array,value: String,changed: C
 	node.item_selected.connect(func(index):changed.call(str(node.get_item_metadata(index))));parent.add_child(node);return node
 static func input(parent: Node,id: String,value: String,changed: Callable) -> LineEdit:
 	var node:=LineEdit.new();node.name=id;node.text=value;node.size_flags_horizontal=Control.SIZE_EXPAND_FILL;node.text_changed.connect(changed);parent.add_child(node);return node
+static func action_error_message(result: Dictionary) -> String:
+	var error_code:=str(result.get("error","operation_failed"))
+	var message:=UI.copy("stock_error_hardware") if error_code=="hardware_unavailable" else copy("error_"+error_code)
+	return message if not message.is_empty() else copy("error_operation_failed")
 static func action(d,name: String,payload: Dictionary={}) -> Dictionary:
+	# The game emits `changed` synchronously during a saved VM action. Hold the
+	# desktop refresh until its transactional outcome is known so a failed save
+	# does not rebuild the editor before its inline error can be shown.
+	var was_refreshing: bool=bool(d.refreshing)
+	if not was_refreshing:d.refreshing=true
 	var result: Dictionary=d._firewall_action(name,payload)
+	if not was_refreshing:d.refreshing=false
 	d.get_node("/root/Soundscape").play_ui("work_success" if bool(result.get("ok",false)) else "work_failure")
 	if bool(result.get("ok",false)):
 		if name=="save_rule":d.firewall_ui.erase("editor")
 		if name=="delete":d.firewall_ui.erase("delete_id")
 		if name=="services":d.firewall_ui.erase("service_draft")
 		if name=="revert":d.firewall_ui.erase("service_draft")
-	render_again(d);return result
+		if not was_refreshing:
+			d.firewall_render_signature=d._firewall_snapshot_signature()
+			d._state_changed()
+		render_again(d)
+	else:
+		# Keep the current editor controls (and focus) intact; only update the
+		# reserved result area so a failed operation is visible before retrying.
+		var page: Control=d.widgets.browser.get("page") if d.widgets.has("browser") else null
+		var feedback: Label=page.find_child("FirewallActionResult",true,false) as Label if is_instance_valid(page) else null
+		if is_instance_valid(feedback):
+			feedback.text=action_error_message(result)
+			feedback.visible=true
+			var scroll: Node=page
+			while is_instance_valid(scroll) and not scroll is ScrollContainer:scroll=scroll.get_parent()
+			if scroll is ScrollContainer:(scroll as ScrollContainer).ensure_control_visible(feedback)
+	return result
 static func address(value: String) -> String:
 	return copy("any") if value=="any" else copy("lan_net") if value=="lan_net" else copy("this_firewall") if value=="self" else value
 static func protocol(value: String) -> String:return "*" if value=="any" else value.to_upper().replace("_","/")
@@ -51,7 +76,13 @@ static func browser_width(d) -> float:
 static func compact_layout(d) -> bool:return false
 static func dense_layout(d) -> bool:return browser_width(d)<1200.0
 static func column_widths(d) -> Array:
-	return [36.0,72.0,128.0,76.0,128.0,76.0,0.0,184.0]
+	# Keep the native rule-list columns intact. The viewport scrolls on narrow
+	# windows instead of squeezing ports, descriptions and row actions together.
+	return [40.0,88.0,156.0,96.0,156.0,96.0,220.0,220.0]
+static func rule_table_width(widths: Array) -> float:
+	var width:=0.0
+	for value in widths:width+=float(value)
+	return width+56.0
 static func chain_item(parent: Node,symbol: String,title: String,value: String,color: Color) -> void:
 	var item:=VBoxContainer.new();item.size_flags_horizontal=Control.SIZE_EXPAND_FILL;item.add_theme_constant_override("separation",2);parent.add_child(item)
 	GLYPH.add_to(item,symbol,25,color)
@@ -68,8 +99,15 @@ static func evidence_chain(d,parent: Node,trace: Dictionary) -> void:
 
 static func render(d,parent: VBoxContainer) -> void:
 	var state: Dictionary=d.firewall_ui;var snap: Dictionary=d.game._vm().firewall_snapshot()
-	var background:=panel(parent,Color("f4f4f4"));background.add_theme_constant_override("separation",7);background.custom_minimum_size.y=maxf(480,float(d.windows.browser.size.y)-110)
-	var header:=panel(background,Color("222222"));var brand:=HBoxContainer.new();brand.add_theme_constant_override("separation",22);header.add_child(brand)
+	var background:=panel(parent,Color("f4f4f4"));background.add_theme_constant_override("separation",7)
+	var viewport := parent.get_parent() as Control
+	var reflow := func(): background.custom_minimum_size.y = maxf(0, viewport.size.y - 12)
+	viewport.resized.connect(reflow)
+	background.tree_exiting.connect(func():
+		if viewport.resized.is_connected(reflow): viewport.resized.disconnect(reflow)
+	)
+	reflow.call_deferred()
+	var header:=panel(background,Color("222222"));var brand:=HFlowContainer.new();brand.add_theme_constant_override("h_separation",22);brand.add_theme_constant_override("v_separation",4);header.add_child(brand)
 	GLYPH.add_to(brand,"network",28,Color.WHITE);label(d,brand,"pfSense",22,Color.WHITE)
 	for item in [["rules","rules"],["services","service_config"],["diagnostics","diagnostics"],["logs","logs"]]:
 		var view:=str(item[0]);var nav:=button(d,brand,copy(str(item[1])),"FirewallNav_"+view,func():state["view"]=view;render_again(d),Color.WHITE);nav.add_theme_stylebox_override("normal",UI.style(Color("080808") if str(state.get("view","rules"))==view else Color.TRANSPARENT,Color.TRANSPARENT,12,8,0))
@@ -88,9 +126,10 @@ static func render(d,parent: VBoxContainer) -> void:
 	var apply:=button(d,changebar,copy("apply"),"FirewallApply",func():action(d,"apply"),Color.WHITE);apply.add_theme_stylebox_override("normal",UI.style(GREEN,Color.TRANSPARENT,12,6,3));apply.disabled=not pending and bool(snap.get("active",true))
 	button(d,changebar,copy("revert"),"FirewallRevert",func():action(d,"revert"),MUTED).disabled=not pending
 	var result: Dictionary=state.get("result",{})
-	if not result.is_empty() and not bool(result.get("ok",false)):
-		var key:="error_"+str(result.get("error","operation_failed"));var message:=UI.copy("stock_error_hardware") if str(result.get("error",""))=="hardware_unavailable" else copy(key)
-		label(d,background,message if not message.is_empty() else copy("error_operation_failed"),14,RED).autowrap_mode=TextServer.AUTOWRAP_WORD_SMART
+	var feedback:=label(d,background,"",14,RED);feedback.name="FirewallActionResult"
+	feedback.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART
+	feedback.visible=not result.is_empty() and not bool(result.get("ok",false))
+	if feedback.visible:feedback.text=action_error_message(result)
 	var body:=VBoxContainer.new();body.add_theme_constant_override("separation",0);background.add_child(body)
 	match str(state.get("view","rules")):
 		"services":services(d,body,snap,state)
@@ -106,9 +145,10 @@ static func rules(d,parent: VBoxContainer,snap: Dictionary,state: Dictionary) ->
 		var style:=UI.style(Color.TRANSPARENT,RED,18,12,0);style.set_border_width_all(0);style.border_width_bottom=4 if iface==name else 0;tab.add_theme_stylebox_override("normal",style)
 	var bar:=panel(parent,Color("414141"));bar.add_theme_constant_override("separation",0);label(d,bar,copy("rules"),15,Color.WHITE)
 	var scroll:=ScrollContainer.new();scroll.name="FirewallRuleTable";scroll.horizontal_scroll_mode=ScrollContainer.SCROLL_MODE_AUTO;scroll.vertical_scroll_mode=ScrollContainer.SCROLL_MODE_DISABLED;parent.add_child(scroll)
-	var table:=VBoxContainer.new();table.size_flags_horizontal=Control.SIZE_EXPAND_FILL;table.add_theme_constant_override("separation",0);scroll.add_child(table)
 	var widths:=column_widths(d)
-	var head:=HBoxContainer.new();head.add_theme_constant_override("separation",8);head.custom_minimum_size.y=34;table.add_child(head)
+	var table_width:=rule_table_width(widths)
+	var table:=VBoxContainer.new();table.name="FirewallRuleColumns";table.size_flags_horizontal=Control.SIZE_EXPAND_FILL;table.custom_minimum_size.x=table_width;table.add_theme_constant_override("separation",0);scroll.add_child(table)
+	var head:=HBoxContainer.new();head.add_theme_constant_override("separation",8);head.custom_minimum_size=Vector2(table_width,34);table.add_child(head)
 	for index in 8:
 		var key: String=["action","protocol","source","source_port","destination","destination_port","description",""][index]
 		var cell:=label(d,head,"" if index in [0,7] else copy(key),12,INK);cell.custom_minimum_size.x=float(widths[index]);cell.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART;cell.size_flags_horizontal=Control.SIZE_EXPAND_FILL if index==6 else Control.SIZE_FILL
@@ -126,8 +166,8 @@ static func rules(d,parent: VBoxContainer,snap: Dictionary,state: Dictionary) ->
 		button(d,buttons,copy("cancel"),"FirewallDeleteCancel",func():state.erase("delete_id");render_again(d),MUTED)
 
 static func rule_row(d,parent: VBoxContainer,rule: Dictionary,_compact: bool,state: Dictionary,widths: Array) -> void:
-	var id:=str(rule.id);var wrapper:=PanelContainer.new();wrapper.name="FirewallRule_"+id;wrapper.add_theme_stylebox_override("panel",UI.style(Color("f8f8f8"),LINE,0,1,0));parent.add_child(wrapper)
-	var row:=HBoxContainer.new();row.custom_minimum_size.y=38;row.add_theme_constant_override("separation",8);wrapper.add_child(row)
+	var id:=str(rule.id);var wrapper:=PanelContainer.new();wrapper.name="FirewallRule_"+id;wrapper.size_flags_horizontal=Control.SIZE_EXPAND_FILL;wrapper.custom_minimum_size.x=rule_table_width(widths);wrapper.add_theme_stylebox_override("panel",UI.style(Color("f8f8f8"),LINE,0,1,0));parent.add_child(wrapper)
+	var row:=HBoxContainer.new();row.custom_minimum_size=Vector2(rule_table_width(widths),38);row.add_theme_constant_override("separation",8);wrapper.add_child(row)
 	var color:=MUTED if bool(rule.disabled) else GREEN if str(rule.action)=="pass" else RED
 	var cells: Array=["✓" if str(rule.action)=="pass" else "×" if str(rule.action)=="block" else "−",protocol(str(rule.protocol)),address(str(rule.source)),port(str(rule.source_port)),address(str(rule.destination)),port(str(rule.destination_port)),str(rule.description)]
 	for index in cells.size():
@@ -147,8 +187,14 @@ static func rule_row(d,parent: VBoxContainer,rule: Dictionary,_compact: bool,sta
 static func open_editor(d,rule: Dictionary,insert: String,iface: String) -> void:
 	var draft: Dictionary=rule.duplicate(true) if not rule.is_empty() else {"interface":iface,"action":"pass","protocol":"tcp","source":"any","source_port":"any","destination":"any","destination_port":"any","disabled":false,"log":true,"description":""}
 	d.firewall_ui["editor"]={"rule":draft,"insert":insert};render_again(d)
-static func form_row(d,parent: Node,key: String) -> HBoxContainer:
-	var row:=HBoxContainer.new();row.add_theme_constant_override("separation",14);parent.add_child(row);label(d,row,copy(key),13).custom_minimum_size.x=180;return row
+static func form_row(d,parent: Node,key: String) -> BoxContainer:
+	var row:=BoxContainer.new();row.add_theme_constant_override("separation",14);parent.add_child(row)
+	var title:=label(d,row,copy(key),13);title.custom_minimum_size.x=180
+	var reflow:=func():
+		row.vertical=row.size.x<680.0*float(d.game.settings.get("text_scale",1.0))
+		row.add_theme_constant_override("separation",4 if row.vertical else 14)
+	row.resized.connect(reflow);reflow.call_deferred()
+	return row
 static func editor(d,parent: VBoxContainer,state: Dictionary) -> void:
 	var form:=panel(parent);form.name="FirewallRuleEditor";label(d,form,copy("edit_rule"),19)
 	var editor_state: Dictionary=state.editor;var draft: Dictionary=editor_state.rule
@@ -195,11 +241,19 @@ static func logs(d,parent: VBoxContainer,snap: Dictionary) -> void:
 	label(d,parent,copy("logs"),19)
 	var rows: Array=snap.get("logs",[])
 	if rows.is_empty():label(d,parent,copy("no_logs"),14,MUTED);return
-	var table:=panel(parent,Color("f7f7f7"));var widths: Array=[62,180,180,70,80,180];var head:=HBoxContainer.new();table.add_child(head)
+	var scroll:=ScrollContainer.new();scroll.name="FirewallLogTable";scroll.horizontal_scroll_mode=ScrollContainer.SCROLL_MODE_AUTO;scroll.vertical_scroll_mode=ScrollContainer.SCROLL_MODE_DISABLED;scroll.size_flags_horizontal=Control.SIZE_EXPAND_FILL;parent.add_child(scroll)
+	var table:=panel(scroll,Color("f7f7f7"));table.name="FirewallLogColumns"
+	var widths: Array=[104,180,180,92,112,180]
+	var content_width:=30.0
+	for index in widths.size():
+		widths[index]=float(widths[index])*float(d.game.settings.get("text_scale",1.0))
+		content_width+=float(widths[index])
+	table.get_parent().custom_minimum_size.x=content_width+8
+	var head:=HBoxContainer.new();head.add_theme_constant_override("separation",6);table.add_child(head)
 	for index in 5:
 		var entry: String = ["interface","source","destination","protocol","action"][index]
-		var cell:=label(d,head,copy(str(entry)),12,MUTED);cell.custom_minimum_size.x=float(widths[index]);cell.size_flags_horizontal=Control.SIZE_EXPAND_FILL if index==4 else Control.SIZE_FILL
-	var rule_head:=label(d,head,copy("matched_rule"),12,MUTED);rule_head.custom_minimum_size.x=float(widths[5]);
+		var cell:=label(d,head,copy(str(entry)),12,MUTED);cell.custom_minimum_size.x=float(widths[index]);cell.size_flags_horizontal=Control.SIZE_FILL
+	var rule_head:=label(d,head,copy("matched_rule"),12,MUTED);rule_head.custom_minimum_size.x=float(widths[5]);rule_head.size_flags_horizontal=Control.SIZE_EXPAND_FILL
 	for item in rows:
 		if not item is Dictionary:continue
 		var row:=HBoxContainer.new();row.add_theme_constant_override("separation",6);table.add_child(row)

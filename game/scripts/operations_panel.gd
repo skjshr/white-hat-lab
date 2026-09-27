@@ -1,21 +1,23 @@
 extends RefCounted
 const COPY = preload("res://scripts/ui_theme.gd")
 const GAME_UI = preload("res://scripts/game_theme.gd")
+const M = preload("res://scripts/management_ui.gd")
 
 static func label(ui, host: Node, value: String, size: int = 16, color: Color = COPY.INK) -> Label:
 	var node: Label = ui._label(value,size,color); node.size_flags_horizontal=Control.SIZE_EXPAND_FILL;host.add_child(node);return node
 
 static func button(ui, host: Node, key: String, action: Callable, id: String = "") -> Button:
-	var node: Button=ui._button(COPY.copy(key),action);node.name=id if not id.is_empty() else key;node.custom_minimum_size.y=38;host.add_child(node);return node
+	var node: Button=ui._button(COPY.copy(key),action);node.name=id if not id.is_empty() else key;node.custom_minimum_size.y=34;host.add_child(node);return node
 
 static func flow(host: Node) -> HFlowContainer:
 	var row:=HFlowContainer.new();row.add_theme_constant_override("h_separation",8);row.add_theme_constant_override("v_separation",6);host.add_child(row);return row
 
 static func footer(ui) -> HBoxContainer:
-	var row:=HBoxContainer.new();row.add_theme_constant_override("separation",8);ui.modal_footer.add_child(row);return row
+	ui.modal_footer.size_flags_horizontal=Control.SIZE_EXPAND_FILL
+	var row:=HBoxContainer.new();row.size_flags_horizontal=Control.SIZE_EXPAND_FILL;row.add_theme_constant_override("separation",8);ui.modal_footer.add_child(row);return row
 
 static func box(ui, host: Node) -> VBoxContainer:
-	var panel:=PanelContainer.new();panel.size_flags_horizontal=Control.SIZE_EXPAND_FILL;panel.add_theme_stylebox_override("panel",COPY.style(Color("f8faf9"),COPY.BORDER,16,13,3));host.add_child(panel)
+	var panel:=PanelContainer.new();panel.size_flags_horizontal=Control.SIZE_EXPAND_FILL;panel.add_theme_stylebox_override("panel",M.surface(M.PAPER,13,true));host.add_child(panel)
 	var body:=VBoxContainer.new();body.size_flags_horizontal=Control.SIZE_EXPAND_FILL;body.add_theme_constant_override("separation",9);panel.add_child(body);return body
 
 static func metric(ui, host: Node, key: String, value: String, id: String = "") -> void:
@@ -38,36 +40,23 @@ static func cell(ui, host: Node, value: String, width: float = 0, color: Color =
 
 static func compact_control(ui, node: Button) -> void:
 	node.custom_minimum_size.y = 30
-	node.add_theme_font_size_override("font_size", maxi(13,int(13*ui.text_scale)))
-	for state in ["normal","hover","pressed","disabled","focus"]:
-		var fill := GAME_UI.ACTION if state == "normal" else GAME_UI.TAB
-		if state == "disabled": fill = GAME_UI.CARD_FRAME
-		if state == "focus": fill = Color.TRANSPARENT
-		node.add_theme_stylebox_override(state,COPY.style(fill,GAME_UI.HEADER if state == "focus" else GAME_UI.CARD_FRAME,7,3,2))
-	for state in ["font_color","font_hover_color","font_pressed_color","font_focus_color"]:
-		node.add_theme_color_override(state,GAME_UI.TEXT)
-	node.add_theme_color_override("font_disabled_color",GAME_UI.FILTER)
+	node.add_theme_font_size_override("font_size", maxi(14,int(14*ui.text_scale)))
+	M.button(node,"quiet")
 
 static func light_control(ui, node: Control) -> void:
-	for state in ["normal","hover","pressed","disabled","focus"]:
-		var fill:=Color("f8faf9") if state!="pressed" else GAME_UI.TAB
-		var text:=GAME_UI.FOOTER if state!="pressed" else Color.WHITE
-		node.add_theme_stylebox_override(state,COPY.style(fill,GAME_UI.CARD_FRAME,7,3,1))
-		node.add_theme_color_override("font_color",GAME_UI.FOOTER)
-		node.add_theme_color_override("font_hover_color",GAME_UI.FOOTER)
-		node.add_theme_color_override("font_pressed_color",Color.WHITE)
-		node.add_theme_color_override("font_focus_color",GAME_UI.FOOTER)
-	node.add_theme_color_override("font_disabled_color",GAME_UI.MUTED)
+	if node is Button:
+		M.button(node as Button,"secondary")
 
-static func action(ui, host: Node, key: String, callback: Callable, id: String = "") -> Button:
+static func action(ui, host: Node, key: String, callback: Callable, id: String = "", role: String = "quiet") -> Button:
 	var node:=button(ui,host,key,callback,id)
 	compact_control(ui,node)
+	M.button(node,role)
 	node.tooltip_text=COPY.copy(key)
 	return node
 
 static func strip(host: Node, tint: Color = GAME_UI.TAB) -> HBoxContainer:
 	var panel:=PanelContainer.new()
-	panel.add_theme_stylebox_override("panel",COPY.style(tint,GAME_UI.CARD_FRAME,8,5,2))
+	panel.add_theme_stylebox_override("panel",M.surface(tint if tint != GAME_UI.TAB else M.PAPER,7,true))
 	host.add_child(panel)
 	var row:=HBoxContainer.new();row.add_theme_constant_override("separation",12);panel.add_child(row)
 	return row
@@ -92,23 +81,23 @@ static func build(ui) -> void:
 			margin.add_theme_constant_override("margin_top",10)
 			margin.add_theme_constant_override("margin_bottom",10)
 	var header:=PanelContainer.new();header.name="DispatchToolbar"
-	header.add_theme_stylebox_override("panel",COPY.style(GAME_UI.FOOTER,GAME_UI.CARD_FRAME,10,7,2));ui.modal_body.add_child(header)
+	header.add_theme_stylebox_override("panel",M.surface(M.PAPER,8,true));ui.modal_body.add_child(header)
 	var head:=HBoxContainer.new();head.add_theme_constant_override("separation",8);header.add_child(head)
 	var open_count:=queue.filter(func(item):return not bool(item.get("completed",false))).size()
-	cell(ui,head,COPY.copy("ops_open_count") % [open_count,g.contract_capacity()],0,GAME_UI.FILTER,true).name="OperationsOpenCount"
-	if not g.last_day_ledger().is_empty():action(ui,head,"ops_previous",ui.open_panel.bind("day_review"),"OperationsPrevious")
+	cell(ui,head,COPY.copy("ops_open_count") % [open_count,g.contract_capacity()],0,M.MUTED,true).name="OperationsOpenCount"
+	if not g.last_day_ledger().is_empty():action(ui,head,"ops_previous",ui.open_panel.bind("day_review"),"OperationsPrevious","quiet")
 	var ready_count:=0
 	for order in g.delivery_orders():
 		if str(order.get("status","")) in ["ready","carried","placing"]:ready_count+=1
-	if ready_count>0:action(ui,head,"ops_delivery",ui.close_panel,"OperationsReceive").text=COPY.copy("ops_delivery") % ready_count
+	if ready_count>0:action(ui,head,"ops_delivery",ui.close_panel,"OperationsReceive","secondary").text=COPY.copy("ops_delivery") % ready_count
 	var spacer:=Control.new();spacer.size_flags_horizontal=Control.SIZE_EXPAND_FILL;head.add_child(spacer)
-	action(ui,head,"ops_close",ui.open_panel.bind("door"),"OperationsCloseDay")
+	action(ui,head,"ops_close",ui.open_panel.bind("door"),"OperationsCloseDay","quiet")
 	var view:=str(ui.operations_choices.get("view","contracts"))
 	if view not in ["contracts","maintenance","staff"]:view="contracts"
 	ui.operations_choices.view=view
 	var views:=HBoxContainer.new();views.name="DispatchViews";views.add_theme_constant_override("separation",6);ui.modal_body.add_child(views)
 	for spec in [["contracts","dispatch_normal","OperationsView_contracts"],["maintenance","dispatch_maintenance","OperationsView_maintenance"],["staff","dispatch_title","OperationsView_staff"]]:
-		var tab:=action(ui,views,str(spec[1]),select_view.bind(ui,str(spec[0])),str(spec[2]));tab.toggle_mode=true;tab.button_pressed=view==str(spec[0]);tab.tooltip_text=COPY.copy(str(spec[1]));tab.size_flags_horizontal=Control.SIZE_EXPAND_FILL
+		var selected:=view==str(spec[0]);var tab:=action(ui,views,str(spec[1]),select_view.bind(ui,str(spec[0])),str(spec[2]),"tab");tab.toggle_mode=true;tab.button_pressed=selected;M.button(tab,"tab",selected);tab.tooltip_text=COPY.copy(str(spec[1]));tab.size_flags_horizontal=Control.SIZE_EXPAND_FILL
 	match view:
 		"contracts":_dispatch_tickets(ui,ui.modal_body,g,queue,false)
 		"maintenance":_dispatch_tickets(ui,ui.modal_body,g,queue,true)
@@ -142,43 +131,67 @@ static func _dispatch_queue(g, member_id: String) -> Array:
 	return g.dispatch_queue(member_id)
 
 static func _dispatch_staff_grid(ui, parent: Node, g) -> void:
-	var section:=VBoxContainer.new();section.name="DispatchStaffGrid";section.size_flags_vertical=Control.SIZE_EXPAND_FILL;section.size_flags_stretch_ratio=1.3;section.add_theme_constant_override("separation",0);parent.add_child(section)
-	var header:=strip(section)
-	cell(ui,header,_dispatch_copy("member"),125,GAME_UI.FILTER)
-	cell(ui,header,_dispatch_copy("active"),230,GAME_UI.FILTER)
-	cell(ui,header,_dispatch_copy("queue"),0,GAME_UI.FILTER,true)
-	var scroll:=ScrollContainer.new();scroll.name="DispatchStaffScroll";scroll.custom_minimum_size.y=70;scroll.size_flags_vertical=Control.SIZE_EXPAND_FILL;scroll.horizontal_scroll_mode=ScrollContainer.SCROLL_MODE_DISABLED;section.add_child(scroll)
-	var table:=VBoxContainer.new();table.size_flags_horizontal=Control.SIZE_EXPAND_FILL;table.add_theme_constant_override("separation",0);scroll.add_child(table)
-	for member in g.team_members():
-		_dispatch_staff_row(ui,table,g,str(member.id),str(member.name),str(member.role))
+	var section:=VBoxContainer.new();section.name="DispatchStaffGrid";section.size_flags_vertical=Control.SIZE_EXPAND_FILL;section.add_theme_constant_override("separation",6);parent.add_child(section)
+	var selected: Dictionary=ui.operations_choices.get("dispatch_selected",{})
+	var selected_id:=str(selected.get("member",""))
+	var members: Array=g.team_members()
+	if selected_id.is_empty() and not members.is_empty():
+		selected_id=str(members[0].get("id",""));selected.member=selected_id;ui.operations_choices.dispatch_selected=selected
+	var header:=strip(section,M.CANVAS)
+	cell(ui,header,_dispatch_copy("member"),180,M.MUTED)
+	cell(ui,header,_dispatch_copy("active"),0,M.MUTED,true)
+	cell(ui,header,_dispatch_copy("queue"),120,M.MUTED)
+	var scroll:=ScrollContainer.new();scroll.name="DispatchStaffScroll";scroll.custom_minimum_size.y=38;scroll.size_flags_vertical=Control.SIZE_SHRINK_BEGIN;scroll.horizontal_scroll_mode=ScrollContainer.SCROLL_MODE_DISABLED;section.add_child(scroll)
+	var table:=VBoxContainer.new();table.size_flags_horizontal=Control.SIZE_EXPAND_FILL;table.add_theme_constant_override("separation",3);scroll.add_child(table)
+	for member in members:
+		_dispatch_staff_row(ui,table,g,str(member.id),str(member.name),str(member.role),str(member.id)==selected_id)
+	scroll.custom_minimum_size.y = minf(table.get_combined_minimum_size().y, 190)
+	var detail_scroll := ScrollContainer.new(); detail_scroll.name="DispatchStaffDetailScroll"; detail_scroll.size_flags_vertical=Control.SIZE_EXPAND_FILL; detail_scroll.horizontal_scroll_mode=ScrollContainer.SCROLL_MODE_DISABLED; detail_scroll.custom_minimum_size.y=120; section.add_child(detail_scroll)
+	_dispatch_staff_detail(ui,detail_scroll,g,selected_id)
 
-static func _dispatch_staff_row(ui, parent: Node, g, member_id: String, member_name: String, role: String) -> void:
-	var row:=strip(parent,Color("f8faf9"));row.name="DispatchStaff_"+member_id;row.custom_minimum_size.y=66
-	var identity:=VBoxContainer.new();identity.custom_minimum_size.x=125;row.add_child(identity)
-	cell(ui,identity,member_name,125)
-	cell(ui,identity,COPY.copy("staffing_role_"+role),125,GAME_UI.FOOTER)
-	var load:=_dispatch_load(g,member_id)
-	var load_row:=VBoxContainer.new();load_row.name="DispatchLoadRow_"+member_id;load_row.add_theme_constant_override("separation",4);identity.add_child(load_row)
-	var load_bar:=ProgressBar.new();load_bar.name="DispatchLoad_"+member_id;load_bar.custom_minimum_size=Vector2(64,5);load_bar.size_flags_horizontal=Control.SIZE_EXPAND_FILL;load_bar.show_percentage=false;load_bar.max_value=maxf(1.0,load.capacity);load_bar.value=minf(load.used,load.capacity);load_row.add_child(load_bar)
-	var load_text_value:=_workload_copy("reserved","Reserved: %d min") % ceili(load.used) if bool(load.get("unbounded",false)) else "%d/%d" % [ceili(load.used),ceili(load.capacity)]
-	var load_text:=cell(ui,load_row,load_text_value,72,COPY.WARNING if load.used>load.capacity else GAME_UI.FOOTER);load_text.name="DispatchLoadText_"+member_id;load_text.tooltip_text=load_text_value;load_text.text_overrun_behavior=TextServer.OVERRUN_NO_TRIMMING;load_text.add_theme_font_size_override("font_size",maxi(11,int(11*ui.text_scale)))
+static func _dispatch_staff_row(ui, parent: Node, g, member_id: String, member_name: String, role: String, selected: bool = false) -> void:
+	var row:=strip(parent,M.SELECTED if selected else M.PAPER);row.name="DispatchStaff_"+member_id;row.custom_minimum_size.y=38
+	var identity:=Button.new();identity.name="DispatchStaffSelect_"+member_id;identity.text=member_name;identity.alignment=HORIZONTAL_ALIGNMENT_LEFT;identity.custom_minimum_size.x=180;identity.tooltip_text=member_name+" / "+COPY.copy("staffing_role_"+role);identity.pressed.connect(func():
+		var choice: Dictionary=ui.operations_choices.get("dispatch_selected",{});choice.member=member_id;ui.operations_choices.dispatch_selected=choice;build(ui))
+	M.button(identity,"tab",selected);row.add_child(identity)
 	var active:=_dispatch_active_job(g,member_id)
-	var active_box:=VBoxContainer.new();active_box.custom_minimum_size.x=230;active_box.add_theme_constant_override("separation",3);row.add_child(active_box)
+	var queued:=_dispatch_queue(g,member_id)
+	var status:=_dispatch_copy("held" if bool(g.state.get("dispatch_holds",{}).get(member_id,false)) else "idle") if active.is_empty() else _dispatch_title(active)
+	cell(ui,row,status,0,M.WARNING if _dispatch_is_risky(g,member_id,active) else M.INK,true).name="DispatchStaffStatus_"+member_id
+	cell(ui,row,"%d" % queued.size(),120,M.MUTED).name="DispatchStaffQueueCount_"+member_id
+
+static func _dispatch_staff_detail(ui, parent: Node, g, member_id: String) -> void:
+	var detail:=PanelContainer.new();detail.name="DispatchStaffDetail";detail.size_flags_horizontal=Control.SIZE_EXPAND_FILL;detail.add_theme_stylebox_override("panel",M.surface(M.PAPER,10,true));parent.add_child(detail)
+	var body:=VBoxContainer.new();body.add_theme_constant_override("separation",5);detail.add_child(body)
+	if member_id.is_empty():
+		cell(ui,body,_dispatch_copy("member"),0,M.MUTED,true);return
+	var member_name:=member_id
+	for member in g.team_members():
+		if str(member.get("id",""))==member_id:member_name=str(member.get("name",member_id));break
+	label(ui,body,member_name,18,M.INK).name="DispatchStaffDetailTitle"
+	var load:=_dispatch_load(g,member_id)
+	var load_row:=HBoxContainer.new();load_row.name="DispatchLoadRow_"+member_id;load_row.add_theme_constant_override("separation",8);body.add_child(load_row)
+	var load_bar:=ProgressBar.new();load_bar.name="DispatchLoad_"+member_id;load_bar.custom_minimum_size=Vector2(120,5);load_bar.size_flags_horizontal=Control.SIZE_EXPAND_FILL;load_bar.size_flags_vertical=Control.SIZE_SHRINK_CENTER;load_bar.show_percentage=false;load_bar.max_value=maxf(1.0,load.capacity);load_bar.value=minf(load.used,load.capacity);load_row.add_child(load_bar)
+	var load_text_value:=_workload_copy("reserved","Reserved: %d min") % ceili(load.used) if bool(load.get("unbounded",false)) else "%d/%d" % [ceili(load.used),ceili(load.capacity)]
+	var load_text:=cell(ui,load_row,load_text_value,84,M.WARNING if load.used>load.capacity else M.MUTED);load_text.name="DispatchLoadText_"+member_id;load_text.tooltip_text=load_text_value;load_text.text_overrun_behavior=TextServer.OVERRUN_NO_TRIMMING
+	load_text.clip_text=false;load_text.vertical_alignment=VERTICAL_ALIGNMENT_CENTER
+	var active:=_dispatch_active_job(g,member_id)
+	var active_box:=VBoxContainer.new();active_box.name="DispatchActiveDetail";active_box.add_theme_constant_override("separation",3);body.add_child(active_box)
 	if active.is_empty():
 		var held: bool=bool(g.state.get("dispatch_holds",{}).get(member_id,false))
-		cell(ui,active_box,_dispatch_copy("held" if held else "idle"),230,COPY.WARNING if held else GAME_UI.FOOTER).name="DispatchActive_"+member_id
+		cell(ui,active_box,_dispatch_copy("held" if held else "idle"),0,M.WARNING if held else M.MUTED,true).name="DispatchActive_"+member_id
 	else:
-		cell(ui,active_box,_dispatch_title(active),230).name="DispatchActive_"+member_id
+		cell(ui,active_box,_dispatch_title(active),0,M.INK,true).name="DispatchActive_"+member_id
 		var controls:=HBoxContainer.new();controls.add_theme_constant_override("separation",8);active_box.add_child(controls)
-		cell(ui,controls,_dispatch_remaining(g,active),0,GAME_UI.FOOTER,true).name="DispatchRemaining_"+member_id
+		cell(ui,controls,_dispatch_remaining(g,active),0,M.INK,true).name="DispatchRemaining_"+member_id
 		action(ui,controls,"dispatch_pause",func():
 			if g.dispatch_pause(member_id):ui._refresh_operations()
-			else:ui._operations_feedback(_dispatch_copy("failed")),"DispatchPause_"+member_id)
+			else:ui._operations_feedback(_dispatch_copy("failed")),"DispatchPause_"+member_id,"quiet")
 		var progress:=ProgressBar.new();progress.name="DispatchProgress_"+member_id;progress.custom_minimum_size.y=4;progress.show_percentage=false;progress.value=_dispatch_progress(active);active_box.add_child(progress)
-		cell(ui,active_box,_dispatch_plan(g,member_id,active),230,COPY.WARNING if _dispatch_is_risky(g,member_id,active) else GAME_UI.FOOTER).name="DispatchPlan_"+member_id
-	var queue_box:=VBoxContainer.new();queue_box.name="DispatchQueue_"+member_id;queue_box.size_flags_horizontal=Control.SIZE_EXPAND_FILL;queue_box.add_theme_constant_override("separation",5);row.add_child(queue_box)
+		cell(ui,active_box,_dispatch_plan(g,member_id,active),0,M.WARNING if _dispatch_is_risky(g,member_id,active) else M.MUTED,true).name="DispatchPlan_"+member_id
+	var queue_box:=VBoxContainer.new();queue_box.name="DispatchQueue_"+member_id;queue_box.size_flags_horizontal=Control.SIZE_EXPAND_FILL;queue_box.add_theme_constant_override("separation",5);body.add_child(queue_box)
 	var queued:=_dispatch_queue(g,member_id)
-	if queued.is_empty():cell(ui,queue_box,_dispatch_copy("empty"),0,COPY.MUTED,true)
+	if queued.is_empty():cell(ui,queue_box,_dispatch_copy("empty"),0,M.MUTED,true)
 	for index in queued.size():_dispatch_chip(ui,queue_box,g,member_id,queued[index],index,queued.size(),active.is_empty())
 
 static func _dispatch_title(job: Dictionary) -> String:
@@ -284,21 +297,44 @@ static func _dispatch_chip(ui, parent: Node, g, member_id: String, job: Dictiona
 
 static func _dispatch_tickets(ui, parent: Node, g, queue: Array, maintenance_only: bool = false) -> void:
 	var section:=VBoxContainer.new();section.name="DispatchTickets";section.size_flags_vertical=Control.SIZE_EXPAND_FILL;section.add_theme_constant_override("separation",5);parent.add_child(section)
-	var toolbar:=HBoxContainer.new();toolbar.name="DispatchTicketToolbar";toolbar.add_theme_constant_override("separation",6);section.add_child(toolbar)
-	cell(ui,toolbar,_dispatch_copy("tickets"),80,GAME_UI.FOOTER,true)
-	var member:=OptionButton.new();member.name="DispatchMemberSelector";compact_control(ui,member);member.custom_minimum_size.x=140;member.add_item(COPY.copy("ops_unassigned"));member.set_item_metadata(0,"");toolbar.add_child(member)
-	for staff in g.team_members():
-		member.add_item(str(staff.name));member.set_item_metadata(member.item_count-1,str(staff.id))
+	var has_entries: bool=not (g.maintenance_jobs() if maintenance_only else queue).is_empty()
+	if not has_entries:
+		var empty_panel:=PanelContainer.new();empty_panel.name="DispatchEmptyState";empty_panel.size_flags_horizontal=Control.SIZE_EXPAND_FILL;empty_panel.add_theme_stylebox_override("panel",M.surface(M.PAPER,12,true));section.add_child(empty_panel)
+		var empty_body:=VBoxContainer.new();empty_body.add_theme_constant_override("separation",6);empty_panel.add_child(empty_body)
+		cell(ui,empty_body,COPY.copy("ops_ready"),0,M.MUTED,true)
+		if not maintenance_only:
+			var sales:=action(ui,empty_body,"ops_sales",ui.open_panel.bind("sales"),"OperationsSalesEmpty","primary");sales.size_flags_horizontal=Control.SIZE_SHRINK_BEGIN
+		return
+	var current: Dictionary=ui.operations_choices.get("dispatch_selected",{})
+	var kind: String="maintenance" if maintenance_only else "contract"
+	var candidates: Array=g.maintenance_jobs() if maintenance_only else queue
+	var selected_exists:=false
+	for item in candidates:
+		var candidate_id:=str(item.get("client" if maintenance_only else "id",""))
+		if str(current.get("kind",""))==kind and str(current.get("id",""))==candidate_id:selected_exists=true
+	if not selected_exists:
+		var chosen: Dictionary={}
+		if not maintenance_only:
+			for item in queue:
+				if bool(item.get("active",false)) or str(item.get("id",""))==str(g.state.get("current_contract_id","")):
+					chosen=item;break
+			if chosen.is_empty():
+				for item in queue:
+					if not bool(item.get("completed",false)):chosen=item;break
+				if chosen.is_empty() and not queue.is_empty():chosen=queue[0]
+		elif not candidates.is_empty():chosen=candidates[0]
+		if not chosen.is_empty():
+			var chosen_id:=str(chosen.get("client" if maintenance_only else "id",""))
+			_dispatch_select_ticket(ui,kind,chosen_id,int(chosen.get("target_index",0)))
+	var toolbar:=HBoxContainer.new();toolbar.name="DispatchTicketToolbar";toolbar.add_theme_constant_override("separation",6)
+	var member:=OptionButton.new();member.name="DispatchMemberSelector";compact_control(ui,member);member.custom_minimum_size.x=140;member.add_item(COPY.copy("ops_unassigned"));member.set_item_metadata(0,"")
+	for staff in g.team_members():member.add_item(str(staff.name));member.set_item_metadata(member.item_count-1,str(staff.id))
 	member.item_selected.connect(func(index):
 		var selected: Dictionary=ui.operations_choices.get("dispatch_selected",{})
 		if not selected.is_empty():selected.member=str(member.get_item_metadata(index))
 		_dispatch_sync_toolbar(ui))
-	action(ui,toolbar,"dispatch_enqueue",func():_dispatch_enqueue_selected(ui,g),"DispatchEnqueue")
-	action(ui,toolbar,"ops_open",func():_dispatch_open_selected(ui,g),"DispatchOpen")
-	action(ui,toolbar,"ops_report",func():_dispatch_report_selected(ui,g),"DispatchReport")
-	var forecast_strip:=strip(section,Color("f8faf9"));forecast_strip.get_parent().name="DispatchForecastStrip";forecast_strip.get_parent().hide()
-	var forecast:=cell(ui,forecast_strip,_workload_copy("schedule","Schedule"),0,GAME_UI.FILTER,true);forecast.name="DispatchForecast";forecast.autowrap_mode=TextServer.AUTOWRAP_OFF
-	var care_actions:=HBoxContainer.new();care_actions.name="DispatchCareActions";care_actions.add_theme_constant_override("separation",6);section.add_child(care_actions)
+	toolbar.add_child(member)
+	var care_actions:=HFlowContainer.new();care_actions.name="DispatchCareActions";care_actions.add_theme_constant_override("h_separation",6);care_actions.add_theme_constant_override("v_separation",4)
 	cell(ui,care_actions,"",0,GAME_UI.FOOTER,true).name="DispatchCareClient"
 	action(ui,care_actions,"care_self_check",func():
 		var selected: Dictionary=ui.operations_choices.get("dispatch_selected",{})
@@ -306,11 +342,11 @@ static func _dispatch_tickets(ui, parent: Node, g, queue: Array, maintenance_onl
 	action(ui,care_actions,"ops_priority_first",func():
 		var selected: Dictionary=ui.operations_choices.get("dispatch_selected",{})
 		if g.prioritize_maintenance(str(selected.get("id",""))):ui._refresh_operations(),"DispatchPriority")
-	var header:=strip(section)
-	cell(ui,header,_dispatch_copy("subject"),0,GAME_UI.FILTER,true)
-	cell(ui,header,_dispatch_copy("target")+" / "+_dispatch_copy("owner"),190,GAME_UI.FILTER)
-	cell(ui,header,_dispatch_copy("status")+" / "+_dispatch_copy("deadline"),130,GAME_UI.FILTER)
-	var scroll:=ScrollContainer.new();scroll.name="DispatchTicketScroll";scroll.custom_minimum_size.y=60 if ui.root.size.x<1100 else 75;scroll.size_flags_vertical=Control.SIZE_EXPAND_FILL;scroll.horizontal_scroll_mode=ScrollContainer.SCROLL_MODE_DISABLED;section.add_child(scroll)
+	var header:=strip(section,M.CANVAS)
+	cell(ui,header,_dispatch_copy("subject"),0,M.MUTED,true)
+	cell(ui,header,_dispatch_copy("target")+" / "+_dispatch_copy("owner"),190,M.MUTED)
+	cell(ui,header,_dispatch_copy("status")+" / "+_dispatch_copy("deadline"),130,M.MUTED)
+	var scroll:=ScrollContainer.new();scroll.name="DispatchTicketScroll";scroll.size_flags_vertical=Control.SIZE_SHRINK_BEGIN;scroll.horizontal_scroll_mode=ScrollContainer.SCROLL_MODE_DISABLED;section.add_child(scroll)
 	var table:=VBoxContainer.new();table.name="DispatchTicketTable";table.size_flags_horizontal=Control.SIZE_EXPAND_FILL;table.add_theme_constant_override("separation",0);scroll.add_child(table)
 	var row_count:=0
 	if not maintenance_only:
@@ -318,14 +354,56 @@ static func _dispatch_tickets(ui, parent: Node, g, queue: Array, maintenance_onl
 	else:
 		for job in g.maintenance_jobs():_dispatch_maintenance_row(ui,table,g,job);row_count+=1
 	if row_count==0:
-		var empty:=cell(ui,table,COPY.copy("ops_ready"),0,GAME_UI.FOOTER,true);empty.name="DispatchEmpty"
+		var empty:=cell(ui,table,COPY.copy("ops_ready"),0,M.MUTED,true);empty.name="DispatchEmpty"
 		if not maintenance_only:
 			var sales:=action(ui,table,"ops_sales",ui.open_panel.bind("sales"),"OperationsSalesEmpty");sales.size_flags_horizontal=Control.SIZE_SHRINK_BEGIN
+	scroll.custom_minimum_size.y=minf(float(row_count if row_count>0 else 1),5.0)*50.0+(32.0 if row_count>0 else 0.0)
+	var work:=PanelContainer.new();work.name="DispatchSelectedWork";work.add_theme_stylebox_override("panel",M.surface(M.CANVAS,8,true));section.add_child(work)
+	var work_body:=VBoxContainer.new();work_body.add_theme_constant_override("separation",4);work.add_child(work_body)
+	var current_selected: Dictionary=ui.operations_choices.get("dispatch_selected",{})
+	var work_actions:=HBoxContainer.new();work_actions.name="DispatchSelectedActions";work_actions.add_theme_constant_override("separation",6);work_body.add_child(work_actions)
+	cell(ui,work_actions,_selected_ticket_title(g,current_selected),0,M.INK,true).name="DispatchSelectedTitle"
+	var action_spacer:=Control.new();action_spacer.size_flags_horizontal=Control.SIZE_EXPAND_FILL;work_actions.add_child(action_spacer)
+	var open_action:=action(ui,work_actions,"ops_open",func():_dispatch_open_selected(ui,g),"DispatchOpen","primary");open_action.custom_minimum_size.x=220 if ui.root.size.x>=1100 else 176
+	var report:=action(ui,work_actions,"ops_report",func():_dispatch_report_selected(ui,g),"DispatchReport","secondary");report.custom_minimum_size.x=120 if ui.root.size.x>=1100 else 88
+	var dispatch_disclosure:=Button.new();dispatch_disclosure.name="DispatchControlsDisclosure";dispatch_disclosure.text="▸  "+_dispatch_copy("title");dispatch_disclosure.toggle_mode=true;dispatch_disclosure.custom_minimum_size.y=30;work_body.add_child(dispatch_disclosure);M.button(dispatch_disclosure,"quiet")
+	var dispatch_controls:=VBoxContainer.new();dispatch_controls.name="DispatchControls";dispatch_controls.add_theme_constant_override("separation",4);dispatch_controls.visible=bool(ui.operations_choices.get("dispatch_controls_open",false));work_body.add_child(dispatch_controls)
+	dispatch_controls.add_child(toolbar)
+	var dispatch_actions:=HFlowContainer.new();dispatch_actions.name="DispatchActions";dispatch_actions.add_theme_constant_override("h_separation",6);dispatch_actions.add_theme_constant_override("v_separation",4);dispatch_controls.add_child(dispatch_actions)
+	var enqueue:=action(ui,dispatch_actions,"dispatch_enqueue",func():_dispatch_enqueue_selected(ui,g),"DispatchEnqueue");enqueue.custom_minimum_size.x=160
+	dispatch_actions.add_child(care_actions)
+	var forecast_strip:=strip(dispatch_controls,M.PAPER);forecast_strip.get_parent().name="DispatchForecastStrip";forecast_strip.get_parent().hide()
+	var forecast:=cell(ui,forecast_strip,_workload_copy("schedule","Schedule"),0,M.MUTED,true);forecast.name="DispatchForecast";forecast.autowrap_mode=TextServer.AUTOWRAP_OFF
+	dispatch_disclosure.button_pressed=dispatch_controls.visible
+	dispatch_disclosure.text=("▾  " if dispatch_controls.visible else "▸  ")+_dispatch_copy("title")
+	dispatch_disclosure.pressed.connect(func():
+		dispatch_controls.visible=dispatch_disclosure.button_pressed
+		ui.operations_choices.dispatch_controls_open=dispatch_controls.visible
+		dispatch_disclosure.text=("▾  " if dispatch_controls.visible else "▸  ")+_dispatch_copy("title")
+		_dispatch_sync_toolbar(ui))
 	_dispatch_sync_toolbar(ui)
+	_dispatch_sync_selected_work(ui,g)
+
+static func _selected_ticket_title(g, selected: Dictionary) -> String:
+	if selected.is_empty():return ""
+	if str(selected.get("kind",""))=="maintenance":
+		for item in g.maintenance_jobs():
+			if str(item.get("client",""))==str(selected.get("id","")):return str(item.get("client",""))+" · "+_dispatch_copy("maintenance")
+	else:
+		for item in g.contract_queue():
+			if str(item.get("id",""))==str(selected.get("id","")):return _dispatch_title(item)
+	return ""
+
+static func _dispatch_sync_selected_work(ui,g) -> void:
+	var selected: Dictionary=ui.operations_choices.get("dispatch_selected",{})
+	var title=ui.modal_body.find_child("DispatchSelectedTitle",true,false)
+	if title is Label:title.text=_selected_ticket_title(g,selected)
+	var open=ui.modal_body.find_child("DispatchOpen",true,false)
+	if open is Button:open.disabled=selected.is_empty() or (str(selected.get("kind",""))=="maintenance" and not g.maintenance_incident_reason(str(selected.get("id",""))).is_empty())
 
 static func _dispatch_ticket_row(ui, parent: Node, g, item: Dictionary) -> void:
 	var id:=str(item.id)
-	var row:=strip(parent,Color("f8faf9"));row.name="OperationsContract_"+id
+	var row:=strip(parent,M.PAPER);row.name="OperationsContract_"+id
 	var choice: Dictionary=ui.operations_choices.get(id,{"target":int(item.get("target_index",0))})
 	ui.operations_choices[id]=choice
 	var ticket:=action(ui,row,"",func():_dispatch_select_ticket(ui,"contract",id,int(choice.target)),"DispatchTicket_"+id)
@@ -341,7 +419,7 @@ static func _dispatch_ticket_row(ui, parent: Node, g, item: Dictionary) -> void:
 	cell(ui,row,COPY.copy("ops_done") if bool(item.completed) else _remaining(item),130,COPY.GREEN if bool(item.completed) else GAME_UI.FOOTER).name="DispatchDeadline_"+id
 
 static func _dispatch_maintenance_row(ui, parent: Node, g, job: Dictionary) -> void:
-	var client:=str(job.client);var row:=strip(parent,Color("f8faf9"));row.name="DispatchMaintenance_"+client
+	var client:=str(job.client);var row:=strip(parent,M.PAPER);row.name="DispatchMaintenance_"+client
 	var ticket:=action(ui,row,"",func():_dispatch_select_ticket(ui,"maintenance",client,0),"DispatchTicketMaintenance_"+client.sha256_text().left(8))
 	light_control(ui,ticket)
 	ticket.text=client+" · "+_dispatch_copy("maintenance");ticket.tooltip_text=ticket.text;ticket.alignment=HORIZONTAL_ALIGNMENT_LEFT;ticket.clip_text=true;ticket.size_flags_horizontal=Control.SIZE_EXPAND_FILL;ticket.toggle_mode=true;ticket.set_meta("dispatch_client",client)
@@ -366,6 +444,7 @@ static func _dispatch_select_ticket(ui, kind: String, id: String, target_index: 
 	var view: String="maintenance" if kind=="maintenance" else "contracts"
 	ui.operations_choices["dispatch_selected_"+view]=selected.duplicate(true)
 	_dispatch_sync_toolbar(ui)
+	_dispatch_sync_selected_work(ui,ui._game())
 
 static func _dispatch_completed(g, selected: Dictionary) -> bool:
 	for item in g.contract_queue():
@@ -396,7 +475,8 @@ static func _dispatch_sync_toolbar(ui) -> void:
 		forecast.text=_dispatch_forecast(g,selected,reason)
 		forecast.add_theme_color_override("font_color", Color("8c5b00") if not reason.is_empty() else GAME_UI.FOOTER)
 	var forecast_strip=ui.modal_body.find_child("DispatchForecastStrip",true,false)
-	if forecast_strip is Control:forecast_strip.visible=not selected.is_empty()
+	var controls=ui.modal_body.find_child("DispatchControls",true,false)
+	if forecast_strip is Control:forecast_strip.visible=not selected.is_empty() and not str(selected.get("member","")).is_empty() and controls is Control and controls.visible
 	var enqueue=ui.modal_body.find_child("DispatchEnqueue",true,false)
 	if enqueue is Button:enqueue.disabled=not reason.is_empty();enqueue.tooltip_text=reason if not reason.is_empty() else _dispatch_copy("enqueue")
 	var open=ui.modal_body.find_child("DispatchOpen",true,false)
@@ -412,7 +492,9 @@ static func _dispatch_sync_toolbar(ui) -> void:
 			ui.modal_body.find_child("DispatchSelfCheck",true,false).disabled=not g.can_run_maintenance(id)
 			ui.modal_body.find_child("DispatchPriority",true,false).disabled=str(g._maintenance_job_for(id).get("status",""))!="pending"
 	for node in ui.modal_body.find_children("DispatchTicket*","Button",true,false):
-		if node is Button and node.toggle_mode:node.set_pressed_no_signal((care and str(node.get_meta("dispatch_client",""))==id) or (not care and str(node.name)=="DispatchTicket_"+id))
+		if node is Button and node.toggle_mode:
+			var pressed: bool=(care and str(node.get_meta("dispatch_client",""))==id) or (not care and str(node.name)=="DispatchTicket_"+id)
+			node.set_pressed_no_signal(pressed);M.button(node,"tab",pressed)
 
 static func _dispatch_forecast(g, selected: Dictionary, reason: String) -> String:
 	if selected.is_empty(): return _dispatch_copy("forecast_select", "Select a job and staff")
@@ -447,42 +529,91 @@ static func _dispatch_report_selected(ui, g) -> void:
 	var selected: Dictionary=ui.operations_choices.get("dispatch_selected",{});if selected.is_empty():return
 	if str(selected.kind)=="maintenance":ui._show_maintenance_result(str(selected.id))
 	else:
-		var completed:=_dispatch_completed(g,selected)
-		ui._operations_open(str(selected.id),-1 if completed else int(selected.target),"receipt" if completed else "team")
+		ui._operations_open(str(selected.id),-1,"receipt")
 
 static func _remaining(item: Dictionary) -> String:
 	var late:=int(item.get("late_minutes",0));var remaining:=float(item.get("remaining",0))
 	return COPY.copy("ops_late") % late if late>0 else COPY.copy("ops_remaining") % int(ceil(remaining))
 
+static func _ledger_int(ledger: Dictionary, keys: Array, fallback: int = 0) -> int:
+	for key in keys:
+		if ledger.has(str(key)): return int(ledger.get(str(key), fallback))
+	return fallback
+
+static func _closeout_group(ui, host: Node, title: String, rows: Array, open: bool, name: String) -> void:
+	var group := VBoxContainer.new(); group.name = name; group.add_theme_constant_override("separation", 4); host.add_child(group)
+	var disclosure := Button.new(); disclosure.name = name + "Disclosure"; disclosure.text = ("▾  " if open else "▸  ") + title; disclosure.toggle_mode = true; disclosure.button_pressed = open; disclosure.alignment = HORIZONTAL_ALIGNMENT_LEFT; disclosure.custom_minimum_size.y = 32; group.add_child(disclosure); M.button(disclosure,"quiet")
+	var body := VBoxContainer.new(); body.name = name + "Rows"; body.visible = open; body.add_theme_constant_override("separation", 2); group.add_child(body)
+	for spec in rows:
+		if spec.size() > 1 and int(spec[1]) == 0: continue
+		var row := HBoxContainer.new(); row.add_theme_constant_override("separation", 8); body.add_child(row)
+		var key := label(ui, row, str(spec[0]), 14, M.MUTED); key.size_flags_horizontal = Control.SIZE_EXPAND_FILL; key.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		var amount := label(ui, row, "¥%d" % int(spec[1]), 15, M.INK); amount.name = name + "Value" + str(row.get_index()); amount.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT; amount.size_flags_horizontal = Control.SIZE_SHRINK_END; amount.autowrap_mode = TextServer.AUTOWRAP_OFF
+	disclosure.pressed.connect(func():
+		body.visible = disclosure.button_pressed
+		disclosure.text = ("▾  " if body.visible else "▸  ") + title
+	)
+
 static func closeout(ui, settled: bool) -> void:
 	var g=ui._game();var ledger: Dictionary=g.last_day_ledger() if settled else g.day_preview()
 	if ledger.is_empty():label(ui,ui.modal_body,COPY.copy("ops_no_receipt"));return
-	label(ui,ui.modal_body,COPY.copy("ops_settled_day" if settled else "ops_closing_day") % int(ledger.day),23,COPY.OS_ACCENT)
-	var summary:=box(ui,ui.modal_body);var metrics:=flow(summary)
-	metric(ui,metrics,"ops_profit","¥%d" % int(ledger.total_profit))
-	metric(ui,metrics,"ops_cash_after","¥%d" % int(ledger.cash_after))
-	metric(ui,metrics,"billing_next_cash","¥%d" % int(ledger.get("next_cash",ledger.cash_after)))
-	var lines:=GridContainer.new();lines.columns=2;lines.size_flags_horizontal=Control.SIZE_EXPAND_FILL;lines.add_theme_constant_override("h_separation",28);lines.add_theme_constant_override("v_separation",8);summary.add_child(lines)
-	for spec in [["ops_contract_net","contract_net"],["ops_care_earned","care_gross"],["ops_care_cost","care_cost"],["ops_payroll","payroll_due"],["ops_hiring","hiring_cost"],["ops_investment","investment_spending"],["stock_title","inventory_spending"],["ops_paid_wages","paid_wages"],["ops_arrears","arrears"]]:
-		label(ui,lines,COPY.copy(spec[0]),16,COPY.MUTED);var amount:=label(ui,lines,"¥%d" % int(ledger.get(spec[1],0)),18);amount.horizontal_alignment=HORIZONTAL_ALIGNMENT_RIGHT
-	for spec in [["billing_draft_total","draft_total"],["billing_receivable_total","receivable_total"],["billing_paid_today","paid_today"],["billing_due_next_day","due_next_day"]]:
-		label(ui,lines,COPY.copy(spec[0]),16,COPY.MUTED);var amount:=label(ui,lines,"¥%d" % int(ledger.get(spec[1],0)),18);amount.horizontal_alignment=HORIZONTAL_ALIGNMENT_RIGHT
-	if int(ledger.open_contracts)>0:label(ui,summary,COPY.copy("ops_carryover") % int(ledger.open_contracts),16,COPY.WARNING)
-	if int(ledger.missed_maintenance)>0:label(ui,summary,COPY.copy("ops_missed") % int(ledger.missed_maintenance),16,COPY.RED)
-	if not settled and int(ledger.open_contracts)>0:
+	var cash_complete := bool(ledger.get("cash_flow_complete", false))
+	var cash_change := _ledger_int(ledger,["cash_change"], int(ledger.get("cash_after",0))-int(ledger.get("cash_open",ledger.get("cash_after",0))))
+	label(ui,ui.modal_body,COPY.copy("ops_settled_day" if settled else "ops_closing_day") % int(ledger.day),23,M.ACCENT)
+	var summary:=HBoxContainer.new();summary.name="CloseoutSummary";summary.size_flags_horizontal=Control.SIZE_EXPAND_FILL;summary.add_theme_constant_override("separation",18);ui.modal_body.add_child(summary)
+	var columns: Container=summary
+	var operating:=VBoxContainer.new();operating.name="CloseoutOperatingColumn";operating.size_flags_horizontal=Control.SIZE_EXPAND_FILL;columns.add_child(operating)
+	label(ui,operating,COPY.copy("ops_profit"),14,M.MUTED)
+	var profit:=label(ui,operating,"¥%d" % int(ledger.get("total_profit",0)),30,M.INK);profit.name="CloseoutProfit";profit.add_theme_font_override("font",COPY.font(600));profit.autowrap_mode=TextServer.AUTOWRAP_OFF
+	var operating_rows: Array = [[COPY.copy("ops_contract_net"),_ledger_int(ledger,["contract_net"])],[COPY.copy("ops_care_earned"),_ledger_int(ledger,["care_gross"])],[COPY.copy("ops_care_cost"),_ledger_int(ledger,["care_cost"])],[COPY.copy("ops_payroll"),_ledger_int(ledger,["payroll_due"])],[COPY.copy("ops_hiring"),_ledger_int(ledger,["hiring_cost"])]]
+	var cash:=VBoxContainer.new();cash.name="CloseoutCashColumn";cash.size_flags_horizontal=Control.SIZE_EXPAND_FILL;columns.add_child(cash)
+	label(ui,cash,COPY.copy("v220_cash_change" if cash_complete else "ops_cash"),14,M.MUTED)
+	var change_color := M.DANGER if cash_complete and cash_change < 0 else M.ACCENT
+	var change:=label(ui,cash,"¥%d" % (cash_change if cash_complete else int(ledger.get("cash_current",ledger.get("cash_after",0)))),28,change_color);change.name="CloseoutCashChange";change.autowrap_mode=TextServer.AUTOWRAP_OFF
+	label(ui,cash,COPY.copy("ops_cash_after"),14,M.MUTED)
+	var cash_after:=label(ui,cash,"¥%d" % int(ledger.get("cash_after",0)),22,M.INK);cash_after.name="CloseoutCashAfter";cash_after.autowrap_mode=TextServer.AUTOWRAP_OFF
+	var details := VBoxContainer.new(); details.name = "CloseoutLedgerDetails"; details.add_theme_constant_override("separation", 6); ui.modal_body.add_child(details)
+	_closeout_group(ui, details, COPY.copy("v220_profit_detail"), operating_rows, false, "CloseoutOperating")
+	var cash_rows: Array = []
+	if cash_complete:
+		cash_rows.append([COPY.copy("v220_cash_open"),_ledger_int(ledger,["cash_open"])])
+		cash_rows.append([COPY.copy("v220_cash_in"),_ledger_int(ledger,["cash_in"])])
+		cash_rows.append([COPY.copy("v220_cash_out"),_ledger_int(ledger,["cash_out"])])
+		cash_rows.append([COPY.copy("v220_cash_change"),cash_change])
+	else:
+		cash_rows.append([COPY.copy("v220_cash_end"),_ledger_int(ledger,["cash_after"])])
+	if cash_complete:
+		var cash_flow: Variant = ledger.get("cash_flow", {})
+		if cash_flow is Dictionary:
+			for flow_spec in [["v220_collections", "invoice_collections"],["v220_job_payments", "job_receipts"],["v220_job_costs", "job_costs"],["v220_care_income", "care_receipts"],["v220_care_costs", "care_costs"],["v220_stock_purchases", "stock_purchases"],["v220_investment", "investment"],["v220_recruitment", "recruitment"],["v220_wages_paid", "wages_paid"]]:
+				if cash_flow.has(str(flow_spec[1])): cash_rows.append([COPY.copy(str(flow_spec[0])), int(cash_flow.get(str(flow_spec[1]), 0))])
+		cash_rows.append([COPY.copy("v220_cash_end"),_ledger_int(ledger,["cash_after"])])
+	cash_rows.append([COPY.copy("billing_due_next_day"),_ledger_int(ledger,["due_next_day"])])
+	var asset_spending:=_ledger_int(ledger,["inventory_spending","investment_spending","assetspend","assets_spend"])
+	if asset_spending!=0:
+		cash_rows.append([COPY.copy("v220_investment"),asset_spending])
+	_closeout_group(ui, details, COPY.copy("v220_cash_flow"), cash_rows, false, "CloseoutCash")
+	var warnings:=VBoxContainer.new();warnings.name="CloseoutWarnings";warnings.add_theme_constant_override("separation",3);ui.modal_body.add_child(warnings)
+	ui.modal_body.move_child(warnings, summary.get_index()+1)
+	if int(ledger.get("open_contracts",0))>0:label(ui,warnings,COPY.copy("ops_carryover") % int(ledger.get("open_contracts",0)),14,M.WARNING)
+	if int(ledger.get("missed_maintenance",0))>0:label(ui,warnings,COPY.copy("ops_missed") % int(ledger.get("missed_maintenance",0)),14,M.DANGER)
+	var receivable:=_ledger_int(ledger,["receivable_total","due_next_day"])
+	if receivable>0:label(ui,warnings,COPY.copy("billing_due_next_day")+"  ¥%d" % receivable,14,M.WARNING)
+	if not settled and int(ledger.get("open_contracts",0))>0:
 		for item in g.contract_queue():
 			if bool(item.completed):continue
-			var pending:=flow(ui.modal_body);label(ui,pending,str(item.client)+" / "+str(item.title)+"  ·  "+str(item.deadline_text),14,COPY.WARNING)
+			var pending:=flow(warnings);label(ui,pending,str(item.client)+" / "+str(item.title)+"  ·  "+str(item.deadline_text),14,M.WARNING)
 			button(ui,pending,"ops_open",ui._operations_open.bind(str(item.id),-1))
 	var actions:=footer(ui)
-	button(ui,actions,"billing_app",ui._open_billing,"DayBilling")
+	if receivable>0:action(ui,actions,"billing_app",ui._open_billing,"DayBilling","quiet")
 	var spacer:=Control.new();spacer.size_flags_horizontal=Control.SIZE_EXPAND_FILL;actions.add_child(spacer)
 	if settled:
-		COPY.primary(button(ui,actions,"ops_open_tasks",ui.open_panel.bind("board"),"DayNext"))
+		action(ui,actions,"ops_open_tasks",ui.open_panel.bind("board"),"DayNext","primary")
 	else:
-		button(ui,actions,"ops_continue",ui.open_panel.bind("board"),"DayContinue")
-		var finish:=button(ui,actions,"queue_overnight",ui._end_day,"DaySettle");finish.disabled=not g.can_end_day();finish.tooltip_text=g.end_day_reason();COPY.primary(finish)
-		if not finish.tooltip_text.is_empty():label(ui,ui.modal_body,finish.tooltip_text,14,COPY.WARNING)
+		action(ui,actions,"ops_continue",ui.open_panel.bind("board"),"DayContinue","quiet")
+		var finish:=action(ui,actions,"queue_overnight",ui._end_day,"DaySettle","primary");finish.disabled=not g.can_end_day();finish.tooltip_text=g.end_day_reason()
+		if not finish.tooltip_text.is_empty():label(ui,warnings,finish.tooltip_text,14,M.WARNING)
+	warnings.visible=warnings.get_child_count()>0
 
 static func signature(g) -> String:
 	var jobs: Array=[]

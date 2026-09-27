@@ -427,7 +427,7 @@ func _raw_option(id: String, index: int) -> String:
 	return str(options[clampi(index, 0, options.size() - 1)])
 
 func _quote_matches_work_status(target: Node, plan_id: String, offer: Dictionary) -> bool:
-	target._reset_state(); target.state.career_mode = true; target.state.awaiting_contract = true; target.state.offers = [offer]; target.state.contract_plan = "standard"; target.state.offer_plan = "standard"; target.set_offer_plan(plan_id)
+	target._reset_state(); target.state.career_mode = true; target.state.awaiting_contract = true; target.state.offers = [offer]; target.state.contract_plan = "standard"; target.state.offer_plan = "standard"; target.state.skills.advisory = 1; target.state.skills.operations = 1; target.state.skills.response = 1; target.set_offer_plan(plan_id)
 	var quote: Dictionary = target.contract_quote(offer)
 	if not target.choose_contract(str(offer.id)): return false
 	var actual: Dictionary = target.work_status()

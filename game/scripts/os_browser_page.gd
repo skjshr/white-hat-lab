@@ -45,6 +45,17 @@ static func _status(d, host: String, code: int) -> Label:
 static func _accent(chapter: int) -> Color:
 	return SHARE_BLUE if chapter in [0, 2] else ID_VIOLET if chapter in [3, 5] else EDR_GREEN if chapter == 4 else UI.OS_ACCENT
 
+static func _is_current_service_host(host: String, chapter: int) -> bool:
+	var hostname := host.get_slice(":", 0).to_lower()
+	match chapter:
+		0: return hostname == "files.client.test"
+		1: return hostname in ["intranet.client.test", "backup.client.test"]
+		2: return hostname in ["intranet.client.test", "admin.client.test", "gateway.client.test"]
+		3: return hostname == "identity.client.test"
+		4: return hostname == "edr.client.test"
+		5: return hostname == "portal.client.test"
+	return false
+
 static func _service_nav(d, shell: VBoxContainer, url: String, chapter: int) -> void:
 	var host := _host(url)
 	var links: Array = []
@@ -68,7 +79,7 @@ static func _service_nav(d, shell: VBoxContainer, url: String, chapter: int) -> 
 		nav.add_child(button)
 
 static func _header(d, shell: VBoxContainer, host: String, code: int, info: Dictionary, accent := UI.OS_ACCENT, customer := "") -> void:
-	var location_text := (customer+"  /  "+host) if not customer.is_empty() else "顧客サイト  /  "+host
+	var location_text := (customer+"  /  "+host) if not customer.is_empty() else host
 	var location: Label = d._label(location_text, 12, UI.MUTED)
 	location.autowrap_mode = TextServer.AUTOWRAP_OFF
 	location.clip_text = true
@@ -94,10 +105,11 @@ static func render(d, page: VBoxContainer, url: String, result: String) -> void:
 	var host := _host(url)
 	var info: Dictionary = d.game.vm_info() if d.game != null else {}
 	var chapter: int = d.game._current_chapter() if d.game != null else -1
-	var accent := _accent(chapter)
+	var is_current_service_host := _is_current_service_host(host, chapter)
+	var accent := _accent(chapter) if is_current_service_host else UI.OS_ACCENT
 	var mission: Dictionary = d.game.mission() if d.game != null else {}
-	_header(d, shell, host, code, info, accent, str(mission.get("client", "顧客")))
-	_service_nav(d, shell, url, chapter)
+	_header(d, shell, host, code, info if is_current_service_host else {}, accent, str(mission.get("client", "顧客")) if is_current_service_host else "")
+	if is_current_service_host: _service_nav(d, shell, url, chapter)
 	if code == 200:
 		var dark := chapter == 4
 		var foreground := Color("e7f4ee") if dark else UI.INK

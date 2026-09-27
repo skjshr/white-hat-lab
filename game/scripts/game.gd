@@ -34,6 +34,10 @@ const PLACEMENT_RULES = preload("res://scripts/placement_rules.gd")
 const MARKET_DEMAND = preload("res://scripts/market_demand.gd")
 const CUSTOMER_STOCK = preload("res://scripts/customer_stock.gd")
 const DISPATCH_FORECAST = preload("res://scripts/dispatch_forecast.gd")
+const PRICING_CATEGORIES := ["advisory", "operations", "response"]
+const PRICING_MIN_PERCENT := 50
+const PRICING_MAX_PERCENT := 150
+const PRICING_STEP_PERCENT := 5
 
 var save_path: String = SAVE_NAME
 var backup_path: String = SAVE_BACKUP_NAME
@@ -285,7 +289,7 @@ func _reset_state() -> void:
 	state = {"version":STATE_VERSION,"maintenance_scope_version":2,"chapter":0,"day":1,"cash":5000,"trust":0,
 		"accepted":false,"inspected":false,"config":_default_fields(0),"revision":0,
 		"validated_revision":-1,"checks":[],"completed_ids":[],"history":[],
-		"equipment":[],"delivery_orders":[],"office_expansion":{"status":"locked","price":28000,"available_day":-1},"assignments":{},"clients":{},"customer_relations":{},"care_agreements":{},"staff":{},"staff_payroll":{"enabled":false,"last_settled_day":-1,"due":[]},"care_incidents":{},"maintenance_targets":{},"maintenance_jobs":[],"maintenance_settled_day":-1,"offer_quotes":{},"quote_decisions":[],"retainer_settled_day":-1,"contract_contexts":{},"offer_plan":"standard","desktop_sessions":{},"retainer_daily":{},"restore_preview":0,"strategy":"","skills":{"operations":0,"advisory":0,"response":0},"profit":0,"credit":0,"recurring_clients":[],"strategy_income":0,"career_mode":false,"contracts_completed":0,"current_contract_id":"","offers":[],"market_day":-1,"market_leads":[],"awaiting_contract":false,"game_complete":false,"errors":[],"profile":profile_defaults(),"diagnostics_required":false,"ui_help_seen":{},"dispatch_queues":{},"dispatch_holds":{}}
+		"equipment":[],"delivery_orders":[],"office_expansion":{"status":"locked","price":28000,"available_day":-1},"assignments":{},"clients":{},"customer_relations":{},"care_agreements":{},"staff":{},"staff_payroll":{"enabled":false,"last_settled_day":-1,"due":[]},"care_incidents":{},"maintenance_targets":{},"maintenance_jobs":[],"maintenance_settled_day":-1,"offer_quotes":{},"quote_decisions":[],"retainer_settled_day":-1,"contract_contexts":{},"offer_plan":"standard","pricing_policy":_default_pricing_policy(),"procurement_cart":CUSTOMER_STOCK.empty_cart(),"desktop_sessions":{},"retainer_daily":{},"restore_preview":0,"strategy":"","skills":{"operations":0,"advisory":0,"response":0},"profit":0,"credit":0,"cash_flow_start_day":0,"recurring_clients":[],"strategy_income":0,"career_mode":false,"contracts_completed":0,"current_contract_id":"","offers":[],"market_day":-1,"market_leads":[],"awaiting_contract":false,"game_complete":false,"errors":[],"profile":profile_defaults(),"diagnostics_required":false,"ui_help_seen":{},"dispatch_queues":{},"dispatch_holds":{}}
 	_assignments = {}
 	state.targets = []; state.target_index = 0; state.contract = {}; state.contract_plan = "standard"; state.offer_plan = "standard"; state.clock_minutes = BUSINESS_START_MINUTE; state.work = {"minutes":0.0,"started_at":BUSINESS_START_MINUTE,"started_day":1,"restarts_failed":0,"resets":0,"incident_cost":0,"plan":"standard"}
 	state.vm_states = {}; state.peak_profit = 0; _machine = null; _machine_key = ""
@@ -368,6 +372,29 @@ func personalize(text: String) -> String:
 		result += text.substr(cursor, best_pos - cursor) + replacements[best_index]
 		cursor = best_pos + sources[best_index].length()
 	return result
+
+func _default_pricing_policy() -> Dictionary:
+	return {"advisory":100,"operations":100,"response":100}
+
+func _valid_pricing_policy(value: Variant) -> bool:
+	if not value is Dictionary: return false
+	for category in PRICING_CATEGORIES:
+		if not value.has(category): return false
+		var amount: Variant = value[category]
+		if typeof(amount) not in [TYPE_INT, TYPE_FLOAT] or not is_finite(float(amount)) or float(amount) != floorf(float(amount)): return false
+		var percent := int(amount)
+		if percent < PRICING_MIN_PERCENT or percent > PRICING_MAX_PERCENT or posmod(percent - PRICING_MIN_PERCENT, PRICING_STEP_PERCENT) != 0: return false
+	for key in value.keys():
+		if str(key) not in PRICING_CATEGORIES: return false
+	return true
+
+func _valid_procurement_cart(value: Variant) -> bool:
+	if not value is Dictionary: return false
+	for key in value.keys():
+		if not CUSTOMER_STOCK.known_sku(str(key)): return false
+		var quantity: Variant = value[key]
+		if typeof(quantity) not in [TYPE_INT, TYPE_FLOAT] or not is_finite(float(quantity)) or float(quantity) != floorf(float(quantity)) or int(quantity) < 0 or int(quantity) > 3: return false
+	return true
 
 func _load_settings() -> void:
 	settings = _default_settings()
@@ -493,6 +520,9 @@ func _valid_state(candidate: Dictionary) -> bool:
 		for order in candidate.delivery_orders:
 			if not order is Dictionary or str(order.get("id", "")).is_empty(): return false
 	if candidate.has("customer_stock") and not CUSTOMER_STOCK.validate(candidate.customer_stock): return false
+	if candidate.has("pricing_policy") and not _valid_pricing_policy(candidate.pricing_policy): return false
+	if candidate.has("procurement_cart") and not _valid_procurement_cart(candidate.procurement_cart): return false
+	if candidate.has("cash_flow_start_day") and (typeof(candidate.cash_flow_start_day) not in [TYPE_INT, TYPE_FLOAT] or not is_finite(float(candidate.cash_flow_start_day)) or float(candidate.cash_flow_start_day) != floorf(float(candidate.cash_flow_start_day)) or int(candidate.cash_flow_start_day) < 0): return false
 	if candidate.has("targets"):
 		if not candidate.targets is Array: return false
 		for target in candidate.targets:
@@ -532,6 +562,24 @@ func load_game() -> bool:
 	state.last_load_error = load_error
 	if not state.has("billing"):
 		BILLING.ensure(state); needs_migration = true
+	if not state.has("pricing_policy"):
+		state.pricing_policy = _default_pricing_policy(); needs_migration = true
+	else:
+		var migrated_policy: Dictionary = state.pricing_policy.duplicate(true)
+		for category in PRICING_CATEGORIES:
+			if not migrated_policy.has(category): migrated_policy[category] = 100; needs_migration = true
+		state.pricing_policy = migrated_policy
+	if not state.has("procurement_cart"):
+		state.procurement_cart = CUSTOMER_STOCK.empty_cart(); needs_migration = true
+	else:
+		var migrated_cart: Dictionary = state.procurement_cart.duplicate(true)
+		for sku in CUSTOMER_STOCK.empty_cart().keys():
+			if not migrated_cart.has(sku): migrated_cart[sku] = 0; needs_migration = true
+		state.procurement_cart = migrated_cart
+	if not state.has("cash_flow_start_day"):
+		# Existing saves do not have a trustworthy opening cash row. Start the
+		# factual cash-flow window on the next day rather than inventing history.
+		state.cash_flow_start_day = int(state.day) + 1; needs_migration = true
 	if not state.has("ui_help_seen") or not state.ui_help_seen is Dictionary:
 		state.ui_help_seen = {"legacy":true}
 		needs_migration = true
@@ -1368,7 +1416,7 @@ func vm_run(command: String, work_kind: String = "") -> String:
 	if current_done(): return "報告済み案件。案件ボードから次の営業へ進行可能。"
 	var machine = _vm()
 	var operation := command.strip_edges().trim_prefix("sudo ")
-	var console_operation := int(state.get("contract", {}).get("linked_identity_version", 0)) == 1 or operation.begins_with("identity ") or operation.begins_with("edr ") or operation.begins_with("portal ") or (_current_chapter()==0 and int(machine.state.get("samba_model_version",1))>=2) or (_current_chapter()==1 and int(machine.state.get("backup_model_version",1))>=2) or (operation.begins_with("curl ") and _current_chapter()==5 and int(machine.state.get("portal_model_version",1))>=2)
+	var console_operation := operation.begins_with("cp ") or int(state.get("contract", {}).get("linked_identity_version", 0)) == 1 or operation.begins_with("identity ") or operation.begins_with("edr ") or operation.begins_with("portal ") or (_current_chapter()==0 and int(machine.state.get("samba_model_version",1))>=2) or (_current_chapter()==1 and int(machine.state.get("backup_model_version",1))>=2) or (operation.begins_with("curl ") and _current_chapter()==5 and int(machine.state.get("portal_model_version",1))>=2)
 	var previous_state: Dictionary = state.duplicate(true) if console_operation else {}
 	var previous_vm: Dictionary = machine.export_state() if console_operation else {}
 	var branch_portal: bool = _current_chapter() == 5 and machine.has_linked_branch_storage()
@@ -1504,6 +1552,25 @@ func _market_demand(offer: Dictionary) -> Dictionary:
 	var satisfaction_bonus := maxi(0, int(relation.get("satisfaction", 70)) - 70) * 5
 	return {"label":label,"cap_factor":float(caps[phase]),"satisfaction_bonus":satisfaction_bonus}
 
+func pricing_policy() -> Dictionary:
+	var result := _default_pricing_policy()
+	var saved: Variant = state.get("pricing_policy", {})
+	if saved is Dictionary:
+		for category in PRICING_CATEGORIES:
+			if saved.has(category): result[category] = clampi(int(saved[category]), PRICING_MIN_PERCENT, PRICING_MAX_PERCENT)
+	return result
+
+func set_pricing_policy(category: String, percent: int) -> bool:
+	if category not in PRICING_CATEGORIES or percent < PRICING_MIN_PERCENT or percent > PRICING_MAX_PERCENT or posmod(percent - PRICING_MIN_PERCENT, PRICING_STEP_PERCENT) != 0: return false
+	var previous := state.duplicate(true)
+	if not state.has("pricing_policy") or not state.pricing_policy is Dictionary: state.pricing_policy = _default_pricing_policy()
+	state.pricing_policy[category] = percent
+	if not _valid_pricing_policy(state.pricing_policy) or not save_game():
+		state = previous
+		return false
+	changed.emit()
+	return true
+
 func set_offer_quote(id: String, amount: int) -> bool:
 	if state.get("game_complete", false) or amount < 0: return false
 	if state.get("contract_contexts",{}).has(id) or id in state.get("completed_ids",[]): return false
@@ -1526,23 +1593,28 @@ func contract_quote(offer: Dictionary, quoted_override: int = -1) -> Dictionary:
 	var specs: Array = offer.get("target_specs", []) if offer.get("target_specs", []) is Array else []
 	var pricing := _contract_budget(int(offer.get("chapter", state.chapter)), int(offer.get("targets", 1)), specs, plan_id)
 	var plan: Dictionary = pricing.plan
-	var fee := roundi(float(offer.get("reward", offer.get("base_reward", 0))) * float(plan.multiplier))
+	var reference_fee := roundi(float(offer.get("reward", offer.get("base_reward", 0))) * float(plan.multiplier))
+	var category := str(offer.get("category", "advisory"))
+	var policy := pricing_policy()
+	var policy_percent := int(policy.get(category, 100))
+	var policy_fee := roundi(float(reference_fee) * float(policy_percent) / 100.0)
 	var offer_supply: Dictionary = offer.get("supply_requirement",{}) if offer.get("supply_requirement",{}) is Dictionary else {}
 	var supply_cost := int(CUSTOMER_STOCK.product(str(offer_supply.get("sku",CUSTOMER_STOCK.SKU))).get("unit_cost",CUSTOMER_STOCK.UNIT_COST)) if not offer_supply.is_empty() else 0
 	var costs := 700 + supply_cost
 	var budget := float(pricing.budget)
 	var demand := _market_demand(offer)
-	var budget_limit := roundi(float(fee) * float(demand.cap_factor) + int(demand.satisfaction_bonus))
-	var quoted_fee := fee
+	var budget_limit := roundi(float(reference_fee) * float(demand.cap_factor) + int(demand.satisfaction_bonus))
+	var quoted_fee := policy_fee
 	var plan_quotes: Dictionary = state.offer_quotes.get(str(offer.get("id", "")), {})
-	if plan_quotes.has(str(plan.id)): quoted_fee = int(plan_quotes[plan.id])
+	var has_saved_quote := plan_quotes.has(str(plan.id))
+	if has_saved_quote: quoted_fee = int(plan_quotes[plan.id])
 	if quoted_override >= 0: quoted_fee = quoted_override
-	var reaction := "discount" if quoted_fee < roundi(fee * 0.9) else ("premium" if quoted_fee > roundi(fee * 1.1) else "fair")
+	var reaction := "discount" if quoted_fee < roundi(reference_fee * 0.9) else ("premium" if quoted_fee > roundi(reference_fee * 1.1) else "fair")
 	var affordable := quoted_fee <= budget_limit
 	var reason := ""
 	if plan.id == "care": reason = care_eligibility(str(offer.get("client", "")))
 	if not affordable: reason = "顧客予算 ¥%d を超えています。" % budget_limit
-	return {"selected_plan":str(plan.id),"plan_label":str(plan.label),"estimated_fee":quoted_fee,"costs":costs,"budget":budget,"deadline_text":_clock_text(BUSINESS_START_MINUTE + int(round(budget))),"invoice_total":quoted_fee+supply_cost,"net":quoted_fee+supply_cost-costs,"reference_fee":fee,"quoted_fee":quoted_fee,"budget_limit":budget_limit,"market_label":str(demand.label),"price_reaction":reaction,"affordable":affordable,"reason":reason}
+	return {"selected_plan":str(plan.id),"plan_label":str(plan.label),"estimated_fee":quoted_fee,"costs":costs,"budget":budget,"deadline_text":_clock_text(BUSINESS_START_MINUTE + int(round(budget))),"invoice_total":quoted_fee+supply_cost,"net":quoted_fee+supply_cost-costs,"reference_fee":reference_fee,"policy_fee":policy_fee,"policy_percent":policy_percent,"quoted_fee":quoted_fee,"budget_limit":budget_limit,"market_label":str(demand.label),"price_reaction":reaction,"affordable":affordable,"reason":reason,"manual_quote":has_saved_quote or quoted_override >= 0}
 
 func work_status() -> Dictionary:
 	var minutes := float(state.get("work", {}).get("minutes", 0.0))
@@ -1822,18 +1894,46 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 		state.offers[-1].advanced_work_minutes = int(selected.get("advanced_work_minutes", 0))
 	var candidate_offers: Array = []
 	var carried_cases: Array = []
+	var completed_cases: Dictionary = {}
+	for receipt in state.get("history", []):
+		if receipt is Dictionary:
+			var completed_case_id := str(receipt.get("case_id", ""))
+			if not completed_case_id.is_empty(): completed_cases[completed_case_id] = true
 	for context_id in state.get("contract_contexts", {}):
 		var context: Dictionary = state.contract_contexts[context_id]
 		var contract: Dictionary = context.get("contract", {})
 		if not bool(context.get("completed", false)) and str(context_id) != "career-%d-%s" % [state.day, str(contract.get("case_id", ""))]:
 			carried_cases.append(str(contract.get("case_id", "")))
+	var care_replacement_cases: Dictionary = {}
+	var offer_category_by_case: Dictionary = {}
+	var fresh_category_counts: Dictionary = {}
+	var quoted_case_ids: Dictionary = {}
+	for candidate in state.offers:
+		var candidate_case_id := str(candidate.get("case_id", ""))
+		var candidate_client := str(candidate.get("client", ""))
+		var candidate_category := str(candidate.get("category", ""))
+		offer_category_by_case[candidate_case_id] = candidate_category
+		if state.get("offer_quotes", {}).has(str(candidate.get("id", ""))): quoted_case_ids[candidate_case_id] = true
+		var candidate_supply: Variant = candidate.get("supply_requirement", {})
+		var special_route: bool = (candidate_supply is Dictionary and not candidate_supply.is_empty()) or candidate_case_id == "endpoint-recovery"
+		if bool(candidate.get("unlocked", false)) and not completed_cases.has(candidate_case_id) and not bool(candidate.get("retired_from_new_offers", false)) and not special_route:
+			fresh_category_counts[candidate_category] = int(fresh_category_counts.get(candidate_category, 0)) + 1
+		if bool(state.get("care_agreements", {}).get(candidate_client, {}).get("active", false)) and not candidate_case_id.is_empty():
+			care_replacement_cases[candidate_case_id] = true
 	var existing_leads: Array = state.get("market_leads", []) if int(state.get("market_day", -1)) == int(state.day) else []
+	if not existing_leads.is_empty():
+		existing_leads = existing_leads.filter(func(raw_id):
+			var lead_id := str(raw_id)
+			var lead_category := str(offer_category_by_case.get(lead_id, ""))
+			return not completed_cases.has(lead_id) or care_replacement_cases.has(lead_id) or quoted_case_ids.has(lead_id) or int(fresh_category_counts.get(lead_category, 0)) == 0)
 	for candidate in state.offers:
 		var case_id := str(candidate.get("case_id", ""))
 		var retired := bool(candidate.get("retired_from_new_offers", false))
+		var care_replacement := care_replacement_cases.has(case_id)
+		var completed_allowed := not completed_cases.has(case_id) or care_replacement or quoted_case_ids.has(case_id) or int(fresh_category_counts.get(str(candidate.get("category", "")), 0)) == 0
 		# Preserve a lead already shown this day, including a quoted/awaiting
 		# retired case. Retirement only affects fresh market generation.
-		if bool(candidate.get("unlocked", false)) and case_id not in carried_cases and (not retired or case_id in existing_leads): candidate_offers.append(candidate)
+		if bool(candidate.get("unlocked", false)) and case_id not in carried_cases and completed_allowed and (not retired or case_id in existing_leads): candidate_offers.append(candidate)
 	var recent_case_ids: Array = []
 	for receipt in state.get("history", []):
 		if receipt is Dictionary and int(receipt.get("day", -1)) == int(state.day) - 1 and str(receipt.get("kind", "")).is_empty():
@@ -1849,6 +1949,46 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 			return str(a.case_id) < str(b.case_id))
 		for candidate in promoted: priority_ids.append(str(candidate.case_id))
 	state.market_leads=MARKET_DEMAND.select_by_category(candidate_offers,int(state.day),recent_case_ids,existing_leads,state.skills,priority_ids)
+	# Keep progression moving when demand selection is saturated by a special
+	# route (hardware, endpoint recovery, or advanced work). Prefer a fresh
+	# ordinary single-service case; when that category has no fresh ordinary
+	# case left, rotate a completed ordinary case back into the board. Existing
+	# same-day leads remain intact so quoted choices do not disappear.
+	for category in ["advisory", "operations", "response"]:
+		var ordinary_lead := false
+		for lead_id in state.market_leads:
+			for candidate in candidate_offers:
+				if str(candidate.get("case_id", "")) != str(lead_id) or str(candidate.get("category", "")) != category: continue
+				var candidate_supply: Variant = candidate.get("supply_requirement", {})
+				var candidate_case := str(candidate.get("case_id", ""))
+				if (not candidate_supply is Dictionary or candidate_supply.is_empty()) and candidate_case != "endpoint-recovery" and not candidate_case.begins_with("advanced-") and not candidate_case.begins_with("composite-"):
+					ordinary_lead = true
+					break
+			if ordinary_lead: break
+		if ordinary_lead: continue
+		var category_lead_count := 0
+		for lead_id in state.market_leads:
+			for candidate in candidate_offers:
+				if str(candidate.get("case_id", "")) == str(lead_id) and str(candidate.get("category", "")) == category:
+					category_lead_count += 1
+					break
+		if category_lead_count >= [2, 3, 4][MARKET_DEMAND.phase(int(state.day), ["advisory", "operations", "response"].find(category))]: continue
+		var ordinary_candidates: Array = candidate_offers.filter(func(candidate):
+			var candidate_supply: Variant = candidate.get("supply_requirement", {})
+			var candidate_case := str(candidate.get("case_id", ""))
+			return str(candidate.get("category", "")) == category and (not candidate_supply is Dictionary or candidate_supply.is_empty()) and candidate_case != "endpoint-recovery" and not candidate_case.begins_with("advanced-") and not candidate_case.begins_with("composite-")
+		)
+		ordinary_candidates.sort_custom(func(a,b):
+			var a_done := completed_cases.has(str(a.get("case_id", "")))
+			var b_done := completed_cases.has(str(b.get("case_id", "")))
+			if a_done != b_done: return not a_done
+			return int(a.get("reward", 0)) > int(b.get("reward", 0))
+		)
+		for fallback in ordinary_candidates:
+			var fallback_id := str(fallback.get("case_id", ""))
+			if fallback_id not in state.market_leads:
+				state.market_leads.append(fallback_id)
+				break
 	state.market_day=int(state.day)
 	var lead_set: Dictionary = {}
 	for lead in state.get("market_leads", []): lead_set[str(lead)] = true
@@ -1873,6 +2013,28 @@ func market_summary() -> Dictionary:
 		result[category].count = int(result[category].count) + 1
 		if bool(offer.get("market_available", false)): result[category].available = int(result[category].available) + 1
 	return result
+
+func offer_operations_preview(offer: Dictionary) -> Dictionary:
+	var requirement: Variant = offer.get("supply_requirement", {}) if offer is Dictionary else {}
+	var sku := str(requirement.get("sku", "")) if requirement is Dictionary else ""
+	var own_required := maxi(0,int(requirement.get("quantity",1))) if requirement is Dictionary and not requirement.is_empty() and not sku.is_empty() else 0
+	var stock := customer_stock_summary(sku) if not sku.is_empty() else {"available":0,"inbound":0,"reserved":0}
+	var available := int(stock.get("available",0)); var inbound := int(stock.get("inbound",0)); var reserved := int(stock.get("reserved",0))
+	# The summary already includes every accepted contract.  Add a preview's
+	# requirement only when this offer is not in that accepted portfolio, so a
+	# second preview cannot promise the same units twice.
+	var offer_id := str(offer.get("id", "")) if offer is Dictionary else ""
+	var already_accepted := bool(state.get("accepted",false)) and str(state.get("current_contract_id", "")) == offer_id and not current_done()
+	if not already_accepted and state.get("contract_contexts",{}).has(offer_id):
+		var context: Variant = state.contract_contexts.get(offer_id,{})
+		already_accepted = context is Dictionary and bool(context.get("accepted",true)) and not bool(context.get("completed",false))
+	if already_accepted: own_required = 0
+	var portfolio_required := int(stock.get("required",0)) + own_required
+	var shortage := maxi(0,portfolio_required-available-inbound)
+	var unit_cost := int(CUSTOMER_STOCK.product(sku).get("unit_cost",0)) if not sku.is_empty() and CUSTOMER_STOCK.known_sku(sku) else 0
+	var staffing := staff_summary()
+	var capacity := contract_capacity(); var open_contracts := _open_contract_count()
+	return {"sku":sku,"required":portfolio_required,"own_required":own_required,"portfolio_required":portfolio_required,"available":available,"inbound":inbound,"reserved":reserved,"shortage":shortage,"purchase_cost":shortage*unit_cost,"cash_after_purchase":int(state.get("cash",0))-shortage*unit_cost,"open_contracts":open_contracts,"contract_capacity":capacity,"free_contract_slots":maxi(0,capacity-open_contracts),"staff_count":team_members().size(),"extra_staff_count":int(staffing.get("count",0)),"staff_capacity":int(staffing.get("capacity",0)),"workforce_capacity":2+int(staffing.get("capacity",0)),"payroll_due":int(staffing.get("due",0))}
 
 func start_free_career() -> bool:
 	if state.get("career_mode",false): return false
@@ -2073,7 +2235,7 @@ func deliver() -> bool:
 			state = previous_state; _assignments = previous_assignments; return false
 		state.last_receipt.invoice_id = str(draft.invoice.id)
 		state.last_receipt.billing_version = 1
-	state.history.append({"id":id,"case_id":state.contract.get("case_id",""),"copy_id":mission().id,"title":mission().title,"day":state.day,"reward":fee,"expense":int(status.costs),"material_cost":int(status.get("material_cost",0)),"hardware_serial":str(_customer_hardware().get("serial","")),"profit":net,"retainer":0,"checks":state.checks.duplicate(true),"grade":str(review.get("grade","C")),"quality_score":int(review.get("score",0)),"baseline_bonus":baseline_bonus,"satisfaction_before":satisfaction_before,"satisfaction_after":int(relation.satisfaction),"renewal_outcome":renewal_outcome})
+	state.history.append({"id":id,"case_id":state.contract.get("case_id",""),"copy_id":mission().id,"title":mission().title,"day":state.day,"reward":fee,"bonus":bonus,"expense":int(status.costs),"material_cost":int(status.get("material_cost",0)),"hardware_serial":str(_customer_hardware().get("serial","")),"profit":net,"cash_delta":delivery_cash,"billing_version":1 if invoiced else 0,"retainer":0,"checks":state.checks.duplicate(true),"grade":str(review.get("grade","C")),"quality_score":int(review.get("score",0)),"baseline_bonus":baseline_bonus,"satisfaction_before":satisfaction_before,"satisfaction_after":int(relation.satisfaction),"renewal_outcome":renewal_outcome})
 	state.clients[id] = {"title":mission().title,"debrief":mission().debrief,"config":_vm().state.get("applied", {}).duplicate(true),"evidence":mission().evidence.duplicate(true),"checks":state.checks.duplicate(true)}
 	if state.get("career_mode", false): _sync_contract_context(); state.contract_contexts[id].completed = true; _make_offers()
 	if state.contract_plan == "care" and not captured_targets.is_empty():
@@ -2114,6 +2276,7 @@ func _settle_staff_payroll() -> void:
 		var owed := maxi(0,int(entry.amount)-int(entry.get("paid_amount",0)))
 		var payment := mini(available,owed)
 		available -= payment; state.cash -= payment
+		if payment > 0: state.history.append({"kind":"wage_payment","day":int(state.day),"staff_id":str(entry.get("staff_id","")),"amount":payment})
 		entry.paid_amount = int(entry.get("paid_amount",0)) + payment
 		entry.paid = int(entry.paid_amount) >= int(entry.amount)
 	state.staff_payroll.last_settled_day = int(state.day)
@@ -2207,7 +2370,15 @@ func _apply_retainer() -> void:
 	if not state.has("retainer_daily") or not state.retainer_daily is Dictionary: state.retainer_daily = {}
 	state.retainer_daily[str(int(state.day))] = {"day":int(state.day),"retainer":income,"retainer_gross":earned,"retainer_cost":service_cost,"retainer_net":income,"maintenance_earned":earned,"maintenance_missed":missed}
 	state.history.append({"id":"retainer-day-%d" % int(state.day),"day":int(state.day),"retainer":income,"retainer_gross":earned,"retainer_cost":service_cost,"retainer_net":income,"maintenance_earned":earned,"maintenance_missed":missed})
-	if state.history.size() > 100: state.history = state.history.slice(-100)
+	if state.history.size() > 100:
+		# Keep every current-day cash row for DayLedger's opening/closing
+		# reconciliation, while retaining the normal recent-history window.
+		var first_current_day := -1
+		for i in state.history.size():
+			if int(state.history[i].get("day", -1)) == int(state.day): first_current_day = i; break
+		var recent_start := maxi(0, state.history.size() - 100)
+		var keep_from := recent_start if first_current_day < 0 else mini(recent_start, first_current_day)
+		state.history = state.history.slice(keep_from)
 	var last_receipt: Dictionary = state.get("last_receipt", {})
 	if not last_receipt.is_empty() and int(last_receipt.get("day", -1)) == int(state.day):
 		last_receipt.retainer = income
@@ -2266,6 +2437,39 @@ func staff_summary() -> Dictionary:
 		if int(item.get("day",-1)) == int(state.day): due += remaining
 		else: arrears += remaining
 	return {"count":count,"capacity":staff_capacity(),"due":due,"arrears":arrears}
+
+func company_operating_summary() -> Dictionary:
+	var draft_invoices: Array = []
+	var draft_total := 0
+	for invoice in BILLING.list(state):
+		if str(invoice.get("status", "")) != "draft": continue
+		draft_invoices.append(invoice.duplicate(true)); draft_total += int(invoice.get("amount",0))
+	var stock_shortages: Array = []
+	var stock_shortage_total := 0
+	var stock_summary := customer_stock_summary()
+	for sku in stock_summary.get("by_sku", {}).keys():
+		var item: Dictionary = stock_summary.by_sku[sku]
+		if int(item.get("shortage",0)) > 0:
+			stock_shortages.append(item.duplicate(true)); stock_shortage_total += int(item.get("shortage",0))
+	var receiving_count := 0
+	var incoming_count := 0
+	for unit in customer_stock_units():
+		if str(unit.get("status", "")) == "ready": receiving_count += 1
+		elif str(unit.get("status", "")) == "queued": incoming_count += 1
+	for order in state.get("delivery_orders", []):
+		if str(order.get("status", "")) == "ready": receiving_count += 1
+		elif str(order.get("status", "")) == "queued": incoming_count += 1
+	var pending_equipment := 0
+	for order in state.get("delivery_orders", []):
+		if str(order.get("status", "")) != "installed": pending_equipment += 1
+	var maintenance_pending := 0
+	for job in state.get("maintenance_jobs", []):
+		if int(job.get("day",state.day)) == int(state.day) and str(job.get("status", "")) in ["pending", "queued", "paused", "failed"]: maintenance_pending += 1
+	var staffing := staff_summary()
+	var capacity := contract_capacity(); var open_contracts := _open_contract_count()
+	var billing := billing_summary()
+	var total_staff := team_members().size()
+	return {"cash":int(state.get("cash",0)),"draft_invoices":draft_invoices,"draft_invoice_count":draft_invoices.size(),"draft_invoice_total":draft_total,"draft_count":draft_invoices.size(),"draft_total":draft_total,"receivable_total":int(billing.get("receivable_total",0)),"paid_today":int(billing.get("paid_today",0)),"due_next_day":int(billing.get("due_next_day",0)),"stock_shortages":stock_shortages,"stock_shortage_total":stock_shortage_total,"stock_shortage_count":stock_shortage_total,"receiving_count":receiving_count,"incoming_count":incoming_count,"installed_equipment_count":state.get("equipment",[]).size(),"pending_equipment_count":pending_equipment,"staff_count":total_staff,"extra_staff_count":int(staffing.get("count",0)),"staff_capacity":int(staffing.get("capacity",0)),"workforce_capacity":2+int(staffing.get("capacity",0)),"contracts":open_contracts,"open_contracts":open_contracts,"contract_capacity":capacity,"free_contract_slots":maxi(0,capacity-open_contracts),"payroll_due":int(staffing.get("due",0)),"payroll_arrears":int(staffing.get("arrears",0)),"maintenance_pending":maintenance_pending}
 
 func colleague_role(id: String) -> String:
 	if id in ["aya","ren"]: return id
@@ -2358,6 +2562,7 @@ func pay_staff_arrears() -> bool:
 		var owed := maxi(0,int(item.amount)-int(item.get("paid_amount",0)))
 		var payment := mini(remaining,owed)
 		item.paid_amount = int(item.get("paid_amount",0)) + payment; remaining -= payment
+		if payment > 0: state.history.append({"kind":"wage_payment","day":int(state.day),"staff_id":str(item.get("staff_id","")),"amount":payment})
 		item.paid = int(item.paid_amount) >= int(item.amount)
 	if not save_game(): state = previous; notified.emit(UI_COPY.copy("staffing_save_failed")); return false
 	changed.emit(); return true
@@ -2587,7 +2792,29 @@ func last_day_ledger() -> Dictionary:
 	return DAY_LEDGER.latest(self)
 
 func assign_colleague(id: String) -> void:
-	operations_assign(id,str(state.get("current_contract_id","")),int(state.get("target_index",0)))
+	var contract_id := str(state.get("current_contract_id",""))
+	if state.get("career_mode",false) or not contract_id.is_empty():
+		operations_assign(id,contract_id,int(state.get("target_index",0)))
+		return
+	# Story mode predates the career contract queue and has no contract id.
+	# Keep that public action working with the same assignment record consumed
+	# by _process/_finish_colleague, without inventing a queue context.
+	if not state.get("accepted",false) or current_done() or id.is_empty() or colleague_role(id).is_empty() or _assignments.get(id,{}).get("status","") == "working": return
+	if not staff_availability(id,"normal",_current_chapter(),true).is_empty() or not _customer_hardware_connected(): return
+	var previous_state := state.duplicate(true); var previous_assignments := _assignments.duplicate(true)
+	var duration := team_work_duration(id); var vm: Variant = _vm(); var config_before := ""
+	if vm != null:
+		var machine_state: Variant = vm.get("state")
+		if machine_state is Dictionary:
+			var files: Variant = machine_state.get("fs", {})
+			var config_path := str(machine_state.get("config_path", ""))
+			if files is Dictionary: config_before = str(files.get(config_path, ""))
+	_assignments[id] = {"status":"working","remaining":duration,"total":duration,"work_minutes":duration,"work_minutes_accounted":0.0,"revision":int(state.get("revision",0)),"chapter":int(state.get("chapter",0)),"contract_id":"","target_index":int(state.get("target_index",0)),"vm_key":_vm_key(),"role":colleague_role(id),"result_path":colleague_result_path(id),"config_before":config_before,"phase":UI_COPY.copy("care_maintenance_working", "working"),"result":""}
+	state.assignments = _assignments.duplicate(true)
+	if not save_game():
+		state = previous_state; _assignments = previous_assignments
+		return
+	changed.emit()
 
 func equipment_catalog() -> Array:
 	var items: Array = [{"id":"backup","title":"バックアップ装置","price":3000,"effect":UI_COPY.copy("staffing_effect_backup"),"description":"復旧用の退避・確認をすばやく進める","physical":"共有ラックに設置"},{"id":"monitor","title":"監視モニター","price":4000,"effect":UI_COPY.copy("staffing_effect_monitor"),"description":"設置効果：診断確認時間短縮・保守枠増加","physical":"復旧担当の机に設置"},{"id":"plant","title":"観葉植物","price":1000,"effect":"オフィス環境改善","description":"作業速度影響なし（常設装飾）","physical":"自由に配置"},{"id":"workstation","title":"高速ワークステーション","price":8000,"effect":"設定の保存・編集を8分から6分に短縮","description":"自席PC編集作業短縮","physical":"自席PCを更新"},{"id":"diagnostic","title":"診断コンソール","price":12000,"effect":"検証を6分から4分に短縮","description":"実測結果の整理を効率化する","physical":"自席PCに診断画面を追加"},{"id":"teamdesk","title":"チーム作業デスク","price":16000,"effect":UI_COPY.copy("staffing_effect_teamdesk"),"description":"設置効果：共同作業時間短縮・保守枠増加","physical":"チーム机を拡張"},{"id":"annexdesk_a","title":UI_COPY.copy("expansion_desk_a"),"price":10000,"effect":UI_COPY.copy("expansion_desk_effect"),"description":UI_COPY.copy("expansion_desk_location"),"physical":UI_COPY.copy("expansion_desk_location")},{"id":"annexdesk_b","title":UI_COPY.copy("expansion_desk_b"),"price":10000,"effect":UI_COPY.copy("expansion_desk_effect"),"description":UI_COPY.copy("expansion_desk_location"),"physical":UI_COPY.copy("expansion_desk_location")}]
@@ -2656,13 +2883,65 @@ func customer_stock_units() -> Array:
 func customer_stock_for(id: String) -> Dictionary:
 	return CUSTOMER_STOCK.unit(state, id).duplicate(true)
 
-func customer_stock_summary() -> Dictionary:
-	var summary := {"capacity":CUSTOMER_STOCK.MAX_CAPACITY,"used":CUSTOMER_STOCK.active_count(state),"cash":int(state.cash),"inbound":0,"available":0,"reserved":0}
-	for unit in customer_stock_units():
-		if str(unit.status) == "queued": summary.inbound += 1
-		elif str(unit.status) not in ["shipping","delivered"]:
-			if str(unit.contract_id).is_empty(): summary.available += 1
-			else: summary.reserved += 1
+func _accepted_stock_requirements() -> Array:
+	var result: Array = []
+	var seen_contracts: Dictionary = {}
+	var current_id := str(state.get("current_contract_id", ""))
+	if bool(state.get("accepted", false)) and not current_id.is_empty() and not current_done():
+		var current_contract: Variant = state.get("contract", {})
+		if current_contract is Dictionary:
+			var current_requirement: Variant = current_contract.get("supply_requirement", {})
+			if current_requirement is Dictionary and not current_requirement.is_empty():
+				result.append({"contract_id":current_id,"target_index":int(current_requirement.get("target_index",0)),"sku":str(current_requirement.get("sku",CUSTOMER_STOCK.SKU)),"quantity":maxi(1,int(current_requirement.get("quantity",1)))})
+		seen_contracts[current_id] = true
+	for raw_id in state.get("contract_contexts", {}).keys():
+		var contract_id := str(raw_id)
+		if seen_contracts.has(contract_id) or contract_id in state.get("completed_ids", []): continue
+		var context: Variant = state.contract_contexts[raw_id]
+		if not context is Dictionary or not bool(context.get("accepted", true)) or bool(context.get("completed", false)): continue
+		var contract: Variant = context.get("contract", {})
+		if not contract is Dictionary: continue
+		var requirement: Variant = contract.get("supply_requirement", {})
+		if requirement is Dictionary and not requirement.is_empty():
+			result.append({"contract_id":contract_id,"target_index":int(requirement.get("target_index",0)),"sku":str(requirement.get("sku",CUSTOMER_STOCK.SKU)),"quantity":maxi(1,int(requirement.get("quantity",1)))})
+		seen_contracts[contract_id] = true
+	return result
+
+func _customer_stock_sku_summary(sku: String, requirements: Array) -> Dictionary:
+	var result := {"ok":true,"error":"","sku":sku,"capacity":CUSTOMER_STOCK.MAX_CAPACITY,"used":0,"cash":int(state.get("cash",0)),"inbound":0,"reserved":0,"reserved_inbound":0,"available":0,"delivered":0,"required":0,"shortage":0}
+	var units := customer_stock_units()
+	for unit in units:
+		if str(unit.get("sku", "")) != sku: continue
+		var status := str(unit.get("status", "")); var assigned := not str(unit.get("contract_id", "")).is_empty()
+		if status not in ["shipping", "delivered"]: result.used = int(result.used) + 1
+		if status == "queued" and not assigned: result.inbound = int(result.inbound) + 1
+		if status == "queued" and assigned: result.reserved_inbound = int(result.reserved_inbound) + 1
+		if status == "delivered": result.delivered = int(result.delivered) + 1
+		if assigned and status != "delivered": result.reserved = int(result.reserved) + 1
+		if not assigned and status in ["ready", "stored", "carried"]: result.available = int(result.available) + 1
+	for requirement in requirements:
+		if str(requirement.get("sku", "")) != sku: continue
+		var needed := maxi(1,int(requirement.get("quantity",1)))
+		var assigned_count := 0
+		for unit in units:
+			if str(unit.get("sku", "")) == sku and str(unit.get("contract_id", "")) == str(requirement.get("contract_id", "")) and int(unit.get("target_index",-1)) == int(requirement.get("target_index",0)):
+				assigned_count += 1
+		result.required = int(result.required) + maxi(0,needed-assigned_count)
+	result.shortage = maxi(0,int(result.required)-int(result.available)-int(result.inbound))
+	return result
+
+func customer_stock_summary(sku: String = "") -> Dictionary:
+	if not sku.is_empty() and not CUSTOMER_STOCK.known_sku(sku): return {"ok":false,"error":"sku","sku":sku}
+	var requirements := _accepted_stock_requirements()
+	var products: Array = [sku] if not sku.is_empty() else [CUSTOMER_STOCK.SKU,CUSTOMER_STOCK.BACKUP_SKU]
+	var by_sku: Dictionary = {}
+	for product_sku in products:
+		by_sku[product_sku] = _customer_stock_sku_summary(product_sku,requirements)
+	if not sku.is_empty(): return by_sku[sku]
+	var summary := {"ok":true,"error":"","sku":"","capacity":CUSTOMER_STOCK.MAX_CAPACITY,"used":0,"cash":int(state.get("cash",0)),"inbound":0,"reserved":0,"reserved_inbound":0,"available":0,"delivered":0,"required":0,"shortage":0,"by_sku":by_sku}
+	for product_sku in by_sku:
+		var item: Dictionary = by_sku[product_sku]
+		for key in ["used","inbound","available","reserved","reserved_inbound","delivered","required","shortage"]: summary[key] = int(summary[key]) + int(item.get(key,0))
 	return summary
 
 func customer_stock_boxes() -> Array:
@@ -2710,6 +2989,51 @@ func _stock_transaction(action: Callable) -> Dictionary:
 		state = before; _machine = null; _machine_key = ""
 		return {"ok":false,"error":"save"}
 	changed.emit()
+	return result
+
+func procurement_cart() -> Dictionary:
+	var cart := CUSTOMER_STOCK.empty_cart()
+	var saved: Variant = state.get("procurement_cart", {})
+	if saved is Dictionary:
+		for sku in cart.keys(): cart[sku] = clampi(int(saved.get(sku,0)),0,3)
+	return cart
+
+func customer_cart_review() -> Dictionary:
+	var cart := procurement_cart()
+	var lines: Array = []
+	var quantity := 0
+	var total := 0
+	for sku in cart.keys():
+		var count := int(cart[sku]); if count <= 0: continue
+		var product := CUSTOMER_STOCK.product(str(sku)); var unit_cost := int(product.get("unit_cost",0)); var line_total := unit_cost * count
+		lines.append({"sku":str(sku),"quantity":count,"unit_cost":unit_cost,"total":line_total}); quantity += count; total += line_total
+	var free_capacity := CUSTOMER_STOCK.MAX_CAPACITY - CUSTOMER_STOCK.active_count(state) - quantity
+	var cash_after := int(state.get("cash",0)) - total
+	var error := ""
+	if not bool(state.get("career_mode",false)): error = "career"
+	elif quantity <= 0: error = "empty"
+	elif free_capacity < 0: error = "capacity"
+	elif cash_after < 0: error = "cash"
+	return {"ok":error.is_empty(),"error":error,"lines":lines,"total":total,"quantity":quantity,"cash_after":cash_after,"free_capacity":free_capacity}
+
+func set_customer_cart(sku: String, quantity: int) -> Dictionary:
+	if not CUSTOMER_STOCK.known_sku(sku): return {"ok":false,"error":"sku","cart":procurement_cart()}
+	if quantity < 0 or quantity > 3: return {"ok":false,"error":"quantity","cart":procurement_cart()}
+	var previous := state.duplicate(true)
+	var cart := procurement_cart(); cart[sku] = quantity; state.procurement_cart = cart
+	if not save_game():
+		state = previous
+		return {"ok":false,"error":"save","cart":procurement_cart()}
+	changed.emit()
+	return {"ok":true,"error":"","cart":cart.duplicate(true),"review":customer_cart_review()}
+
+func buy_customer_cart() -> Dictionary:
+	var cart := procurement_cart()
+	var result := _stock_transaction(func():
+		var purchased: Dictionary = CUSTOMER_STOCK.purchase_cart(state,cart)
+		if bool(purchased.get("ok",false)): state.procurement_cart = CUSTOMER_STOCK.empty_cart()
+		return purchased)
+	if bool(result.get("ok",false)): result["cart"] = procurement_cart()
 	return result
 
 func buy_customer_stock(quantity: int, sku: String = CUSTOMER_STOCK.SKU) -> Dictionary:

@@ -1,10 +1,11 @@
 extends CanvasLayer
 const UI = preload("res://scripts/ui_theme.gd")
-const EQUIPMENT_ART = preload("res://scripts/equipment_art.gd")
+const EQUIPMENT_PANEL = preload("res://scripts/equipment_panel.gd")
 const OPERATIONS_PANEL = preload("res://scripts/operations_panel.gd")
 const SALES_PANEL = preload("res://scripts/sales_panel.gd")
 const PROCUREMENT_PANEL = preload("res://scripts/procurement_panel.gd")
 const GAME_THEME = preload("res://scripts/game_theme.gd")
+const M = preload("res://scripts/management_ui.gd")
 ## White Hat Lab interface. All learner-facing narrative is read from Game.copy.
 
 class CoffeeCup extends Control:
@@ -116,6 +117,8 @@ var title_label: Label
 var status_label: Label
 var current_kind := ""
 var settings_return_kind := ""
+var desktop_return_kind := ""
+var desktop_return_scroll: Dictionary = {}
 var text_scale := 1.0
 var controls: Dictionary = {}
 var pending_settings: Dictionary = {}
@@ -134,6 +137,8 @@ var sales_view := "inquiries"
 var sales_stage := "all"
 var sales_expanded_id := ""
 var sales_search := ""
+var pricing_drafts: Dictionary = {}
+var sales_quote_drafts: Dictionary = {}
 var shop_view := "equipment"
 var operations_choices: Dictionary = {}
 var menu_sound: AudioStreamPlayer
@@ -141,6 +146,7 @@ var settings_category := "video"
 var profile_inputs: Dictionary = {}
 var creating_company := false
 var _maintenance_ui_signature := ""
+var _operating_ui_signature := ""
 var _maintenance_progress_labels: Dictionary = {}
 var coffee_phase := "idle"
 var coffee_elapsed := 0.0
@@ -213,7 +219,7 @@ func _build_theme() -> void:
 	var theme := UI.make_theme(text_scale,true)
 	var font := FontVariation.new(); font.base_font = load("res://assets/fonts/NotoSansJP.ttf"); font.variation_opentype = {TextServerManager.get_primary_interface().name_to_tag("wght"):500}
 	var heavy := FontVariation.new(); heavy.base_font = font.base_font; heavy.variation_opentype = {TextServerManager.get_primary_interface().name_to_tag("wght"):700}; heading_font = load("res://assets/fonts/MPLUSRounded1c-ExtraBold.ttf") if ResourceLoader.exists("res://assets/fonts/MPLUSRounded1c-ExtraBold.ttf") else heavy
-	theme.default_font = font; theme.default_font_size = 18
+	theme.default_font = font; theme.default_font_size = maxi(14, int(18 * text_scale))
 	var normal := GAME_THEME.action_style()
 	var hover := GAME_THEME.action_style(GAME_THEME.TAB)
 	var pressed := GAME_THEME.action_style(GAME_THEME.TAB)
@@ -246,16 +252,21 @@ func _label(text: String, size := 20, color := INK) -> Label:
 
 func _button(text: String, action: Callable = Callable()) -> Button:
 	var b := Button.new(); b.text = text; b.custom_minimum_size = Vector2(0, 46); b.focus_mode = Control.FOCUS_ALL
+	b.tooltip_text = text
 	b.pressed.connect(func(): get_node("/root/Soundscape").play_ui("click"))
 	b.mouse_entered.connect(func(): if not b.disabled: get_node("/root/Soundscape").play_ui("hover"))
 	if action.is_valid(): b.pressed.connect(action)
+	if _is_management_panel(current_kind):
+		b.custom_minimum_size.y = 38
+		b.add_theme_font_size_override("font_size", roundi(14 * text_scale))
+		M.button(b)
 	return b
 
 func _ribbon(text: String, color: Color, action: Callable) -> Button:
 	var b := _button(text, action); b.custom_minimum_size = Vector2(320, 58)
 	var fill := GAME_THEME.BUY if color == TEAL else GAME_THEME.WARNING if color == ORANGE else GAME_THEME.DANGER if color == RED else GAME_THEME.ACTION
 	GAME_THEME.primary(b,fill)
-	b.add_theme_font_size_override("font_size",24); b.add_theme_font_override("font",heading_font)
+	b.add_theme_font_size_override("font_size",maxi(14, int(24 * text_scale))); b.add_theme_font_override("font",heading_font)
 	return b
 
 func _panel(parent: Control, title: String) -> VBoxContainer:
@@ -291,34 +302,33 @@ func _build_hud() -> void:
 
 func _build_main_menu() -> void:
 	var menu := Control.new(); menu.name = "MainMenu"; menu.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); menu.mouse_filter=Control.MOUSE_FILTER_STOP; root.add_child(menu); controls.menu=menu
-	var shade := TextureRect.new(); shade.texture=load("res://assets/ui/menu_backdrop.svg"); shade.expand_mode=TextureRect.EXPAND_IGNORE_SIZE; shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); shade.mouse_filter=Control.MOUSE_FILTER_IGNORE; menu.add_child(shade)
+	var artwork := TextureRect.new(); artwork.name="TitleArtwork"; artwork.texture=load("res://assets/ui/menu_backdrop.svg"); artwork.expand_mode=TextureRect.EXPAND_IGNORE_SIZE; artwork.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); artwork.mouse_filter=Control.MOUSE_FILTER_IGNORE; menu.add_child(artwork)
 	var layout := VBoxContainer.new(); layout.position=Vector2(76,75); layout.custom_minimum_size.x=440; layout.size.x=440; layout.add_theme_constant_override("separation",8); menu.add_child(layout); controls.menu_layout=layout
 	var branding := HBoxContainer.new(); branding.add_theme_constant_override("separation",16); layout.add_child(branding)
-	var mark := TextureRect.new(); mark.texture=load("res://assets/ui/mark.svg"); mark.custom_minimum_size=Vector2(86,86); mark.expand_mode=TextureRect.EXPAND_IGNORE_SIZE; mark.stretch_mode=TextureRect.STRETCH_KEEP_ASPECT_CENTERED; branding.add_child(mark)
-	var title := _label(str(_game().company_name()),36,GAME_THEME.TEXT); title.name="CompanyTitle"; title.size_flags_horizontal=Control.SIZE_EXPAND_FILL; title.autowrap_mode=TextServer.AUTOWRAP_OFF; title.clip_text=true; title.tooltip_text=title.text; controls.company_title=title; title.add_theme_constant_override("outline_size",6); title.add_theme_color_override("font_outline_color",INK); branding.add_child(title); title.resized.connect(_fit_company_title)
+	var mark := TextureRect.new(); mark.texture=load("res://assets/ui/mark.svg"); mark.custom_minimum_size=Vector2(48,64); mark.expand_mode=TextureRect.EXPAND_IGNORE_SIZE; mark.stretch_mode=TextureRect.STRETCH_KEEP_ASPECT_CENTERED; branding.add_child(mark)
+	var title := _label("ホワイトハッカーラボ",36,GAME_THEME.TEXT); title.name="CompanyTitle"; title.add_theme_font_override("font",UI.font(700)); title.size_flags_horizontal=Control.SIZE_EXPAND_FILL; title.autowrap_mode=TextServer.AUTOWRAP_OFF; title.clip_text=true; title.tooltip_text=title.text; controls.company_title=title; branding.add_child(title); title.resized.connect(_fit_company_title)
 	controls.menu_title=title
-	var subtitle := _label(str(_game().company_name()) if _game() != null and _game().has_method("company_name") else "あおばセキュリティ相談所",19,Color.WHITE); subtitle.autowrap_mode=TextServer.AUTOWRAP_OFF; subtitle.clip_text=true; subtitle.add_theme_constant_override("outline_size",5); subtitle.add_theme_color_override("font_outline_color",INK); layout.add_child(subtitle); controls.subtitle=subtitle; subtitle.hide()
 	var gap := Control.new(); gap.custom_minimum_size.y=9; layout.add_child(gap)
 	var resume := _ribbon(UI.copy("title_continue","続きから"),ORANGE,_resume_game); resume.name="ResumeButton"; layout.add_child(resume); controls.resume=resume
+	GAME_THEME.primary(resume,GAME_THEME.TABBAR); resume.alignment=HORIZONTAL_ALIGNMENT_LEFT; resume.add_theme_font_override("font",UI.font(700))
 	var load_error := _label("",14,Color("ffd5d5")); load_error.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART; load_error.custom_minimum_size.x=420; load_error.hide(); layout.add_child(load_error); controls.load_error=load_error
-	layout.add_child(_ribbon(UI.copy("title_new","新しく始める"),TEAL,_open_new_company))
+	var start := _ribbon(UI.copy("title_new","新しく始める"),TEAL,_open_new_company); start.name="NewCompanyButton"; start.alignment=HORIZONTAL_ALIGNMENT_LEFT; start.add_theme_font_override("font",UI.font(700)); GAME_THEME.primary(start,GAME_THEME.ACTION); layout.add_child(start)
 	for entry in [[UI.copy("title_manual","チュートリアル"),"help"],[UI.copy("title_options","オプション"),"settings"],[UI.copy("title_credits","クレジット"),"credits"],[UI.copy("title_exit","終了"),"quit"]]:
 		var button := _button("›   "+str(entry[0]),_quit if entry[1]=="quit" else open_panel.bind(entry[1])); button.custom_minimum_size=Vector2(260,38); button.size_flags_horizontal=Control.SIZE_SHRINK_BEGIN; button.alignment=HORIZONTAL_ALIGNMENT_LEFT
 		button.add_theme_stylebox_override("normal",_surface(Color.TRANSPARENT,Color.TRANSPARENT,14,4)); button.add_theme_stylebox_override("hover",_surface(Color(1,1,1,0.12),Color.TRANSPARENT,14,4)); button.add_theme_stylebox_override("pressed",_surface(Color(1,1,1,0.2),Color.TRANSPARENT,14,4))
 		for state_name in ["font_color","font_hover_color","font_pressed_color","font_focus_color"]: button.add_theme_color_override(state_name,Color("f5f8f8"))
 		layout.add_child(button)
-	var sticker := PanelContainer.new(); sticker.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT); sticker.position=Vector2(-346,-166); sticker.size=Vector2(304,118); sticker.rotation=deg_to_rad(-2); var note_style:=_surface(Color("fff7e3"),INK,20,15); note_style.shadow_color=Color(0.05,0.1,0.1,0.2); note_style.shadow_size=5; note_style.shadow_offset=Vector2(4,5); sticker.add_theme_stylebox_override("panel",note_style); menu.add_child(sticker)
-	var note:=VBoxContainer.new(); note.add_theme_constant_override("separation",7); sticker.add_child(note); note.add_child(_label("OFFLINE",16,MUTED))
 	var version := _label("VERSION "+str(ProjectSettings.get_setting("application/config/version",""))+"  /  OFFLINE",14,Color.WHITE); version.autowrap_mode=TextServer.AUTOWRAP_OFF; version.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT); version.position=Vector2(-290,-34); menu.add_child(version)
-	controls.menu_sticker=sticker
 
 func _layout_main_menu() -> void:
 	if not controls.has("menu_layout"): return
 	var compact := root.size.y < 800
-	controls.menu_layout.position=Vector2(40,24) if compact else Vector2(76,75)
+	controls.menu_layout.position=Vector2(40,56) if compact else Vector2(76,75)
+	var menu_width := clampf(root.size.x * 0.36, 360.0, 460.0)
+	controls.menu_layout.custom_minimum_size.x=menu_width; controls.menu_layout.size.x=menu_width
+	controls.load_error.custom_minimum_size.x=menu_width
 	controls.menu_layout.add_theme_constant_override("separation",4 if compact else 8)
 	_fit_company_title()
-	controls.menu_sticker.visible=not compact
 
 func _fit_company_title() -> void:
 	if not controls.has("company_title"): return
@@ -332,7 +342,7 @@ func _fit_company_title() -> void:
 func _new_game(initial_profile: Dictionary = {}) -> bool:
 	if _game() == null or not _game().new_game(initial_profile): return false
 	if is_instance_valid(guided_intro): guided_intro.begin()
-	operations_choices.clear();board_selected_id="";board_page=0;sales_view="inquiries";sales_search="";board_filter="all"
+	operations_choices.clear();board_selected_id="";board_page=0;sales_view="inquiries";sales_search="";board_filter="all";pricing_drafts.clear();sales_quote_drafts.clear()
 	_reset_coffee()
 	close_panel(false)
 	controls.menu.visible = false; hud.visible = true; _sync_office_clock_pause(); emit_signal("started"); update_hud()
@@ -434,46 +444,81 @@ func _management_rail_button(label: String, kind: String, selected: bool) -> But
 	return button
 
 func _management_tab(label: String, kind: String, selected: bool) -> Button:
-	var button := _button(label, open_panel.bind(kind))
+	var button := _button(label, _navigate_management.bind(kind))
 	button.name = "ManagementTab_%s" % kind
-	button.custom_minimum_size = Vector2(0, 42)
-	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	button.add_theme_font_size_override("font_size", 16)
-	button.add_theme_stylebox_override("normal", GAME_THEME.tab_style(selected))
-	button.add_theme_stylebox_override("hover", GAME_THEME.tab_style(true))
-	button.add_theme_stylebox_override("pressed", GAME_THEME.tab_style(true))
-	button.add_theme_color_override("font_color", GAME_THEME.WHITE)
-	button.add_theme_color_override("font_hover_color", GAME_THEME.WHITE)
-	button.add_theme_color_override("font_pressed_color", GAME_THEME.WHITE)
+	button.set_meta("navigation_selected", selected)
+	button.custom_minimum_size = Vector2(0, 44)
+	button.add_theme_font_size_override("font_size", roundi(14 * text_scale))
+	M.button(button, "tab", selected)
+	for state in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
+		button.add_theme_color_override(state, M.WHITE if selected else Color("B9CDCF"))
+	for state in ["normal", "hover", "pressed"]:
+		var style := M.surface(M.ACCENT if selected else M.DARK.lightened(0.06) if state != "normal" else Color.TRANSPARENT, 10)
+		style.content_margin_top = 8; style.content_margin_bottom = 8
+		button.add_theme_stylebox_override(state, style)
 	return button
 
+func _navigate_management(kind: String) -> void:
+	# A top-level tab always opens its list, never a previously visited quote.
+	if kind == "sales": board_selected_id = ""
+	open_panel(kind)
+
+func _return_from_desktop() -> void:
+	if not _is_management_panel(desktop_return_kind): close_panel(); return
+	var destination := desktop_return_kind
+	open_panel(destination)
+	if current_kind != destination: return
+	if is_instance_valid(modal_scroll): modal_scroll.set_deferred("scroll_vertical", int(desktop_return_scroll.get("outer", 0)))
+	for id in desktop_return_scroll:
+		var scroll = modal_body.find_child(str(id), true, false)
+		if scroll is ScrollContainer: scroll.set_deferred("scroll_vertical", int(desktop_return_scroll[id]))
+
+func _return_to_sales_list() -> void:
+	board_selected_id = ""
+	open_panel("sales")
+
 func _management_header(kind: String) -> PanelContainer:
-	var header := PanelContainer.new()
-	header.name = "ManagementHeader"
-	header.custom_minimum_size.y = 50
-	header.add_theme_stylebox_override("panel", GAME_THEME.surface(GAME_THEME.TITLE, Color.TRANSPARENT, 4, 10))
-	var row := HBoxContainer.new(); row.add_theme_constant_override("separation", 10); header.add_child(row)
-	var brand := _label(str(_game().company_name()), 21, GAME_THEME.WHITE); brand.name="CompanyBrand"; brand.add_theme_font_override("font",heading_font); brand.tooltip_text=str(_game().company_name()); brand.clip_text=true; brand.autowrap_mode = TextServer.AUTOWRAP_OFF; brand.size_flags_horizontal = Control.SIZE_EXPAND_FILL; row.add_child(brand)
-	var title := _label(_panel_title(kind), 18, GAME_THEME.WHITE); title.autowrap_mode = TextServer.AUTOWRAP_OFF; row.add_child(title)
-	var close := _button("×", close_panel); close.name = "ManagementClose"; close.custom_minimum_size = Vector2(42, 38); close.add_theme_font_size_override("font_size", 27); close.add_theme_stylebox_override("normal", GAME_THEME.surface(GAME_THEME.DANGER, Color.TRANSPARENT, 3, 2)); close.add_theme_color_override("font_color", GAME_THEME.WHITE); row.add_child(close)
+	var header := PanelContainer.new(); header.name = "ManagementHeader"
+	header.add_theme_stylebox_override("panel", M.surface(M.DARK, 8))
+	var row := HBoxContainer.new(); row.add_theme_constant_override("separation", 8); header.add_child(row)
+	row.add_child(_management_tabs(kind))
+	var spacer := Control.new(); spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL; row.add_child(spacer)
+	var status := VBoxContainer.new(); status.name = "ManagementStatus"; status.add_theme_constant_override("separation", 0); status.size_flags_vertical = Control.SIZE_SHRINK_CENTER; row.add_child(status)
+	var cash := _label("¥%s" % _group_number(int(_game().state.get("cash", 0))), 17, M.WHITE); cash.name = "ManagementCash"; cash.autowrap_mode = TextServer.AUTOWRAP_OFF; cash.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT; status.add_child(cash)
+	var clock := _label("DAY %02d  %s" % [int(_game().state.get("day", 1)), str(_game().business_clock())], 11, Color("B9CDCF")); clock.name = "ManagementClock"; clock.autowrap_mode = TextServer.AUTOWRAP_OFF; clock.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT; status.add_child(clock)
+	var guide := _button("?", _toggle_management_guide); guide.name = "ManagementGuide"; guide.tooltip_text = UI.copy("next_guide"); guide.custom_minimum_size = Vector2(34, 36); M.button(guide, "quiet"); guide.add_theme_color_override("font_color", M.WHITE); row.add_child(guide)
+	var close := _button("×", close_panel); close.name = "ManagementClose"; close.custom_minimum_size = Vector2(34, 36); M.button(close, "quiet"); close.add_theme_color_override("font_color", M.WHITE); row.add_child(close)
 	return header
+
+func _group_number(value: int) -> String:
+	var text := str(absi(value)); var result := ""
+	for i in text.length():
+		if i > 0 and (text.length() - i) % 3 == 0: result += ","
+		result += text[i]
+	return ("−" if value < 0 else "") + result
+
+func _toggle_management_guide() -> void:
+	if is_instance_valid(next_task_guide): next_task_guide.open_management()
 
 func _options_header() -> PanelContainer:
 	var header := PanelContainer.new()
 	header.name = "OptionsHeader"
-	header.custom_minimum_size.y = 58
-	header.add_theme_stylebox_override("panel", GAME_THEME.surface(GAME_THEME.TITLE, Color.TRANSPARENT, 4, 10))
-	var row := HBoxContainer.new(); row.add_theme_constant_override("separation", 10); header.add_child(row)
-	var title := _label(UI.copy("title_options", "オプション"), 24, GAME_THEME.WHITE)
+	header.custom_minimum_size.y = 52
+	var header_style := GAME_THEME.surface(GAME_THEME.FOOTER, Color.TRANSPARENT, 4, 9)
+	header_style.border_color = GAME_THEME.TAB_BAR
+	header_style.border_width_bottom = 3
+	header.add_theme_stylebox_override("panel", header_style)
+	var row := HBoxContainer.new(); row.add_theme_constant_override("separation", 9); header.add_child(row)
+	var title := _label(UI.copy("title_options", "オプション"), 21, GAME_THEME.WHITE)
 	title.add_theme_font_override("font", heading_font); title.size_flags_horizontal = Control.SIZE_EXPAND_FILL; row.add_child(title)
-	var close := _button("×", _close_settings); close.name = "SettingsClose"; close.custom_minimum_size = Vector2(42, 42)
-	close.add_theme_font_size_override("font_size", 27); close.add_theme_stylebox_override("normal", GAME_THEME.surface(GAME_THEME.DANGER, Color.TRANSPARENT, 3, 2)); close.add_theme_color_override("font_color", GAME_THEME.WHITE); row.add_child(close)
+	var close := _button("×", _close_settings); close.name = "SettingsClose"; close.custom_minimum_size = Vector2(38, 38); close.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	close.add_theme_font_size_override("font_size", maxi(20, int(24 * text_scale))); close.add_theme_stylebox_override("normal", GAME_THEME.surface(GAME_THEME.ACTION, GAME_THEME.LINE, 3, 2)); close.add_theme_stylebox_override("hover", GAME_THEME.surface(GAME_THEME.TAB, GAME_THEME.TAB_BAR, 3, 2)); close.add_theme_stylebox_override("pressed", GAME_THEME.surface(GAME_THEME.TAB, GAME_THEME.TAB_BAR, 3, 2)); close.add_theme_color_override("font_color", GAME_THEME.WHITE); close.add_theme_color_override("font_hover_color", GAME_THEME.WHITE); close.add_theme_color_override("font_pressed_color", GAME_THEME.WHITE); row.add_child(close)
 	return header
 
 func _management_tabs(kind: String) -> HBoxContainer:
-	var tabs := HBoxContainer.new(); tabs.name = "ManagementTabs"; tabs.add_theme_constant_override("separation", 6)
-	for entry in [[UI.copy("ops_title"), "board"], [UI.copy("ops_sales"), "sales"], ["会社", "company"], [UI.copy("staffing_title"), "staffing"], ["設備", "shop"], ["PC", "terminal"]]:
-		tabs.add_child(_management_tab(str(entry[0]), str(entry[1]), kind == str(entry[1])))
+	var tabs := HBoxContainer.new(); tabs.name = "ManagementTabs"; tabs.add_theme_constant_override("separation", 2)
+	for entry in [[UI.copy("board_list"), "board"], [UI.copy("ops_sales").get_slice("・", 0), "sales"], ["会社", "company"], [UI.copy("staffing_title"), "staffing"], ["設備", "shop"], ["PC", "terminal"]]:
+		tabs.add_child(_management_tab(str(entry[0]), str(entry[1]), kind == str(entry[1]) or (kind in ["door", "day_review"] and str(entry[1]) == "board")))
 	return tabs
 
 func _build_management_rail(kind: String) -> VBoxContainer:
@@ -500,18 +545,42 @@ func _build_management_rail(kind: String) -> VBoxContainer:
 	return rail
 
 func _layout_management() -> void:
-	if not is_instance_valid(management_rail): return
-	management_rail.custom_minimum_size.x = 180 if root.size.x >= 1100 else 140
+	if not is_instance_valid(modal) or not _is_management_panel(current_kind): return
+	var viewport_size := root.size
+	var quote_detail := current_kind == "sales" and not board_selected_id.is_empty()
+	var width := minf(1060.0 if quote_detail else 1440.0, viewport_size.x - 24.0)
+	var desired_height := 940.0
+	if quote_detail and is_instance_valid(modal_body):
+		desired_height = maxf(380.0, modal_body.get_combined_minimum_size().y + 194.0)
+	var height := minf(desired_height, viewport_size.y - 24.0)
+	modal.set_anchors_preset(Control.PRESET_CENTER)
+	modal.offset_left = -width / 2; modal.offset_right = width / 2
+	modal.offset_top = -height / 2; modal.offset_bottom = height / 2
+	if current_kind == "sales" and is_instance_valid(modal_scroll):
+		modal_scroll.custom_minimum_size.x = minf(1180.0, width - 40.0)
 
 func open_panel(kind: String) -> void:
 	# UI -> UI is one continuous visible-cursor session.  Do not hand the
 	# pointer back to gameplay while replacing the panel tree.
 	var previous_kind := current_kind
+	var return_scroll: Dictionary = {}
+	if kind == "terminal" and _is_management_panel(previous_kind) and is_instance_valid(modal_body):
+		return_scroll.outer = modal_scroll.scroll_vertical
+		for scroll in modal_body.find_children("*", "ScrollContainer", true, false):
+			return_scroll[str(scroll.name)] = scroll.scroll_vertical
+	if previous_kind == "sales" and is_instance_valid(modal_body):
+		var quote_input = modal_body.find_child("OfferPrice", true, false)
+		if quote_input is SpinBox: quote_input.apply()
 	var management_switch := not previous_kind.is_empty() and _is_management_panel(previous_kind) and _is_management_panel(kind)
+	if management_switch and is_instance_valid(next_task_guide): next_task_guide.management_open = false
 	if kind == "settings" and settings_return_kind.is_empty() and not previous_kind.is_empty(): settings_return_kind = previous_kind
 	if current_kind != "":
 		if not close_panel(false, false): return
+	if kind == "terminal" and previous_kind != "terminal":
+		desktop_return_kind = previous_kind if _is_management_panel(previous_kind) else ""
+		desktop_return_scroll = return_scroll
 	current_kind = kind
+	if _is_management_panel(kind): hud.hide()
 	if kind == "settings":
 		if is_instance_valid(next_task_guide): next_task_guide.hide()
 		if is_instance_valid(guided_intro): guided_intro.hide()
@@ -528,7 +597,12 @@ func open_panel(kind: String) -> void:
 			RenderingServer.frame_post_draw.connect(func():
 				if is_instance_valid(opened_desktop) and desktop == opened_desktop:
 					_desktop_preview_drawn = true, CONNECT_ONE_SHOT)
-		desktop.close_requested.connect(func(): open_panel("board") if _game().state.get("career_mode",false) else close_panel())
+		desktop.close_requested.connect(close_panel)
+		if desktop.has_signal("return_requested"):
+			desktop.connect("return_requested", _return_from_desktop)
+		if desktop.has_method("configure_return"):
+			var return_label := UI.copy("board_list") if desktop_return_kind == "board" else _panel_title(desktop_return_kind)
+			desktop.configure_return(return_label if not desktop_return_kind.is_empty() else "")
 		desktop.company_requested.connect(func(): open_panel("company"))
 		desktop.staffing_requested.connect(func(): open_panel("staffing"))
 		desktop.contracts_requested.connect(func(): open_panel("board"))
@@ -543,20 +617,21 @@ func open_panel(kind: String) -> void:
 		modal = PanelContainer.new(); modal.name = "Panel_%s" % kind; modal.mouse_filter = Control.MOUSE_FILTER_STOP; root.add_child(modal)
 		var layout: VBoxContainer
 		if management:
-			modal.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-			modal.add_theme_stylebox_override("panel", GAME_THEME.surface(GAME_THEME.CANVAS, Color.TRANSPARENT, 0, 0))
-			var outer := MarginContainer.new(); outer.add_theme_constant_override("margin_left", 16); outer.add_theme_constant_override("margin_right", 16); outer.add_theme_constant_override("margin_top", 16); outer.add_theme_constant_override("margin_bottom", 16); modal.add_child(outer)
-			var shell := VBoxContainer.new(); shell.add_theme_constant_override("separation", 8); outer.add_child(shell)
+			modal.theme = M.theme(text_scale)
+			var background := M.surface(M.PAPER, 0)
+			background.shadow_color = Color(0.02, 0.06, 0.07, 0.3); background.shadow_size = 18
+			modal.add_theme_stylebox_override("panel", background)
+			var shell := VBoxContainer.new(); shell.add_theme_constant_override("separation", 0); modal.add_child(shell)
 			shell.add_child(_management_header(kind))
-			shell.add_child(_management_tabs(kind))
-			var content_panel := PanelContainer.new(); content_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL; content_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL; content_panel.add_theme_stylebox_override("panel", GAME_THEME.surface(GAME_THEME.CANVAS, GAME_THEME.CARD_FRAME, 4, 12)); shell.add_child(content_panel)
-			var content_margin := MarginContainer.new(); content_margin.add_theme_constant_override("margin_left", 0); content_margin.add_theme_constant_override("margin_right", 0); content_margin.add_theme_constant_override("margin_top", 0); content_margin.add_theme_constant_override("margin_bottom", 0); content_panel.add_child(content_margin)
-			layout = VBoxContainer.new(); layout.add_theme_constant_override("separation", 8); content_margin.add_child(layout)
+			var content_margin := MarginContainer.new(); content_margin.name = "ManagementContent"; content_margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
+			for side in ["left", "right", "top", "bottom"]: content_margin.add_theme_constant_override("margin_" + side, 18)
+			shell.add_child(content_margin)
+			layout = VBoxContainer.new(); layout.add_theme_constant_override("separation", 14); content_margin.add_child(layout)
 			management_rail = null
 		else:
 			if options_shell:
 				modal.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-				modal.add_theme_stylebox_override("panel", GAME_THEME.surface(GAME_THEME.CANVAS, Color.TRANSPARENT, 0, 0))
+				modal.add_theme_stylebox_override("panel", GAME_THEME.surface(GAME_THEME.FOOTER, Color.TRANSPARENT, 0, 0))
 				var options_outer := MarginContainer.new(); options_outer.add_theme_constant_override("margin_left", 16); options_outer.add_theme_constant_override("margin_right", 16); options_outer.add_theme_constant_override("margin_top", 16); options_outer.add_theme_constant_override("margin_bottom", 16); modal.add_child(options_outer)
 				layout = VBoxContainer.new(); layout.add_theme_constant_override("separation", 8); options_outer.add_child(layout)
 				layout.add_child(_options_header())
@@ -578,18 +653,24 @@ func open_panel(kind: String) -> void:
 			var nav := HBoxContainer.new(); nav.add_theme_constant_override("separation", 8); layout.add_child(nav)
 			controls.settings_tabs={}
 			for entry in [[UI.copy("opt_tab_video","映像"),"video"],[UI.copy("opt_tab_controls","操作"),"control"],[UI.copy("opt_tab_audio","音声"),"audio"],["読みやすさ","accessibility"]]:
-				var tab:=_button(entry[0],_settings_tab.bind(entry[1])); tab.toggle_mode=true; tab.button_pressed=entry[1]=="video"; tab.size_flags_horizontal=Control.SIZE_EXPAND_FILL; nav.add_child(tab); controls.settings_tabs[entry[1]]=tab
+				var tab:=_button(entry[0],_settings_tab.bind(entry[1])); tab.toggle_mode=true; tab.button_pressed=entry[1]=="video"; tab.size_flags_horizontal=Control.SIZE_EXPAND_FILL; tab.add_theme_font_size_override("font_size", maxi(14, int(16 * text_scale))); GAME_THEME.navigation(tab, entry[1] == "video"); nav.add_child(tab); controls.settings_tabs[entry[1]]=tab
+			var options_content := PanelContainer.new(); options_content.size_flags_vertical=Control.SIZE_EXPAND_FILL; options_content.add_theme_stylebox_override("panel",GAME_THEME.surface(GAME_THEME.CANVAS,GAME_THEME.LINE,5,12)); layout.add_child(options_content)
+			var options_layout := VBoxContainer.new(); options_layout.add_theme_constant_override("separation",8); options_content.add_child(options_layout); content_host=options_layout
 		modal_scroll = ScrollContainer.new(); modal_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED; modal_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL; content_host.add_child(modal_scroll)
 		modal_body = VBoxContainer.new(); modal_body.add_theme_constant_override("separation", 14); modal_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL; modal_scroll.add_child(modal_body)
+		if kind == "sales":
+			# Keep the quote and sales reading column legible on wide displays while
+			# leaving the footer in the shell's full width row.
+			modal_scroll.custom_maximum_size.x = 1180
+			modal_scroll.custom_minimum_size.x = minf(1180.0, root.size.x - 64.0)
+			modal_scroll.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		modal_footer = HBoxContainer.new(); modal_footer.add_theme_constant_override("separation", 12)
 		if management:
-			var footer_panel := PanelContainer.new(); footer_panel.name = "ManagementFooter"; footer_panel.custom_minimum_size.y = 42; footer_panel.add_theme_stylebox_override("panel", GAME_THEME.surface(GAME_THEME.FOOTER, Color.TRANSPARENT, 3, 8)); layout.add_child(footer_panel); footer_panel.add_child(modal_footer)
-			var footer_status := HBoxContainer.new(); footer_status.name = "ManagementStatus"; footer_status.add_theme_constant_override("separation", 12); modal_footer.add_child(footer_status)
-			var footer_cash := _label("¥%d" % int(_game().state.get("cash", 0)), 16, GAME_THEME.WHITE); footer_cash.name = "ManagementCash"; footer_cash.autowrap_mode = TextServer.AUTOWRAP_OFF; footer_status.add_child(footer_cash)
-			var footer_clock := _label("DAY %02d  %s" % [int(_game().state.get("day", 1)), str(_game().business_clock()) if _game().has_method("business_clock") else ""], 14, GAME_THEME.WHITE); footer_clock.name = "ManagementClock"; footer_clock.autowrap_mode = TextServer.AUTOWRAP_OFF; footer_status.add_child(footer_clock)
-			var footer_spacer := Control.new(); footer_spacer.name = "ManagementActionSpacer"; footer_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL; modal_footer.add_child(footer_spacer)
+			var footer_panel := PanelContainer.new(); footer_panel.name = "ManagementFooter"
+			var footer_style := M.surface(M.PAPER, 0); footer_style.border_width_top = 1; footer_style.border_color = M.LINE; footer_style.content_margin_top = 12
+			footer_panel.add_theme_stylebox_override("panel", footer_style); layout.add_child(footer_panel); footer_panel.add_child(modal_footer)
 		else:
-			layout.add_child(modal_footer)
+			content_host.add_child(modal_footer)
 		match kind:
 			"profile": _profile_editor()
 			"board": _board()
@@ -609,6 +690,12 @@ func open_panel(kind: String) -> void:
 		if kind not in ["confirm_display","pause","settings"] and not management: _add_close()
 		for footer_child in modal_footer.get_children():
 			if footer_child is Label: footer_child.autowrap_mode=TextServer.AUTOWRAP_OFF; footer_child.vertical_alignment=VERTICAL_ALIGNMENT_CENTER
+		if management:
+			_layout_management()
+			if kind == "sales" and not board_selected_id.is_empty():
+				modal_body.minimum_size_changed.connect(_layout_management.call_deferred)
+			var footer_panel := modal.find_child("ManagementFooter", true, false)
+			if footer_panel is Control: footer_panel.visible = not modal_footer.get_children().is_empty()
 		# Management tabs are one continuous workspace. Recreating the shell with
 		# a fade from zero made every tab click flash; keep it fully opaque while
 		# the old queued tree covers the same frame.
@@ -618,6 +705,7 @@ func open_panel(kind: String) -> void:
 			modal.modulate.a=0.0; create_tween().tween_property(modal,"modulate:a",1.0,0.12)
 
 func _panel_title(kind: String) -> String:
+	if kind == "company": return UI.copy("v220_operating_desk")
 	if kind=="board":return UI.copy("ops_title")
 	if kind=="sales":return UI.copy("ops_sales")
 	if kind=="day_review":return UI.copy("ops_settlement")
@@ -723,7 +811,7 @@ func _sales_board() -> void:
 		if not board_selected_id.is_empty():
 			for offer in g.state.offers:
 				if str(offer.id) == board_selected_id:
-					var sales_back := _button("← "+UI.copy("ops_sales"),func(): board_selected_id=""; open_panel("sales")); modal_footer.add_child(sales_back)
+					var sales_back := _button("← "+UI.copy("ops_sales"), _return_to_sales_list); sales_back.name = "QuoteBack"; modal_footer.add_child(sales_back)
 					if modal_footer.get_child_count() > 1: modal_footer.move_child(sales_back, 1)
 					_contract_detail(offer)
 					_sales_fonts(modal_body)
@@ -737,7 +825,8 @@ func _sales_board() -> void:
 	if not g.state.career_mode and (not g.state.accepted or g.current_done()):
 		modal_body.add_child(_button("営業カタログへ",_start_free_career))
 	modal_footer.add_child(_button("会社・スキル",open_panel.bind("company")))
-	var pc := _button(UI.copy("office_pc","自席PCを使う")+"  [F]",open_panel.bind("terminal")); pc.name="GuidePC"; GAME_THEME.primary(pc,GAME_THEME.TAB); modal_footer.add_child(pc)
+	var spacer := Control.new(); spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL; modal_footer.add_child(spacer)
+	var pc := _button(UI.copy("office_pc","自席PCを使う")+"  [F]",open_panel.bind("terminal")); pc.name="GuidePC"; M.button(pc,"primary"); modal_footer.add_child(pc)
 
 func _refresh_sales_panel(reset_scroll: bool = false) -> void:
 	# Sales subtabs, filters, and accordions replace only their content. The
@@ -810,6 +899,12 @@ func _contract_ticket(offer: Dictionary) -> void:
 	var detail:=_button("詳細表示",_select_contract.bind(str(offer.id))); detail.custom_minimum_size=Vector2(128,38); row.add_child(detail)
 
 func _select_contract(id: String) -> void:
+	for item in _game().contract_queue():
+		if str(item.get("id", "")) == id:
+			operations_choices.view = "contracts"
+			operations_choices.dispatch_selected = {"kind":"contract", "id":id, "target":int(item.get("target_index",0)), "member":""}
+			open_panel("board")
+			return
 	board_selected_id=id
 	open_panel("sales")
 
@@ -820,9 +915,10 @@ func _open_billing(invoice_id: String = "") -> void:
 func _contract_detail(offer: Dictionary) -> void:
 	var g := _game()
 	var card:=PanelContainer.new(); card.add_theme_stylebox_override("panel",_surface(GAME_THEME.WHITE,Color.TRANSPARENT,12,10)); modal_body.add_child(card)
-	var body:=VBoxContainer.new(); body.add_theme_constant_override("separation",6); card.add_child(body)
-	body.add_child(_label(str(offer.title),20,INK))
-	body.add_child(_label(str(offer.client),13,UI.MUTED))
+	var body:=VBoxContainer.new(); body.add_theme_constant_override("separation",4); card.add_child(body)
+	var identity := HBoxContainer.new(); identity.add_theme_constant_override("separation",12); body.add_child(identity)
+	var job_title := _label(str(offer.title),20,INK); job_title.size_flags_horizontal=Control.SIZE_EXPAND_FILL; identity.add_child(job_title)
+	var client_title := _label(str(offer.client),13,UI.MUTED); client_title.autowrap_mode=TextServer.AUTOWRAP_OFF; client_title.size_flags_vertical=Control.SIZE_SHRINK_CENTER; identity.add_child(client_title)
 	var reasons: Array = g.contract_eligibility(offer) if g.has_method("contract_eligibility") else (["受注可能"] if bool(offer.unlocked) else ["受注条件未達"])
 	var quote: Dictionary = g.contract_quote(offer)
 	body.add_child(_label(UI.copy("board_facts") % [int(offer.targets),int(quote.budget),int(quote.costs)],14,INK))
@@ -830,12 +926,6 @@ func _contract_detail(offer: Dictionary) -> void:
 		var eligibility := _label(" / ".join(PackedStringArray(reasons)),14,WARNING)
 		eligibility.name = "ContractEligibility"
 		body.add_child(eligibility)
-	var disclosures := HBoxContainer.new(); disclosures.add_theme_constant_override("separation",24); body.add_child(disclosures)
-	var brief := _sales_disclosure(body, UI.copy("board_brief"), disclosures)
-	brief.add_child(_label(str(offer.brief),14,INK))
-	var conditions := _sales_disclosure(body, UI.copy("board_conditions"), disclosures)
-	conditions.add_child(_label(UI.copy("billing_terms") + "  " + str(g.invoice_terms(offer).label),14,INK))
-	conditions.add_child(_label("%s · 会社Lv.%d / 専門Lv.%d / 難度%d" % [str(offer.service),offer.required_level,offer.required_rank,offer.grade],14,INK))
 	var inputs := HBoxContainer.new(); inputs.add_theme_constant_override("separation",20); body.add_child(inputs)
 	var plan_row := HBoxContainer.new(); plan_row.add_theme_constant_override("separation",12); plan_row.size_flags_horizontal=Control.SIZE_EXPAND_FILL; inputs.add_child(plan_row)
 	var plan_label := _label(UI.copy("board_plan"),14,UI.MUTED); plan_label.autowrap_mode=TextServer.AUTOWRAP_OFF; plan_label.size_flags_vertical=Control.SIZE_SHRINK_CENTER; plan_row.add_child(plan_label)
@@ -857,12 +947,24 @@ func _contract_detail(offer: Dictionary) -> void:
 	)
 	plan_row.add_child(plan)
 	var price_row := HBoxContainer.new(); price_row.add_theme_constant_override("separation",12); price_row.size_flags_horizontal=Control.SIZE_EXPAND_FILL; inputs.add_child(price_row)
-	var price_label := _label(UI.copy("board_price"),14,UI.MUTED); price_label.autowrap_mode=TextServer.AUTOWRAP_OFF; price_label.size_flags_vertical=Control.SIZE_SHRINK_CENTER; price_row.add_child(price_label)
-	var price := SpinBox.new(); price.name="OfferPrice"; price.min_value=0; price.max_value=maxi(1,int(quote.reference_fee)*10); price.step=1; price.value=int(quote.quoted_fee); price.prefix="¥"; price.custom_minimum_size.x=150; price.size_flags_horizontal=Control.SIZE_EXPAND_FILL; price_row.add_child(price)
-	body.add_child(_label(UI.copy("board_quote_limits") % [int(quote.reference_fee),int(quote.budget_limit)],12,UI.MUTED))
-	var price_preview := _label("",14,INK); price_preview.name="QuotePreview"; body.add_child(price_preview)
+	var supply_requirement: Dictionary = offer.get("supply_requirement", {}) if offer.get("supply_requirement", {}) is Dictionary else {}
+	var has_billable_material := not supply_requirement.is_empty()
+	var supply_cost := maxi(0, int(quote.get("invoice_total", quote.quoted_fee)) - int(quote.quoted_fee))
+	var price_label := _label(UI.copy("billing_fee") if has_billable_material else UI.copy("board_price"),14,UI.MUTED); price_label.autowrap_mode=TextServer.AUTOWRAP_OFF; price_label.size_flags_vertical=Control.SIZE_SHRINK_CENTER; price_row.add_child(price_label)
+	var price := SpinBox.new(); price.name="OfferPrice"; price.min_value=0; price.max_value=maxi(1,int(quote.reference_fee)*10); price.step=1; price.value=int(sales_quote_drafts.get(str(offer.id), quote.quoted_fee)); price.prefix="¥"; price.custom_minimum_size.x=150; price.size_flags_horizontal=Control.SIZE_EXPAND_FILL; price_row.add_child(price); M.field(price); M.field(plan)
+	var material_totals: HBoxContainer
+	var material_cost_label: Label
+	var invoice_total_label: Label
+	if has_billable_material and supply_cost > 0:
+		material_totals = HBoxContainer.new(); material_totals.name="QuoteHardwareAmounts"; material_totals.add_theme_constant_override("separation",16); material_totals.size_flags_horizontal=Control.SIZE_EXPAND_FILL; body.add_child(material_totals)
+		material_cost_label = _label(UI.copy("stock_material_cost") + "  ¥%d" % supply_cost,13,UI.MUTED); material_cost_label.name="QuoteHardwareMaterial"; material_cost_label.autowrap_mode=TextServer.AUTOWRAP_OFF; material_cost_label.size_flags_horizontal=Control.SIZE_SHRINK_BEGIN; material_totals.add_child(material_cost_label)
+		invoice_total_label = _label(UI.copy("billing_total") + "  ¥%d" % int(quote.get("invoice_total", quote.quoted_fee)),14,INK); invoice_total_label.name="QuoteHardwareTotal"; invoice_total_label.autowrap_mode=TextServer.AUTOWRAP_OFF; invoice_total_label.size_flags_horizontal=Control.SIZE_SHRINK_BEGIN; material_totals.add_child(invoice_total_label)
+	var quote_totals := HBoxContainer.new(); quote_totals.add_theme_constant_override("separation",12); body.add_child(quote_totals)
+	var quote_limits := _label(UI.copy("board_quote_limits") % [int(quote.reference_fee),int(quote.budget_limit)],12,UI.MUTED); quote_limits.autowrap_mode=TextServer.AUTOWRAP_OFF; quote_limits.size_flags_vertical=Control.SIZE_SHRINK_CENTER; quote_totals.add_child(quote_limits)
+	var price_preview := _label("",14,INK); price_preview.name="QuotePreview"; price_preview.size_flags_horizontal=Control.SIZE_EXPAND_FILL; price_preview.horizontal_alignment=HORIZONTAL_ALIGNMENT_RIGHT; quote_totals.add_child(price_preview)
 	var update_preview := func(_amount: float) -> void:
 		var proposed: Dictionary = g.contract_quote(offer,roundi(price.value))
+		if is_instance_valid(invoice_total_label): invoice_total_label.text = UI.copy("billing_total") + "  ¥%d" % int(proposed.get("invoice_total", proposed.get("quoted_fee", 0)))
 		var reaction := str(proposed.price_reaction)
 		var reaction_text: String = {"discount":"割安 · 顧客評価 +3","fair":"相場内 · 顧客評価 ±0","premium":"高め · 顧客評価 -3"}.get(reaction,reaction)
 		price_preview.text=(UI.copy("board_profit") % int(proposed.net)) + "  ·  " + reaction_text
@@ -870,6 +972,18 @@ func _contract_detail(offer: Dictionary) -> void:
 		elif int(proposed.net) < 0: price_preview.text += "\n基本経費を下回る赤字見積です。"
 		price_preview.add_theme_color_override("font_color", WARNING if not bool(proposed.affordable) or int(proposed.net)<0 else INK)
 	price.value_changed.connect(update_preview); update_preview.call(price.value)
+	price.value_changed.connect(func(value: float): sales_quote_drafts[str(offer.id)] = roundi(value))
+	var operating_preview: Dictionary = g.offer_operations_preview(offer)
+	if int(operating_preview.get("required", 0)) > 0 or int(operating_preview.get("shortage", 0)) > 0:
+		_contract_operations_preview(body, offer, g)
+	var disclosures := HBoxContainer.new(); disclosures.add_theme_constant_override("separation",24); body.add_child(disclosures)
+	var brief := _sales_disclosure(body, UI.copy("board_brief"), disclosures)
+	brief.add_child(_label(str(offer.brief),14,INK))
+	var conditions := _sales_disclosure(body, UI.copy("board_conditions"), disclosures)
+	conditions.add_child(_label(UI.copy("billing_terms") + "  " + str(g.invoice_terms(offer).label),14,INK))
+	conditions.add_child(_label("%s · 会社Lv.%d / 専門Lv.%d / 難度%d" % [str(offer.service),offer.required_level,offer.required_rank,offer.grade],14,INK))
+	if int(operating_preview.get("required", 0)) == 0 and int(operating_preview.get("shortage", 0)) == 0:
+		_contract_operations_preview(conditions, offer, g, true)
 	var care_reason := ""
 	if selected_plan == "care":
 		var terms: Dictionary = g.care_terms(str(offer.client)); care_reason=str(terms.reason)
@@ -877,12 +991,14 @@ func _contract_detail(offer: Dictionary) -> void:
 		if not rates_template.is_empty(): body.add_child(_label((rates_template % [int(terms.fee),int(terms.cost),int(terms.net)]) + ("\n" + billing if not billing.is_empty() else ""),14,TEAL))
 		if not care_reason.is_empty(): body.add_child(_label(care_reason,14,WARNING))
 	var actions := HBoxContainer.new(); actions.name = "QuoteActions"; actions.add_theme_constant_override("separation",10); modal_footer.add_child(actions)
+	actions.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	actions.alignment = BoxContainer.ALIGNMENT_END
 	var save_draft:=_button(UI.copy("board_save_draft"),func():
 		price.apply()
 		if g.set_offer_quote(str(offer.id),roundi(price.value)):
-			board_selected_id="";sales_view="inquiries";open_panel("sales"))
+			sales_quote_drafts.erase(str(offer.id)); board_selected_id="";sales_view="inquiries";open_panel("sales"))
 	save_draft.name="SaveQuoteDraft";save_draft.disabled=not offer.unlocked or not bool(offer.get("market_available",true));actions.add_child(save_draft)
-	var accept:=_button(UI.copy("board_send_quote"),func(): price.apply(); _submit_quote(str(offer.id),roundi(price.value))); accept.name="AcceptContract"; accept.disabled=not offer.unlocked or not bool(offer.get("market_available",true)) or not care_reason.is_empty(); actions.add_child(accept); GAME_THEME.primary(accept,GAME_THEME.TAB)
+	var accept:=_button(UI.copy("board_send_quote"),func(): price.apply(); _submit_quote(str(offer.id),roundi(price.value))); accept.name="AcceptContract"; accept.disabled=not offer.unlocked or not bool(offer.get("market_available",true)) or not care_reason.is_empty(); actions.add_child(accept); M.button(accept,"primary")
 	var existing_contract := false
 	var active_contracts := 0
 	if g.has_method("contract_queue"):
@@ -890,10 +1006,29 @@ func _contract_detail(offer: Dictionary) -> void:
 			if str(queued.get("id", "")) == str(offer.id): existing_contract = true
 			if not bool(queued.get("completed", false)): active_contracts += 1
 	if existing_contract: save_draft.disabled = true
-	var queue_reason := _queue_copy("queue_already", "") if existing_contract else _queue_copy("queue_full", "") if g.has_method("contract_capacity") and active_contracts >= int(g.contract_capacity()) else ""
+	var capacity_full := not existing_contract and g.has_method("contract_capacity") and active_contracts >= int(g.contract_capacity())
+	var queue_reason := _queue_copy("queue_already", "") if existing_contract else _queue_copy("queue_full", "") if capacity_full else ""
 	if not queue_reason.is_empty():
 		accept.disabled = true
 		body.add_child(_label(queue_reason, 14, WARNING))
+		if capacity_full:
+			var capacity_routes := HFlowContainer.new()
+			capacity_routes.name = "CapacityResolutionActions"
+			capacity_routes.add_theme_constant_override("h_separation", 8)
+			capacity_routes.add_theme_constant_override("v_separation", 4)
+			body.add_child(capacity_routes)
+			var open_work := _button(UI.copy("queue_resume"), Callable(self, "_open_capacity_operations").bind(str(offer.id), price))
+			open_work.name = "CapacityOpenOperations"
+			open_work.custom_minimum_size.y = 30
+			open_work.add_theme_font_size_override("font_size", maxi(12, int(12 * text_scale)))
+			capacity_routes.add_child(open_work)
+			var equipment_target := _capacity_equipment_target(g)
+			if not equipment_target.is_empty():
+				var open_equipment := _button(UI.copy("stock_equipment_tab"), Callable(self, "_open_capacity_equipment").bind(str(offer.id), price, equipment_target))
+				open_equipment.name = "CapacityOpenEquipment"
+				open_equipment.custom_minimum_size.y = 30
+				open_equipment.add_theme_font_size_override("font_size", maxi(12, int(12 * text_scale)))
+				capacity_routes.add_child(open_equipment)
 
 	var decisions: Array = g.state.get("quote_decisions",[])
 	if not decisions.is_empty():
@@ -901,13 +1036,118 @@ func _contract_detail(offer: Dictionary) -> void:
 		if str(decision.get("offer_id","")) == str(offer.id) and str(decision.get("decision","")) == "declined":
 			var declined := _label("前回: ¥%d / 予算超過" % int(decision.amount),14,WARNING); declined.name = "QuoteDeclined"; body.add_child(declined)
 
+func _contract_operations_preview(body: VBoxContainer, offer: Dictionary, g, details_open: bool = false) -> void:
+	if not g.has_method("offer_operations_preview"):
+		return
+	var preview: Dictionary = g.offer_operations_preview(offer)
+	var panel := PanelContainer.new()
+	panel.name = "OperationsPreview"
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", M.surface(M.CANVAS, 12))
+	body.add_child(panel)
+	var content := VBoxContainer.new()
+	content.add_theme_constant_override("separation", 4)
+	panel.add_child(content)
+	var heading := HBoxContainer.new(); heading.add_theme_constant_override("separation",10); content.add_child(heading)
+	var title := _label(UI.copy("v220_stock_coverage"), 14, M.INK)
+	title.add_theme_font_override("font", heading_font); title.size_flags_horizontal=Control.SIZE_EXPAND_FILL
+	heading.add_child(title)
+	var shortage := int(preview.get("shortage", 0)) > 0
+	var summary := _label(UI.copy("v220_stock_required_count") % [int(preview.get("required",0)),int(preview.get("available",0)),int(preview.get("inbound",0))] + "  ·  " + UI.copy("v220_stock_shortage_count") % int(preview.get("shortage",0)) + "  ·  " + UI.copy("v220_purchase_needed") + " ¥%d" % int(preview.get("purchase_cost",0)),12,M.INK)
+	summary.name="OperationsStockSummary"; content.add_child(summary); summary.visible = int(preview.get("required", 0)) > 0 or int(preview.get("shortage", 0)) > 0
+	var facts := HFlowContainer.new()
+	facts.name = "OperationsPreviewFacts"
+	facts.add_theme_constant_override("h_separation", 6)
+	facts.add_theme_constant_override("v_separation", 4)
+	content.add_child(facts); facts.visible = details_open
+	_preview_fact(facts, UI.copy("v220_stock_required"), preview.get("required", 0))
+	_preview_fact(facts, UI.copy("v220_stock_available"), preview.get("available", 0))
+	_preview_fact(facts, UI.copy("v220_stock_inbound"), preview.get("inbound", 0))
+	_preview_fact(facts, UI.copy("v220_stock_reserved"), preview.get("reserved", 0))
+	_preview_fact(facts, UI.copy("v220_stock_shortage"), preview.get("shortage", 0))
+	_preview_fact(facts, UI.copy("v220_purchase_needed"), "¥%d" % int(preview.get("purchase_cost", 0)))
+	_preview_fact(facts, UI.copy("v220_after_purchase"), "¥%d" % int(preview.get("cash_after_purchase", g.state.get("cash", 0))))
+	var capacity_text := "%d / %d" % [int(preview.get("open_contracts", 0)), int(preview.get("contract_capacity", 0))]
+	var staff_text := "%d / %d" % [int(preview.get("staff_count", 0)), int(preview.get("workforce_capacity", 2 + int(preview.get("staff_capacity", 0))))]
+	_preview_fact(facts, UI.copy("v220_contract_slots"), capacity_text)
+	_preview_fact(facts, UI.copy("v220_staff_seats"), staff_text)
+	_preview_fact(facts, UI.copy("ops_payroll"), "¥%d" % int(preview.get("payroll_due", 0)))
+	var details := _button(UI.copy("market_detail")); details.name="OperationsPreviewDetails"; details.toggle_mode=true; details.custom_minimum_size.y=30; details.add_theme_font_size_override("font_size",maxi(14,int(12*text_scale))); details.toggled.connect(func(expanded): facts.visible=expanded); heading.add_child(details)
+	details.visible = not details_open
+	var actions := HBoxContainer.new()
+	actions.name = "OperationsPreviewActions"
+	actions.add_theme_constant_override("separation", 8)
+	actions.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	heading.add_child(actions)
+	var procurement := _button(UI.copy("v220_prepare_stock"), Callable(self, "_open_quote_procurement").bind(str(offer.id)))
+	procurement.name = "OperationsProcurement"
+	procurement.custom_minimum_size.y = 30
+	procurement.add_theme_font_size_override("font_size", maxi(12, int(12 * text_scale)))
+	procurement.visible = shortage
+	actions.add_child(procurement)
+	var team := _button(UI.copy("v220_prepare_staff"), Callable(self, "_open_quote_team").bind(str(offer.id)))
+	team.name = "OperationsStaffing"
+	team.custom_minimum_size.y = 30
+	team.add_theme_font_size_override("font_size", maxi(12, int(12 * text_scale)))
+	# The team view remains useful when every seat is occupied (queues and shifts).
+	team.disabled = false
+	actions.add_child(team); team.visible = details_open
+	details.toggled.connect(func(opened): team.visible = opened)
+
+func _preview_fact(host: Container, label_text: String, value: Variant) -> void:
+	var item := VBoxContainer.new()
+	item.custom_minimum_size.x = 72
+	item.add_theme_constant_override("separation", 1)
+	host.add_child(item)
+	item.add_child(_label(label_text, 10, GAME_THEME.FILTER))
+	var value_label := _label(str(value), 12, GAME_THEME.WHITE)
+	value_label.name = "Value"
+	value_label.add_theme_font_override("font", UI.font(700))
+	item.add_child(value_label)
+
+func _open_quote_procurement(id: String) -> void:
+	board_selected_id = id
+	shop_view = "stock"
+	open_panel("shop")
+
+func _open_quote_team(id: String) -> void:
+	board_selected_id = id
+	open_panel("terminal")
+	if is_instance_valid(desktop): desktop._show_app("team")
+
+func _save_quote_route_draft(id: String, price: SpinBox) -> void:
+	if not is_instance_valid(price): return
+	price.apply()
+	sales_quote_drafts[id] = roundi(price.value)
+
+func _open_capacity_operations(id: String, price: SpinBox) -> void:
+	_save_quote_route_draft(id, price)
+	operations_choices.view = "contracts"
+	open_panel("board")
+
+func _capacity_equipment_target(g) -> String:
+	for id in ["teamdesk", "annexdesk_a", "annexdesk_b"]:
+		if id in g.state.get("equipment", []): continue
+		var delivery: Dictionary = g.delivery_for(id) if g.has_method("delivery_for") else {}
+		if not delivery.is_empty() or str(g.equipment_unavailable_reason(id)).is_empty(): return id
+	var expansion: Dictionary = g.office_expansion_status() if g.has_method("office_expansion_status") else {}
+	if not g.office_expanded() and str(expansion.get("status", "locked")) in ["locked", "ordered"]: return "office_expansion"
+	return ""
+
+func _open_capacity_equipment(id: String, price: SpinBox, equipment_id: String) -> void:
+	_save_quote_route_draft(id, price)
+	shop_view = "equipment"
+	set_meta("equipment_selected", equipment_id)
+	open_panel("shop")
+
 func _sales_disclosure(parent: VBoxContainer, title: String, header: Container) -> VBoxContainer:
 	var content := VBoxContainer.new()
 	var toggle := _button(title)
+	toggle.name = "QuoteConditions" if title == UI.copy("board_conditions") else "QuoteBrief"
 	toggle.toggle_mode = true
 	toggle.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	toggle.custom_minimum_size.y = 28
-	toggle.add_theme_font_size_override("font_size",int(13*text_scale))
+	toggle.add_theme_font_size_override("font_size",maxi(14, int(14*text_scale)))
 	for state in ["normal","pressed"]: toggle.add_theme_stylebox_override(state,UI.style(GAME_THEME.WHITE,Color.TRANSPARENT,0,2,0))
 	toggle.add_theme_stylebox_override("hover",UI.style(GAME_THEME.CANVAS,Color.TRANSPARENT,0,2,0))
 	for state in ["font_color","font_pressed_color","font_hover_color","font_focus_color"]: toggle.add_theme_color_override(state,INK)
@@ -931,7 +1171,10 @@ func _submit_quote(id: String, amount: int) -> void:
 			return
 	var quote_ok: bool = bool(g.set_offer_quote(id,amount))
 	if not quote_ok: return
-	if g.choose_contract(id): open_panel("terminal")
+	sales_quote_drafts.erase(id)
+	if g.choose_contract(id):
+		board_selected_id = ""
+		_select_contract(id)
 	else: _select_contract(id)
 
 
@@ -982,47 +1225,73 @@ func _staffing() -> void:
 
 func _company() -> void:
 	var g := _game(); if g == null: return
-	modal_body.add_child(_button(UI.copy("staffing_title"), open_panel.bind("staffing")))
 	_maintenance_progress_labels.clear()
 	_maintenance_ui_signature = _maintenance_signature(g)
-	var portfolio: Dictionary = g.care_portfolio() if g.has_method("care_portfolio") else {"clients": []}
-	var level: Dictionary = g.company_level() if g.has_method("company_level") else {"level":1,"xp":g.state.get("profit", 0),"current_floor":0,"next_threshold":0,"progress":0.0,"next_unlock":"-","label":"会社"}
-	modal_body.add_child(_label("%s   所持金 ¥%d   Lv.%d   XP %d   保有pt %d" % [g.company_name(),int(g.state.get("cash",0)),level.level,level.xp,g.skill_points()],16,TEAL))
-	var unlock:=_label("次の解放: %s" % level.next_unlock,13,MUTED); unlock.tooltip_text="あと %d XP" % maxi(0,int(level.next_threshold)-int(level.xp)); modal_body.add_child(unlock)
-	var xp := ProgressBar.new(); xp.value=float(level.progress)*100.0; xp.show_percentage=false; xp.custom_minimum_size.y=6; modal_body.add_child(xp)
-	var branches := VBoxContainer.new(); branches.size_flags_vertical = Control.SIZE_SHRINK_BEGIN; branches.add_theme_constant_override("separation", 10); modal_body.add_child(branches)
-	var compact_company := root.size.x < 1100
+	_operating_ui_signature = _operating_signature(g)
+	var view := str(get_meta("company_view", "overview"))
+	var nav := HBoxContainer.new(); nav.name = "CompanyViews"; nav.add_theme_constant_override("separation", 12); modal_body.add_child(nav)
+	for spec in [["overview", UI.copy("rmd_overview")], ["growth", UI.copy("v220_growth")], ["care", "顧客保守"]]:
+		var tab := _button(str(spec[1]), _select_company_view.bind(str(spec[0])))
+		tab.name = "CompanyView_" + str(spec[0]); M.button(tab, "tab", view == str(spec[0])); nav.add_child(tab)
+	var spacer := Control.new(); spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL; nav.add_child(spacer)
+	var menu := MenuButton.new(); menu.text = "···"; menu.name = "CompanyMenu"; M.button(menu, "quiet"); nav.add_child(menu)
+	menu.get_popup().add_item("名前の変更", 0); menu.get_popup().add_item("営業記録書き出し", 1)
+	menu.get_popup().id_pressed.connect(func(id): _open_profile_editor() if id == 0 else _report())
+	modal_body.add_child(M.rule())
+	match view:
+		"growth": _company_growth(g)
+		"care": _company_care(g)
+		_: _company_operating_desk(g, g.company_operating_summary())
+
+func _select_company_view(view: String) -> void:
+	set_meta("company_view", view); open_panel("company")
+
+func _company_growth(g) -> void:
+	var level: Dictionary = g.company_level()
+	var details := modal_body
+	details.add_child(_label("Lv.%d   ·   保有pt %d" % [level.level,g.skill_points()],16,TEAL))
+	var unlock:=_label("次の解放: %s" % level.next_unlock,13,MUTED); unlock.tooltip_text="あと %d XP" % maxi(0,int(level.next_threshold)-int(level.xp)); details.add_child(unlock)
+	var xp := ProgressBar.new(); xp.value=float(level.progress)*100.0; xp.show_percentage=false; xp.custom_minimum_size.y=6; details.add_child(xp)
+	var branches := VBoxContainer.new(); branches.size_flags_vertical = Control.SIZE_SHRINK_BEGIN; branches.add_theme_constant_override("separation", 10); details.add_child(branches)
 	for skill in g.skill_catalog():
-		var card := PanelContainer.new(); card.size_flags_horizontal = Control.SIZE_EXPAND_FILL; card.size_flags_vertical = Control.SIZE_SHRINK_BEGIN; card.add_theme_stylebox_override("panel", GAME_THEME.surface(GAME_THEME.CARD, GAME_THEME.CARD_FRAME, 6, 10)); branches.add_child(card)
-		var row: Container = VBoxContainer.new() if compact_company else HBoxContainer.new(); row.size_flags_vertical = Control.SIZE_SHRINK_BEGIN; row.add_theme_constant_override("separation", 10 if compact_company else 16); card.add_child(row)
-		var column := VBoxContainer.new(); column.size_flags_vertical = Control.SIZE_SHRINK_CENTER; column.size_flags_horizontal = Control.SIZE_EXPAND_FILL; column.custom_minimum_size.x = 0 if compact_company else 390; column.add_theme_constant_override("separation", 3); row.add_child(column)
-		var skill_title := _label(skill.title, 20, GAME_THEME.WHITE); skill_title.autowrap_mode = TextServer.AUTOWRAP_OFF; skill_title.clip_text = true; skill_title.tooltip_text = str(skill.title); column.add_child(skill_title)
-		column.add_child(_label("Lv.%d / %d" % [int(skill.rank),int(skill.max_rank)], 14, GAME_THEME.FILTER))
-		var stages:=HBoxContainer.new(); stages.size_flags_horizontal=Control.SIZE_EXPAND_FILL; stages.size_flags_vertical=Control.SIZE_SHRINK_CENTER; stages.custom_minimum_size.y=18; stages.add_theme_constant_override("separation",3); column.add_child(stages)
+		var card := PanelContainer.new(); card.size_flags_horizontal = Control.SIZE_EXPAND_FILL; card.size_flags_vertical = Control.SIZE_SHRINK_BEGIN; card.add_theme_stylebox_override("panel", M.surface(M.CANVAS, 12)); branches.add_child(card)
+		var row := HBoxContainer.new(); row.size_flags_vertical = Control.SIZE_SHRINK_BEGIN; row.add_theme_constant_override("separation", 18); card.add_child(row)
+		var column := VBoxContainer.new(); column.size_flags_vertical = Control.SIZE_SHRINK_CENTER; column.custom_minimum_size.x = 220; column.add_theme_constant_override("separation", 3); row.add_child(column)
+		var skill_title := _label(skill.title, 16, M.INK); skill_title.autowrap_mode = TextServer.AUTOWRAP_OFF; skill_title.clip_text = true; skill_title.tooltip_text = str(skill.title); column.add_child(skill_title)
+		column.add_child(_label("Lv.%d / %d" % [int(skill.rank),int(skill.max_rank)], 12, M.MUTED))
+		var stages:=HBoxContainer.new(); stages.size_flags_horizontal=Control.SIZE_EXPAND_FILL; stages.size_flags_vertical=Control.SIZE_SHRINK_CENTER; stages.custom_minimum_size.y=7; stages.add_theme_constant_override("separation",3); column.add_child(stages)
 		for i in 10:
-			var stage:=PanelContainer.new(); stage.custom_minimum_size=Vector2(24,18); stage.size_flags_horizontal=Control.SIZE_EXPAND_FILL; stage.size_flags_vertical=Control.SIZE_SHRINK_CENTER; stage.add_theme_stylebox_override("panel",GAME_THEME.surface(GAME_THEME.SUCCESS if i < skill.rank else GAME_THEME.CARD_FRAME,Color.TRANSPARENT,2,2)); stages.add_child(stage)
+			var stage:=PanelContainer.new(); stage.custom_minimum_size=Vector2(12,7); stage.size_flags_horizontal=Control.SIZE_EXPAND_FILL; stage.size_flags_vertical=Control.SIZE_SHRINK_CENTER; stage.add_theme_stylebox_override("panel",M.surface(M.ACCENT if i < skill.rank else M.LINE,0)); stages.add_child(stage)
 		var effects := VBoxContainer.new(); effects.size_flags_horizontal=Control.SIZE_EXPAND_FILL; effects.size_flags_vertical=Control.SIZE_SHRINK_CENTER; effects.add_theme_constant_override("separation",4); row.add_child(effects)
-		effects.add_child(_label("現在: %s" % str(skill.get("current_effect", "未習得")), 14, GAME_THEME.WHITE))
+		effects.add_child(_label("現在: %s" % str(skill.get("current_effect", "未習得")), 12, M.INK))
 		var case_unlocks: Array = g.skill_case_unlocks(str(skill.id))
 		var next_effect := "次: %s" % (str(skill.get("next_effect", "最大ランク")) if skill.rank < int(skill.max_rank) else "最大ランク")
 		if not case_unlocks.is_empty(): next_effect = UI.copy("firm_unlocks") % " / ".join(case_unlocks.slice(0,2))
-		var next_label := _label(next_effect, 14, GAME_THEME.FILTER)
+		var next_label := _label(next_effect, 12, M.MUTED)
 		next_label.name = "SkillNext_" + str(skill.id)
 		next_label.tooltip_text = "\n".join(case_unlocks)
 		effects.add_child(next_label)
-		var learn := _button("習得 / 1 pt", Callable(self, "_learn_skill").bind(skill.id)); learn.custom_minimum_size=Vector2(106,40); learn.size_flags_vertical=Control.SIZE_SHRINK_CENTER; learn.disabled = skill.rank >= int(skill.max_rank) or g.skill_points() <= 0 or str(g.state.strategy) == ""; GAME_THEME.primary(learn, GAME_THEME.BUY); row.add_child(learn)
-	if g.has_method("care_portfolio"):
-		modal_body.add_child(_label(UI.copy("care_title", "顧客保守"), 22, TEAL))
+		var learn := _button("習得 / 1 pt", Callable(self, "_learn_skill").bind(skill.id)); learn.custom_minimum_size=Vector2(106,40); learn.size_flags_vertical=Control.SIZE_SHRINK_CENTER; learn.disabled = skill.rank >= int(skill.max_rank) or g.skill_points() <= 0 or str(g.state.strategy) == ""; M.button(learn, "primary"); row.add_child(learn)
+
+func _company_care(g) -> void:
+	var portfolio: Dictionary = g.care_portfolio()
+	var details := modal_body
+	var compact_company := root.size.x < 1100
+	if portfolio.get("clients", []).is_empty():
+		details.add_child(_label("保守契約なし", 20, M.MUTED))
+		var browse := _button(UI.copy("ops_sales").get_slice("・", 0), open_panel.bind("sales")); M.button(browse, "primary"); browse.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN; details.add_child(browse)
+		return
+	if not portfolio.get("clients", []).is_empty():
 		var contract_rates := UI.copy("care_contract_rates", "")
 		var contract_text := contract_rates % [int(portfolio.get("gross_daily", 0)), int(portfolio.get("service_cost_daily", 0)), int(portfolio.get("net_daily", 0))] if not contract_rates.is_empty() else ""
-		var summary := _label(contract_text, 15, TEAL); summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; modal_body.add_child(summary)
+		var summary := _label(contract_text, 15, TEAL); summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; details.add_child(summary)
 		if g.has_method("maintenance_summary"):
 			var maintenance_summary: Dictionary = g.maintenance_summary()
 			var count_template := UI.copy("care_summary", "")
-			if not count_template.is_empty(): modal_body.add_child(_label(count_template % [int(maintenance_summary.get("pending", 0)), int(maintenance_summary.get("working", 0)), int(maintenance_summary.get("done", 0)), int(maintenance_summary.get("failed", 0))], 14, MUTED))
+			if not count_template.is_empty() and int(maintenance_summary.get("pending", 0)) + int(maintenance_summary.get("working", 0)) + int(maintenance_summary.get("failed", 0)) > 0: details.add_child(_label(count_template % [int(maintenance_summary.get("pending", 0)), int(maintenance_summary.get("working", 0)), int(maintenance_summary.get("done", 0)), int(maintenance_summary.get("failed", 0))], 14, MUTED))
 			var today_template := UI.copy("care_today", "")
-			if not today_template.is_empty(): modal_body.add_child(_label(today_template % [int(maintenance_summary.get("earned", 0)), int(maintenance_summary.get("service_cost", 0)), int(maintenance_summary.get("net", 0))], 14, TEAL))
-	var table := VBoxContainer.new(); table.size_flags_horizontal = Control.SIZE_EXPAND_FILL; table.add_theme_constant_override("separation", 4); modal_body.add_child(table)
+			if not today_template.is_empty() and int(maintenance_summary.get("earned", 0)) + int(maintenance_summary.get("service_cost", 0)) > 0: details.add_child(_label(today_template % [int(maintenance_summary.get("earned", 0)), int(maintenance_summary.get("service_cost", 0)), int(maintenance_summary.get("net", 0))], 14, TEAL))
+	var table := VBoxContainer.new(); table.size_flags_horizontal = Control.SIZE_EXPAND_FILL; table.add_theme_constant_override("separation", 4); details.add_child(table)
 	var widths: Array = [150, 88, 100, 84, 64] if compact_company else [220, 100, 120, 100, 80]
 	var header := HBoxContainer.new(); header.add_theme_constant_override("separation", 8); table.add_child(header)
 	for index in 5:
@@ -1039,7 +1308,9 @@ func _company() -> void:
 		var colors: Array = [INK, TEAL, INK, TEAL if status_text == "稼働" else ORANGE, MUTED]
 		for index in values.size():
 			var cell: Label = _label(str(values[index]), 13, colors[index]); cell.custom_minimum_size.x = widths[index]; cell.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN; cell.autowrap_mode = TextServer.AUTOWRAP_OFF; cell.clip_text = true; cell.tooltip_text = str(values[index]); care_top_row.add_child(cell)
-		if g.has_method("maintenance_jobs"):
+		var choose := _button(UI.copy("market_detail"), func(): set_meta("company_client", client_name); _refresh_maintenance_panel())
+		choose.name = "CompanyClient_" + client_name.sha256_text().left(10); M.button(choose, "quiet", str(get_meta("company_client", "")) == client_name); care_top_row.add_child(choose)
+		if g.has_method("maintenance_jobs") and str(get_meta("company_client", "")) == client_name:
 			var owner_row:=HFlowContainer.new();owner_row.add_theme_constant_override("h_separation",8);owner_row.add_theme_constant_override("v_separation",5);client_box.add_child(owner_row)
 			var scope_label:=_label(UI.copy("care_scope_count") % g._maintenance_targets_for(client_name).size(),12,MUTED);scope_label.autowrap_mode=TextServer.AUTOWRAP_OFF;scope_label.size_flags_vertical=Control.SIZE_SHRINK_CENTER;owner_row.add_child(scope_label)
 			var owner_label:=_label(UI.copy("care_owner"),12,MUTED);owner_label.autowrap_mode=TextServer.AUTOWRAP_OFF;owner_label.size_flags_vertical=Control.SIZE_SHRINK_CENTER;owner_row.add_child(owner_label)
@@ -1094,9 +1365,89 @@ func _company() -> void:
 				delegate.name = "Maintenance_"+assignee
 				delegate.disabled = not g.can_run_maintenance(client_name) or not unavailable.is_empty()
 				delegate.tooltip_text = unavailable; care_row.add_child(delegate)
-	modal_footer.add_child(_button("案件ボード", Callable(self, "open_panel").bind("board")))
-	modal_footer.add_child(_button("名前の変更",_open_profile_editor))
-	modal_footer.add_child(_button("営業記録書き出し",_report))
+
+func _company_operating_desk(g, summary: Dictionary) -> void:
+	var panel := VBoxContainer.new(); panel.name = "OperatingDesk"; panel.add_theme_constant_override("separation", 18); modal_body.add_child(panel)
+	var identity := HBoxContainer.new(); identity.add_theme_constant_override("separation", 16); panel.add_child(identity)
+	var company := _label(g.company_name(), 26, M.INK); company.name = "CompanyBrand"; company.clip_text = true; company.autowrap_mode = TextServer.AUTOWRAP_OFF; company.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS; company.tooltip_text = g.company_name(); company.size_flags_horizontal = Control.SIZE_EXPAND_FILL; identity.add_child(company)
+	var level: Dictionary = g.company_level(); var level_label := _label("Lv.%d" % int(level.level), 18, M.ACCENT); level_label.autowrap_mode = TextServer.AUTOWRAP_OFF; identity.add_child(level_label)
+	var metrics := HBoxContainer.new(); metrics.name = "OperatingMetrics"; metrics.add_theme_constant_override("separation", 36); panel.add_child(metrics)
+	_operating_metric(metrics, UI.copy("billing_receivable_total"), "¥" + _group_number(_summary_number(summary, "receivables", summary.get("receivable_total", 0))))
+	_operating_metric(metrics, UI.copy("ops_payroll"), "¥" + _group_number(_summary_number(summary, "payroll_due", 0)))
+	_operating_metric(metrics, UI.copy("v220_contract_slots"), "%d / %d" % [_summary_number(summary, "open_contracts", 0), _summary_number(summary, "contract_capacity", 0)])
+	panel.add_child(M.rule())
+	var attention := VBoxContainer.new(); attention.name = "OperatingAttention"; attention.add_theme_constant_override("separation", 12); panel.add_child(attention)
+	var attention_heading := _label(UI.copy("v220_attention"), 14, M.MUTED); attention.add_child(attention_heading)
+	var count := 0
+	for item in [["receiving_count", "v220_receive_count", _open_company_receiving], ["stock_shortage_total", "v220_stock_shortage_count", _open_company_procurement], ["draft_invoice_count", "v220_invoice_count", _open_company_billing], ["maintenance_pending", "v220_maintenance_count", _open_company_maintenance]]:
+		var amount := _summary_number(summary, str(item[0]), 0)
+		if amount > 0:
+			_operating_attention_row(attention, UI.copy(str(item[1])), amount, item[2]); count += 1
+	var arrears := _summary_number(summary, "payroll_arrears", 0)
+	if arrears > 0:
+		var debt := _label(UI.copy("ops_arrears") + "  ¥" + _group_number(arrears), 15, M.DANGER); attention.add_child(debt)
+		var payroll := _button(UI.copy("staffing_title"), open_panel.bind("staffing")); M.button(payroll, "quiet"); attention.add_child(payroll); count += 1
+	attention_heading.visible = count > 0
+	if count == 0:
+		attention.add_child(_label(UI.copy("v220_attention_clear"), 17, M.ACCENT))
+		var browse := _button(UI.copy("ops_sales").get_slice("・", 0), open_panel.bind("sales")); browse.name = "CompanyNext"; browse.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN; M.button(browse, "primary"); attention.add_child(browse)
+	var capacity := HBoxContainer.new(); capacity.name = "OperatingCapacity"; capacity.add_theme_constant_override("separation", 32); panel.add_child(capacity)
+	var staff_current := _summary_number(summary, "staff_count", 0)
+	_operating_metric(capacity, UI.copy("v220_staff_seats"), "%d / %d" % [staff_current, _summary_number(summary, "workforce_capacity", staff_current)])
+	_operating_metric(capacity, UI.copy("v220_installed"), str(_summary_number(summary, "installed_equipment_count", 0)))
+	if _summary_number(summary, "pending_equipment_count", 0) > 0:
+		_operating_metric(capacity, UI.copy("v220_equipment_pending"), str(_summary_number(summary, "pending_equipment_count", 0)))
+
+func _summary_number(summary: Dictionary, key: String, fallback: Variant = 0) -> int:
+	var value: Variant = summary.get(key, fallback)
+	if value is Dictionary:
+		var data: Dictionary = value
+		return int(data.get("count", data.get("total", data.get("value", fallback))))
+	return int(value)
+
+func _operating_metric(host: Container, title: String, value: String) -> void:
+	var item := VBoxContainer.new()
+	item.custom_minimum_size.x = 154
+	item.add_theme_constant_override("separation", 1)
+	host.add_child(item)
+	item.add_child(_label(title, 11, M.MUTED))
+	var amount := _label(value, 23, M.INK)
+	amount.add_theme_font_override("font", UI.font(700))
+	item.add_child(amount)
+
+func _operating_attention_row(host: VBoxContainer, title: String, count: int, action: Callable) -> void:
+	var row := HBoxContainer.new()
+	row.name = "OperatingAttention_" + str(host.get_child_count())
+	row.add_theme_constant_override("separation", 8)
+	host.add_child(row)
+	var row_text := title % count if title.contains("%") else "%s  %d" % [title, count]
+	var label := _label(row_text, 12, M.INK)
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(label)
+	var button := _button(UI.copy("business_details", "開く"), action)
+	button.custom_minimum_size.x = 70
+	M.button(button, "primary" if host.get_child_count() == 2 else "quiet")
+	row.add_child(button)
+
+func _open_company_procurement() -> void:
+	shop_view = "stock"
+	set_meta("stock_view", "catalog")
+	open_panel("shop")
+
+func _open_company_receiving() -> void:
+	shop_view = "stock"
+	set_meta("stock_view", "inventory")
+	open_panel("shop")
+
+func _open_company_maintenance() -> void:
+	operations_choices.view = "maintenance"
+	open_panel("board")
+
+func _open_company_billing() -> void:
+	_open_billing()
+
+func _return_to_quote() -> void:
+	open_panel("sales")
 
 func _learn_skill(id: String) -> void:
 	var g := _game()
@@ -1130,88 +1481,7 @@ func _show_maintenance_result(client: String) -> void:
 	if is_instance_valid(desktop) and desktop.has_method("_append"): desktop._append(title + "\n" + (result if not result.is_empty() else UI.copy("care_result_empty", "")))
 
 func _shop() -> void:
-	var g := _game(); if g == null: return
-	if shop_view == "stock":
-		PROCUREMENT_PANEL.render(self, modal_body, g)
-		return
-	var shop_tabs := HBoxContainer.new()
-	shop_tabs.name = "ShopTabs"
-	shop_tabs.add_theme_constant_override("separation", 8)
-	modal_body.add_child(shop_tabs)
-	var equipment_tab := _button(UI.copy("stock_equipment_tab", "Equipment"), func():
-		shop_view = "equipment"
-		open_panel("shop"))
-	equipment_tab.name = "EquipmentTab"
-	GAME_THEME.navigation(equipment_tab, true)
-	shop_tabs.add_child(equipment_tab)
-	var stock_tab := _button(UI.copy("stock_tab", "Customer stock"), func():
-		shop_view = "stock"
-		open_panel("shop"))
-	stock_tab.name = "StockTab"
-	GAME_THEME.navigation(stock_tab, false)
-	shop_tabs.add_child(stock_tab)
-	var orders: Array = g.state.get("delivery_orders", []) if g.state.get("delivery_orders", []) is Array else []
-	var installed_count := 0
-	var delivery_counts := {"queued": 0, "ready": 0, "carried": 0, "placing": 0}
-	for order in orders:
-		if str(order.get("status", "")) == "installed": installed_count += 1
-		elif delivery_counts.has(str(order.get("status", ""))): delivery_counts[str(order.status)] += 1
-	modal_body.add_child(_label("%s %d / %d　%s" % [UI.copy("delivery_installed","設置済み"), installed_count, g.equipment_catalog().size(), UI.copy("delivery_destination","受取場所: オフィス入口")],14,TEAL))
-	var delivery_summary: PackedStringArray = []
-	for status in delivery_counts:
-		if int(delivery_counts[status]) > 0:
-			delivery_summary.append("%s %d" % [UI.copy("delivery_waiting" if status == "queued" else "delivery_"+status,status),int(delivery_counts[status])])
-	if not delivery_summary.is_empty(): modal_body.add_child(_label("　".join(delivery_summary),14,MUTED))
-	var grid:=GridContainer.new(); grid.columns=3 if root.size.x >= 1100 else 2; grid.size_flags_horizontal=Control.SIZE_EXPAND_FILL; grid.add_theme_constant_override("h_separation",10); grid.add_theme_constant_override("v_separation",10); modal_body.add_child(grid)
-	for item in g.equipment_catalog():
-		var price: int = g.equipment_price(str(item.id)) if g.has_method("equipment_price") else int(item.price)
-		var card:=PanelContainer.new(); card.size_flags_horizontal=Control.SIZE_EXPAND_FILL; card.custom_minimum_size.y=168; card.add_theme_stylebox_override("panel",GAME_THEME.surface(GAME_THEME.CARD,GAME_THEME.CARD_FRAME,8,10)); grid.add_child(card)
-		var content_box:=VBoxContainer.new(); content_box.add_theme_constant_override("separation",6); card.add_child(content_box)
-		var item_title := _label(str(item.title),17,GAME_THEME.WHITE); item_title.add_theme_font_override("font",UI.font(700)); item_title.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART; content_box.add_child(item_title)
-		var row:=HBoxContainer.new(); row.add_theme_constant_override("separation",10); content_box.add_child(row)
-		var owned: bool = item.id in g.state.equipment
-		var order: Dictionary = g.delivery_for(str(item.id)) if g.has_method("delivery_for") else {}
-		var delivery_status := str(order.get("status", ""))
-		var state_text := "（%s）" % UI.copy("delivery_installed","設置済み") if owned else ("（%s）" % UI.copy("delivery_waiting","配送待ち") if delivery_status == "queued" else ("（%s）" % UI.copy("delivery_ready","入口に到着・受取待ち") if delivery_status == "ready" else ("（%s）" % UI.copy("delivery_carried","運搬中") if delivery_status == "carried" else ("（%s）" % UI.copy("delivery_placing","設置中") if delivery_status == "placing" else ""))))
-		var image_well:=PanelContainer.new(); image_well.add_theme_stylebox_override("panel",GAME_THEME.surface(GAME_THEME.CANVAS,Color.TRANSPARENT,4,2)); row.add_child(image_well)
-		var icon := TextureRect.new(); icon.texture = EQUIPMENT_ART.icon(str(item.id)); icon.custom_minimum_size = Vector2(128,104) if root.size.x < 1100 else Vector2(180,132); icon.size_flags_horizontal = Control.SIZE_SHRINK_CENTER; icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE; icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED; image_well.add_child(icon)
-		var col:=VBoxContainer.new(); col.size_flags_horizontal=Control.SIZE_EXPAND_FILL; col.add_theme_constant_override("separation",4); row.add_child(col)
-		var item_model := _label(str(item.get("model", "")),12,GAME_THEME.FILTER); item_model.autowrap_mode=TextServer.AUTOWRAP_OFF; item_model.clip_text=true; col.add_child(item_model)
-		var item_effect := _label(UI.copy("%s_effect" % str(item.id),str(item.get("effect",item.description))),12,GAME_THEME.FILTER); item_effect.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART; col.add_child(item_effect)
-		var action_well:=VBoxContainer.new(); action_well.custom_minimum_size.x=100; action_well.size_flags_vertical=Control.SIZE_SHRINK_CENTER; action_well.add_theme_constant_override("separation",4); row.add_child(action_well)
-		var price_label := _label("¥%d" % price,18,GAME_THEME.WHITE); price_label.horizontal_alignment=HORIZONTAL_ALIGNMENT_RIGHT; price_label.autowrap_mode=TextServer.AUTOWRAP_OFF; action_well.add_child(price_label)
-		var status_label := _label(state_text,11,GAME_THEME.FILTER if not owned else GAME_THEME.SUCCESS); status_label.horizontal_alignment=HORIZONTAL_ALIGNMENT_RIGHT; status_label.autowrap_mode=TextServer.AUTOWRAP_OFF; status_label.clip_text=true; action_well.add_child(status_label)
-		var b: Button
-		if owned:
-			b = _button(UI.copy("delivery_installed","設置済み"), Callable(self, "_show_delivery_help"))
-		elif not delivery_status.is_empty():
-			b = _button(state_text, Callable(self, "_show_delivery_help"))
-		else:
-			b = _button(UI.copy("delivery_order","注文"), Callable(self, "_buy").bind(item.id))
-		var unavailable := str(g.equipment_unavailable_reason(str(item.id))) if g.has_method("equipment_unavailable_reason") else ""
-		b.name = "Buy_"+str(item.id); b.tooltip_text = unavailable; b.custom_minimum_size.x=108
-		GAME_THEME.primary(b, GAME_THEME.BUY); b.disabled = owned or not delivery_status.is_empty() or int(g.state.cash) < price or not unavailable.is_empty(); action_well.add_child(b)
-	_expansion_purchase(g)
-
-func _expansion_purchase(g) -> void:
-	if not g.has_method("office_expansion_status"): return
-	var expansion: Dictionary = g.office_expansion_status()
-	var card := PanelContainer.new(); card.add_theme_stylebox_override("panel",GAME_THEME.surface(GAME_THEME.ACTION,GAME_THEME.CARD_FRAME,8,10)); modal_body.add_child(card)
-	var row := HBoxContainer.new(); row.add_theme_constant_override("separation",12); card.add_child(row)
-	var details := VBoxContainer.new(); details.size_flags_horizontal=Control.SIZE_EXPAND_FILL; row.add_child(details)
-	var expansion_title := _label(UI.copy("expansion_title"),20,GAME_THEME.WHITE); expansion_title.add_theme_font_override("font",UI.font(700)); details.add_child(expansion_title)
-	var status := str(expansion.get("status","locked"))
-	if status == "ordered":
-		details.add_child(_label(UI.copy("expansion_available_day") % int(expansion.get("available_day",0)),14,GAME_THEME.FILTER))
-	elif status == "open":
-		var added := 0
-		for id in ["annexdesk_a","annexdesk_b"]:
-			if id in g.state.equipment: added += 1
-		details.add_child(_label(UI.copy("expansion_added_seats") % added,14,GAME_THEME.FILTER))
-	var button := _button(UI.copy("expansion_buy") if status == "locked" else UI.copy("expansion_"+status),func():
-		if g.buy_office_expansion(): open_panel("shop")
-	)
-	button.name="BuyOfficeExpansion"; button.tooltip_text=str(g.office_expansion_reason()); button.disabled=status!="locked" or not button.tooltip_text.is_empty(); button.custom_minimum_size.x=150; GAME_THEME.primary(button,GAME_THEME.BUY); row.add_child(button)
+	EQUIPMENT_PANEL.build(self)
 
 func _show_delivery_help() -> void:
 	if is_instance_valid(status_label): status_label.text = ""
@@ -1228,7 +1498,8 @@ func _door() -> void:
 		modal_body.add_child(_button("初週決算確認", Callable(self, "open_panel").bind("ending")))
 		modal_body.add_child(_button("営業を続ける", Callable(self, "_continue_business")))
 		return
-	var end_reason := str(g.end_day_reason()) if g.has_method("end_day_reason") else (str(g.maintenance_end_day_reason()) if g.has_method("maintenance_end_day_reason") else ""); var b := _button(_queue_copy("queue_overnight", ""), Callable(self, "_end_day")); b.name="DaySettle"; b.disabled = g.has_method("can_end_day") and not bool(g.can_end_day()) or (not g.has_method("can_end_day") and not end_reason.is_empty()); b.tooltip_text = end_reason if not end_reason.is_empty() else ""; GAME_THEME.primary(b,GAME_THEME.TAB); modal_footer.add_child(b)
+	var footer_space := Control.new(); footer_space.size_flags_horizontal = Control.SIZE_EXPAND_FILL; modal_footer.add_child(footer_space)
+	var end_reason := str(g.end_day_reason()) if g.has_method("end_day_reason") else (str(g.maintenance_end_day_reason()) if g.has_method("maintenance_end_day_reason") else ""); var b := _button(_queue_copy("queue_overnight", ""), Callable(self, "_end_day")); b.name="DaySettle"; b.disabled = g.has_method("can_end_day") and not bool(g.can_end_day()) or (not g.has_method("can_end_day") and not end_reason.is_empty()); b.tooltip_text = end_reason if not end_reason.is_empty() else ""; M.button(b,"primary"); modal_footer.add_child(b)
 	if not end_reason.is_empty(): modal_body.add_child(_label(end_reason,16,WARNING))
 
 func _end_day() -> void:
@@ -1359,7 +1630,9 @@ func _close_settings() -> void:
 func _settings_tab(tab: String) -> void:
 	settings_category=tab
 	for id in controls.get("settings_tabs",{}):
-		if is_instance_valid(controls.settings_tabs[id]): controls.settings_tabs[id].button_pressed=id==tab
+		if is_instance_valid(controls.settings_tabs[id]):
+			controls.settings_tabs[id].button_pressed=id==tab
+			GAME_THEME.navigation(controls.settings_tabs[id], id == tab)
 	for child in modal_body.get_children(): child.visible = child.get_meta("category","video") == tab and not child.get_meta("folded",false)
 	modal_scroll.scroll_vertical = 0
 
@@ -1544,16 +1817,12 @@ func update_hud() -> void:
 			if g.can_deliver(): phase = "検証完了 / 納品"
 		if g.current_done(): phase = "納品完了 / 退勤可能"
 		controls.work_state.text = phase
-	if controls.has("subtitle"):
-		controls.subtitle.text = g.company_name(); controls.subtitle.tooltip_text = g.company_name()
-	if controls.has("company_title") and is_instance_valid(controls.company_title) and controls.company_title.text!=g.company_name():
-		controls.company_title.text=g.company_name(); controls.company_title.tooltip_text=g.company_name(); _fit_company_title()
-	if DisplayServer.get_name()!="headless": DisplayServer.window_set_title(g.company_name())
+	if DisplayServer.get_name()!="headless": DisplayServer.window_set_title("ホワイトハッカーラボ")
 	if is_instance_valid(modal):
 		var brand=modal.find_child("CompanyBrand",true,false)
 		if brand is Label: brand.text=g.company_name(); brand.tooltip_text=g.company_name()
 		var cash=modal.find_child("ManagementCash",true,false)
-		if cash is Label: cash.text="¥%d" % int(g.state.get("cash",0))
+		if cash is Label: cash.text="¥%s" % _group_number(int(g.state.get("cash",0)))
 		var clock=modal.find_child("ManagementClock",true,false)
 		if clock is Label: clock.text="DAY %02d  %s" % [int(g.state.get("day",1)),str(g.business_clock())]
 	if controls.has("resume"): controls.resume.disabled = not (g.has_method("has_save") and g.has_save())
@@ -1585,6 +1854,10 @@ func _maintenance_signature(g) -> String:
 	for member in g.team_members(): rows.append([member.id, g.state.assignments.get(member.id, {}).get("status", ""), g.staff_availability(str(member.id),"maintenance")])
 	return str(g.maintenance_summary()) + str(rows)
 
+func _operating_signature(g) -> String:
+	if g == null or not g.has_method("company_operating_summary"): return ""
+	return str(g.company_operating_summary())
+
 func _refresh_maintenance_panel() -> void:
 	if current_kind != "company": return
 	var scroll := modal_scroll.scroll_vertical
@@ -1594,12 +1867,16 @@ func _refresh_maintenance_panel() -> void:
 func _on_game_changed() -> void:
 	update_hud(); _update_crew_status()
 	if current_kind=="board" and is_instance_valid(modal_body) and _game().state.get("career_mode",false):OPERATIONS_PANEL.refresh_live(self)
+	if current_kind=="shop" and shop_view=="stock" and is_instance_valid(modal_body):PROCUREMENT_PANEL.refresh_live(self)
+	if current_kind=="shop" and shop_view=="stock": PROCUREMENT_PANEL.refresh_live(self)
 	if current_kind == "company":
 		var g := _game()
 		if g != null and g.has_method("maintenance_jobs"):
-			var signature := _maintenance_signature(g)
-			if signature != _maintenance_ui_signature:
-				_maintenance_ui_signature = signature
+			var maintenance_signature := _maintenance_signature(g)
+			var operating_signature := _operating_signature(g)
+			if maintenance_signature != _maintenance_ui_signature or operating_signature != _operating_ui_signature:
+				_maintenance_ui_signature = maintenance_signature
+				_operating_ui_signature = operating_signature
 				call_deferred("_refresh_maintenance_panel")
 			else:
 				for job in g.maintenance_jobs():
@@ -1624,8 +1901,11 @@ func _input(event: InputEvent) -> void:
 func _unhandled_key_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
 		get_viewport().set_input_as_handled()
-		if current_kind == "settings": _close_settings()
+		if _is_management_panel(current_kind) and is_instance_valid(next_task_guide) and next_task_guide.management_open:
+			next_task_guide.open_management()
+		elif current_kind == "settings": _close_settings()
 		elif current_kind == "confirm_display": _revert_settings()
+		elif current_kind == "sales" and not board_selected_id.is_empty(): _return_to_sales_list()
 		elif current_kind != "": close_panel()
 		elif controls.has("menu") and not controls.menu.visible: open_panel("pause")
 

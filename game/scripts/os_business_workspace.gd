@@ -358,16 +358,16 @@ static func _order_details(d, parent: Node, order: Dictionary) -> void:
 	var heading := HBoxContainer.new(); heading.add_theme_constant_override("separation", 8); parent.add_child(heading)
 	var back := _button(d, heading, copy("back", "Back"), "BusinessBack", func(): d.business_ui["selected_order"] = ""; _persist(d); d._render_business_workspace())
 	back.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	var order_label := _label(d, parent, str(order.get("order", order.get("id", ""))), 30, INK); order_label.name = "BusinessSelectedOrder"
+	var summary := HBoxContainer.new(); summary.add_theme_constant_override("separation", 16); parent.add_child(summary)
+	var order_label := _label(d, summary, str(order.get("order", order.get("id", ""))), 30, INK); order_label.name = "BusinessSelectedOrder"
+	order_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var total := HBoxContainer.new(); total.add_theme_constant_override("separation", 10); total.size_flags_horizontal = Control.SIZE_SHRINK_END; summary.add_child(total)
+	var label := _label(d, total, copy("total"), 13, MUTED); label.size_flags_horizontal = Control.SIZE_SHRINK_END
+	var amount := _label(d, total, _number(order.get("total", "")), 22, INK); amount.size_flags_horizontal = Control.SIZE_SHRINK_END
 	var grid := GridContainer.new(); grid.columns = 2; grid.add_theme_constant_override("h_separation", 20); grid.add_theme_constant_override("v_separation", 8); parent.add_child(grid)
 	grid.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN; grid.custom_minimum_size.x = 400
 	_field(d, grid, copy("customer", "Customer"), str(order.get("customer", "")))
 	_field(d, grid, copy("customer_id", "Customer ID"), str(order.get("customer_id", "")))
-	var space := Control.new(); space.custom_minimum_size.y = 32; parent.add_child(space)
-	parent.add_child(HSeparator.new())
-	var total := HBoxContainer.new(); total.add_theme_constant_override("separation", 24); parent.add_child(total)
-	var label := _label(d, total, copy("total"), 15, INK); label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	var amount := _label(d, total, _number(order.get("total", "")), 22, INK); amount.size_flags_horizontal = Control.SIZE_SHRINK_END
 
 static func _accounting(d, parent: Node, data: Dictionary, response: String) -> void:
 	var entries: Array = _ledger(data)

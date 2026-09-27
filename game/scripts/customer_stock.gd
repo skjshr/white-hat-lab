@@ -20,6 +20,12 @@ const STATUSES := ["queued", "ready", "carried", "stored", "staged", "shipping",
 static func catalog() -> Array:
 	return [_product(SKU), _product(BACKUP_SKU)]
 
+static func known_sku(sku: String) -> bool:
+	return sku in [SKU, BACKUP_SKU]
+
+static func empty_cart() -> Dictionary:
+	return {SKU:0, BACKUP_SKU:0}
+
 static func product(sku: String = SKU) -> Dictionary:
 	return _product(sku)
 
@@ -72,35 +78,70 @@ static func _capacity_used(state: Dictionary) -> int:
 static func active_count(state: Dictionary) -> int:
 	return _capacity_used(state)
 
+static func purchase_cart(state: Dictionary, cart: Dictionary) -> Dictionary:
+	# Validate the complete cart before touching state.  The caller wraps this
+	# in the normal save transaction, so a failed save also restores the cart
+	# purchase as one operation.
+	var stock := _stock(state)
+	if stock.is_empty() or not stock.get("units", []) is Array: return _error("stock_error_checks")
+	if not bool(state.get("career_mode", false)): return _error("stock_error_career")
+	if not state.get("history", []) is Array: return _error("stock_error_checks")
+	if not cart is Dictionary: return _error("stock_error_cart")
+	var quantities: Dictionary = empty_cart()
+	var total_quantity := 0
+	var total_cost := 0
+	var lines: Array = []
+	var ids: Array[String] = []
+	for raw_sku in cart.keys():
+		var sku := str(raw_sku)
+		if not known_sku(sku): return _error("stock_error_sku")
+		var raw_quantity: Variant = cart[raw_sku]
+		if typeof(raw_quantity) not in [TYPE_INT, TYPE_FLOAT] or not is_finite(float(raw_quantity)) or float(raw_quantity) != floorf(float(raw_quantity)): return _error("stock_error_quantity")
+		var quantity := int(raw_quantity)
+		if quantity < 0 or quantity > 3: return _error("stock_error_quantity")
+		quantities[sku] = quantity
+		if quantity == 0: continue
+		var item := _product(sku)
+		var unit_cost := int(item.unit_cost)
+		if total_quantity > 2147483647 - quantity or total_cost > 2147483647 - unit_cost * quantity: return _error("stock_error_cost")
+		total_quantity += quantity
+		total_cost += unit_cost * quantity
+		lines.append({"sku":sku,"quantity":quantity,"unit_cost":unit_cost,"total":unit_cost * quantity})
+	if total_quantity < 1: return _error("stock_error_quantity")
+	if _capacity_used(state) + total_quantity > MAX_CAPACITY: return _error("stock_error_capacity")
+	if typeof(state.get("cash", null)) not in [TYPE_INT, TYPE_FLOAT] or not is_finite(float(state.cash)) or int(state.cash) < total_cost: return _error("stock_error_cash")
+	var next_serial := int(stock.get("next_serial", 0))
+	if next_serial < 1: return _error("stock_error_checks")
+	var receiving_slots: Array[int] = []
+	for item in stock.units:
+		if item is Dictionary and str(item.get("status", "")) in ["queued", "ready"]:
+			receiving_slots.append(int(item.get("receiving_slot", -1)))
+	var free_slots: Array[int] = []
+	for slot in MAX_CAPACITY:
+		if slot not in receiving_slots: free_slots.append(slot)
+	if free_slots.size() < total_quantity: return _error("stock_error_capacity")
+	var serial_cursor := next_serial
+	var slot_cursor := 0
+	for line in lines:
+		for _i in int(line.quantity):
+			var created := _new_unit(str(line.sku), serial_cursor, int(state.get("day", 0)), free_slots[slot_cursor])
+			stock.units.append(created)
+			ids.append(str(created.id))
+			serial_cursor += 1
+			slot_cursor += 1
+	stock.next_serial = serial_cursor
+	state.cash = int(state.cash) - total_cost
+	var history_row := {"kind":"inventory_purchase","day":int(state.get("day", 0)),"amount":total_cost,"sku":str(lines[0].sku) if lines.size() == 1 else "mixed","serials":ids.duplicate(),"lines":lines.duplicate(true)}
+	state.history.append(history_row)
+	return {"ok":true,"error":"","ids":ids,"total":total_cost,"quantity":total_quantity,"lines":lines,"sku":str(lines[0].sku) if lines.size() == 1 else "mixed"}
+
 static func purchaseable(state: Dictionary, quantity: int = 1, sku: String = SKU) -> bool:
 	var stock := _stock(state)
 	var item := _product(sku)
 	return not stock.is_empty() and str(item.sku) == sku and bool(state.get("career_mode", false)) and quantity >= 1 and quantity <= 3 and _capacity_used(state) + quantity <= MAX_CAPACITY and typeof(state.get("cash", null)) in [TYPE_INT, TYPE_FLOAT] and int(state.cash) >= int(item.unit_cost) * quantity and stock.get("units", []) is Array and state.get("history", []) is Array
 
 static func purchase(state: Dictionary, quantity: int, sku: String = SKU) -> Dictionary:
-	var stock := _stock(state)
-	if stock.is_empty() or not stock.get("units", []) is Array: return _error("stock_error_checks")
-	if not bool(state.get("career_mode", false)): return _error("stock_error_career")
-	var item := _product(sku)
-	if str(item.sku) != sku: return _error("stock_error_sku")
-	if quantity < 1 or quantity > 3: return _error("stock_error_quantity")
-	if _capacity_used(state) + quantity > MAX_CAPACITY: return _error("stock_error_capacity")
-	var total_cost := int(item.unit_cost) * quantity
-	if typeof(state.get("cash", null)) not in [TYPE_INT, TYPE_FLOAT] or int(state.cash) < total_cost: return _error("stock_error_cash")
-	if not state.get("history", []) is Array: return _error("stock_error_checks")
-	var next_serial := int(stock.get("next_serial", 0))
-	if next_serial < 1: return _error("stock_error_checks")
-	var ids: Array[String] = []
-	for i in quantity:
-		var serial_number := next_serial + i
-		var receiving_slot := _receiving_slot(state)
-		if receiving_slot < 0: return _error("stock_error_capacity")
-		var created := _new_unit(sku, serial_number, int(state.get("day", 0)), receiving_slot)
-		stock.units.append(created); ids.append(str(created.id))
-	stock.next_serial = next_serial + quantity
-	state.cash = int(state.cash) - total_cost
-	state.history.append({"kind":"inventory_purchase","day":int(state.get("day", 0)),"amount":total_cost,"sku":sku,"serials":ids.duplicate()})
-	return {"ok":true,"error":"","ids":ids,"total":total_cost,"sku":sku}
+	return purchase_cart(state, {sku:quantity})
 
 static func advance(state: Dictionary, delta: float, wait_seconds: float = DELIVERY_WAIT_SECONDS) -> Dictionary:
 	var stock := _stock(state)

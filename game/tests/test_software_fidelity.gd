@@ -22,10 +22,21 @@ func show_app(id: String) -> void:
 	if not pc.windows[id].maximized:pc.windows[id].toggle_maximize()
 	await frames()
 
+func check_mail_bounds() -> void:
+	var window: Control = pc.windows.mail
+	var paper: Control = pc.widgets.mail.paper
+	var viewport: Control = pc.widgets.mail.body.get_parent()
+	check(pc.workspace.get_global_rect().grow(2).encloses(window.get_global_rect()), "mail window stays inside workspace")
+	check(paper.get_global_rect().grow(2).encloses(viewport.get_global_rect()), "mail scroll viewport stays inside reading pane")
+	check(viewport.size.y >= 140, "mail reading viewport never collapses")
+	check(window.get_global_rect().grow(2).encloses(paper.get_global_rect()), "reading pane stays inside mail window")
+	var message: Control = pc.widgets.mail.body.find_child("MailMessageBody",true,false)
+	check(message != null and message.get_global_rect().position.y < viewport.get_global_rect().end.y - 40, "message starts visibly before scrolling")
+
 func capture(id: String) -> void:
 	if not capture_enabled:return
 	await frames();await RenderingServer.frame_post_draw
-	var folder:=ProjectSettings.globalize_path("res://../artifacts/simulator/software-fidelity/ui")
+	var folder:=ProjectSettings.globalize_path("res://../artifacts/simulator/v220/desktop" if "--v220-capture" in OS.get_cmdline_user_args() else "res://../artifacts/simulator/software-fidelity/ui")
 	DirAccess.make_dir_recursive_absolute(folder)
 	check(root.get_texture().get_image().save_png(folder.path_join(id+("-narrow" if narrow else "-wide")+".png"))==OK,"capture "+id)
 
@@ -37,6 +48,7 @@ func run() -> void:
 	game.set_process(false);ui._new_game();game.choose_strategy("operations");game.accept_mission()
 	game.set_settings({"resolution":"960x600" if narrow else "1280x720","window_mode":"windowed","text_scale":1.3 if narrow else 1.0,"volume":0},false)
 	root.size=Vector2i(960,600) if narrow else Vector2i(1280,720)
+	ui._set_text_scale(1.3 if narrow else 1.0)
 	ui.open_panel("terminal");await frames();pc=ui.desktop
 	pc._run_command("ssh client");await frames()
 	await show_app("mail")
@@ -71,6 +83,14 @@ func run() -> void:
 	check(not pc.widgets.mail.list_panel.visible and pc.widgets.mail.paper.visible,"single pane retains selected message")
 	pc.widgets.mail.single_pane=false;pc.BUSINESS.refresh_mail(pc);await frames()
 	check(DisplayServer.mouse_get_position()==pointer,"mail selection/layout preserves OS pointer")
+	check_mail_bounds()
+	var initial_size: Vector2i = root.size
+	root.size = Vector2i(1280,720) if narrow else Vector2i(960,600)
+	await frames(15)
+	check_mail_bounds()
+	root.size = initial_size
+	await frames(15)
+	check_mail_bounds()
 	await capture("outwatch-message")
 	await show_app("files")
 	pc.FILES.navigate(pc,"/etc/samba",true);await frames();await capture("explorer")

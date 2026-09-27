@@ -287,7 +287,7 @@ func sync_orders(orders: Array) -> void:
 		active[id] = true
 		var sig: String = _signature(order)
 		if _order_signatures.get(id, "") == sig and _boxes.has(id): continue
-		if _boxes.has(id) and is_instance_valid(_boxes[id]): _boxes[id].queue_free()
+		if _boxes.has(id) and is_instance_valid(_boxes[id]): _release_visual(_boxes[id])
 		var body: StaticBody3D = _make_delivery_box(id)
 		body.position = _position_from_saved(order.get("box_position", BOX_RECEIVING_POINT))
 		body.rotation.y = float(order.get("rotation_y", 0.0))
@@ -304,11 +304,11 @@ func sync_orders(orders: Array) -> void:
 		if status == "placing" and id == _placing_id: _show_ghost(id)
 	for stale_id in _boxes.keys().duplicate():
 		if not active.has(stale_id):
-			if is_instance_valid(_boxes[stale_id]): _boxes[stale_id].queue_free()
+			if is_instance_valid(_boxes[stale_id]): _release_visual(_boxes[stale_id])
 			_boxes.erase(stale_id); _order_signatures.erase(stale_id)
 
 func _show_ghost(id: String) -> void:
-	if is_instance_valid(_ghost): _ghost.queue_free()
+	if is_instance_valid(_ghost): _release_visual(_ghost)
 	_ghost = _equipment_ghost(id)
 	_ghost.name = "DeliveryPlacementGhost"
 	var order: Dictionary = _order_for_any(id)
@@ -381,6 +381,17 @@ func _mesh_nodes(root: Node) -> Array:
 	result.append_array(root.find_children("*", "MeshInstance3D", true, false))
 	return result
 
+func _release_visual(node: Node) -> void:
+	if not is_instance_valid(node): return
+	# Clear per-instance materials before queue_free. GLES can still process a
+	# queued MeshInstance for one frame; releasing its override first prevents a
+	# stale material RID from reaching the render server during teardown.
+	for mesh in _mesh_nodes(node):
+		mesh.material_override = null
+		if mesh.mesh != null:
+			for surface in mesh.mesh.get_surface_count(): mesh.set_surface_override_material(surface, null)
+	node.queue_free()
+
 func interact(action: String, id: String = "", slot: int = -1, position: Array = []) -> bool:
 	if game == null: return false
 	if _is_stock_id(id):
@@ -450,7 +461,7 @@ func interact(action: String, id: String = "", slot: int = -1, position: Array =
 			_placing_id = ""; _placing_slot = -1
 			_placing_position = Vector3.ZERO; _placement_valid = false; _placement_error = ""; _moving_installed = false
 			_preview_key = ""
-			if is_instance_valid(_ghost): _ghost.queue_free(); _ghost = null
+			if is_instance_valid(_ghost): _release_visual(_ghost); _ghost = null
 		sync_orders(game.delivery_orders())
 		delivery_changed.emit()
 	return result

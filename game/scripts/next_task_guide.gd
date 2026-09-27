@@ -30,6 +30,17 @@ static func _legacy(game) -> Dictionary:
 		if chapter == 0 and _has_console(game):
 			return _copy_item("connect", "next_connect_title", "next_connect_body", "browser", "SambaConnect", {"url":_legacy_url(game)})
 		return _copy_item("connect", "next_connect_title", "next_terminal_body", "terminal", "TerminalConnect")
+	var service_error := str(machine.state.get("error", ""))
+	if not service_error.is_empty():
+		# A failed restart is already observed. Inspect only the saved syntax, not
+		# hidden desired settings, so a repaired file leads back to Apply even
+		# while the service retains its previous failure until that restart.
+		var config_path := str(info.get("config_path", ""))
+		var parsed := _dict_call(machine, "_parse_config", [game.vm_read(config_path)])
+		var current_error := str(parsed.get("error", service_error))
+		if not current_error.is_empty():
+			return _copy_item("fix-config", "next_fix_title", "next_fix_body", "editor", "ConfigEditor", {"config_path":config_path,"hint":current_error + "\n" + UI_COPY.copy("next_fix_hint")})
+		return _copy_item("apply", "guide_restart_title", "next_apply_body", "monitor", "ServiceRestart")
 	var review: Dictionary = game.case_review()
 	var optional_hint := UI_COPY.copy("next_optional_baseline") if bool(review.get("can_capture", false)) and not bool(review.get("current_recorded", false)) else ""
 	if bool(machine.state.get("dirty", false)) and str(machine.state.get("error", "")).is_empty():
@@ -43,7 +54,15 @@ static func _legacy(game) -> Dictionary:
 		if bool(probe.get("recorded", false)) and bool(probe.get("fresh", false)) and not bool(probe.get("passed", false)):
 			return _optional(_fix(game, probe), optional_hint)
 	var observed := probes.any(func(row): return bool(row.get("recorded", false)))
-	for probe in probes:
+	# A successful Samba upload changes the file listing and invalidates prior
+	# read evidence. Suggest the public write checks first so the player can
+	# finish on the final file state without repeating the read checks. This
+	# only selects a diagnostic; the player still runs every check explicitly.
+	var observation_order := probes
+	if chapter == 0 and int(machine.state.get("samba_model_version", 1)) >= 2:
+		observation_order = probes.filter(func(row): return str(row.get("id", "")) in ["staff-write", "guest-write"])
+		observation_order.append_array(probes.filter(func(row): return str(row.get("id", "")) not in ["staff-write", "guest-write"]))
+	for probe in observation_order:
 		if not bool(probe.get("recorded", false)) or not bool(probe.get("fresh", false)):
 			var result := _copy_item("test" if observed else "investigate", "next_test_title" if observed else "next_investigate_title", "next_probe_body", "verify", "DiagnosticRun", {"probe_id":str(probe.get("id", "")), "hint":str(probe.get("description", "")) + "\n" + UI_COPY.copy("next_diagnostic_hint")})
 			result.body += "  " + str(probe.get("label", ""))

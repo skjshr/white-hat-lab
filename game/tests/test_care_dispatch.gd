@@ -41,6 +41,13 @@ func select_owner(client: String,owner: String) -> void:
 		if str(picker.get_item_metadata(index))==owner:picker.select(index);picker.item_selected.emit(index);break
 	check(game.maintenance_owner(client)==owner,"dropdown saves recurring owner")
 
+func request_cases(case_ids: Array) -> void:
+	# Keep the care-dispatch fixture focused on replacing a maintained service;
+	# market demand remains authoritative through the normal lead/accept APIs.
+	game.state.market_leads = case_ids.duplicate()
+	game.state.market_day = int(game.state.day)
+	game._make_offers()
+
 func capture(label: String) -> void:
 	if not capture_enabled:return
 	office._process(6.0)
@@ -71,6 +78,7 @@ func run() -> void:
 	var original_fee:=int(game.state.care_agreements[client].fee)
 	check(int(game.maintenance_summary().earned)==original_fee,"one client fee despite multiple services")
 	check(game.end_day(),"new day requires new checks")
+	request_cases(["service-0-case-1","service-0-case-0","service-1-case-0"])
 	var share_offer: Dictionary={};var other_offer: Dictionary={};var backup_offer: Dictionary={}
 	for offer in game.state.offers:
 		if str(offer.case_id)=="service-0-case-1":share_offer=offer
@@ -96,6 +104,7 @@ func run() -> void:
 	var other_client:=str(other_offer.client)
 	check(str(game._maintenance_job_for(client).status)=="done","retained service inspection passed")
 	check(game.end_day(),"next day's two pending checks")
+	request_cases(["service-0-case-0"])
 	for agreement in game.state.care_agreements.values():agreement.next_incident_day=int(game.state.day)+5
 	check(game.assign_maintenance(other_client,"aya"),"single-service inspection overlaps replacement delivery")
 	for offer in game.state.offers:

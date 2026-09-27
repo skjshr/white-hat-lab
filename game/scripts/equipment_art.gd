@@ -17,6 +17,6 @@ static func icon(id: String) -> Texture2D:
 		_icons[id] = customer_texture
 		return customer_texture
 	if id not in ORDER: return null
-	var texture: Texture2D = load("res://assets/ui/equipment_catalog/%s.png" % id)
+	var texture: Texture2D = load("res://assets/ui/equipment_catalog_polish/%s.png" % id)
 	_icons[id] = texture
 	return texture
