@@ -4,9 +4,53 @@ const Game = preload("res://scripts/game.gd")
 const Catalog = preload("res://scripts/case_catalog.gd")
 const VM = preload("res://scripts/virtual_machine.gd")
 var failures: Array[String] = []
+var coverage: Dictionary = {}
+
+func _coverage_guard() -> void:
+	# This legacy VM suite owns the 36 service variations and 3 linked cases.
+	# Dedicated models have separate real-action solvers; no generic config
+	# write is treated as a substitute for their successful delivery.
+	for chapter in 6:
+		for variant in 6:
+			coverage["service-%d-case-%d" % [chapter,variant]] = {"suite":"test_diagnostics.gd","status":"pending"}
+	for id in ["composite-branch-reopen","composite-former-access","composite-corruption-response"]:
+		coverage[id] = {"suite":"test_diagnostics.gd","status":"pending"}
+	var dedicated := {
+		"hardware-backup-install":"test_hardware_backup_install.gd",
+		"hardware-gateway-install":"test_procurement.gd",
+		"endpoint-recovery":"test_endpoint_remediation.gd",
+		"advanced-portal":"test_pentest_portal_integration.gd"
+	}
+	for id in ["advanced-hunt","advanced-pentest","advanced-recovery","advanced-ddos","advanced-api","advanced-supplychain","advanced-cloud","advanced-malware","advanced-detection"]:
+		dedicated[id] = "test_advanced_contracts.gd"
+	for id in ["firm-permission-review","firm-remote-hardening","firm-continuity","firm-recovery-drill","firm-account-containment","firm-major-containment","firm-partner-rollout","firm-clean-recovery","firm-leak-response"]:
+		dedicated[id] = "test_professional_contracts.gd"
+	for id in dedicated:
+		coverage[id] = {"suite":dedicated[id],"status":"dedicated_not_executed_by_this_suite"}
+		_assert(FileAccess.file_exists("res://tests/"+str(dedicated[id])),"dedicated coverage source exists "+str(id))
+	var found := {}
+	for item in Catalog.all():
+		found[str(item.id)] = true
+		_assert(coverage.has(str(item.id)),"unknown catalog ID requires an explicit coverage owner: "+str(item.id))
+	for id in coverage: _assert(found.has(id),"coverage ID remains in catalog: "+str(id))
+
+func _owned(id: String) -> bool:
+	return str(coverage.get(id,{}).get("suite","")) == "test_diagnostics.gd"
+
+func _write_coverage() -> void:
+	var entries: Array = []
+	for item in Catalog.all():
+		var row: Dictionary = coverage.get(str(item.id),{"suite":"unknown","status":"unmapped"}).duplicate(true)
+		row.id = str(item.id); entries.append(row)
+	var path := ProjectSettings.globalize_path("res://../../audit/all-services/diagnostics-coverage.json")
+	DirAccess.make_dir_recursive_absolute(path.get_base_dir())
+	var file := FileAccess.open(path,FileAccess.WRITE)
+	_assert(file != null,"coverage manifest saved")
+	if file: file.store_string(JSON.stringify({"catalog_count":entries.size(),"suite_failures":failures.size(),"cases":entries},"\t")); file.close()
+	print("DIAGNOSTICS_COVERAGE ",path)
 
 func _assert(condition: bool, message: String) -> void:
-	if not condition: failures.append(message)
+	if not condition: failures.append(message); print("FAIL: ",message)
 
 func _new_game() -> Game:
 	var game := Game.new(); root.add_child(game)
@@ -18,6 +62,9 @@ func _prepare(game: Game, item: Dictionary, completed: Array = []) -> void:
 	if item.has("targets") and item.targets is Array and not item.targets.is_empty():
 		game.state.career_mode = true; game.state.awaiting_contract = true; game.state.peak_profit = 1000000
 		game.state.skills = {"operations":3,"advisory":3,"response":3}; game._make_offers()
+		# Reconstruct an already-issued lead so rotation does not decide whether
+		# this deterministic linked-service regression reaches its target.
+		game.state.market_leads=[str(item.id)]; game.state.market_day=int(game.state.day); game._make_offers()
 		for offer in game.state.offers:
 			if str(offer.get("case_id", "")) == str(item.id):
 				game.choose_contract(str(offer.id)); break
@@ -28,7 +75,7 @@ func _prepare(game: Game, item: Dictionary, completed: Array = []) -> void:
 	game.accept_mission()
 	game.vm_run("ssh client")
 
-func _apply_and_probe(game: Game, item: Dictionary) -> bool:
+func _apply_and_probe(game: Game, item: Dictionary, measure: bool = true) -> bool:
 	var machine = game._vm()
 	var config: String = machine._config_text(item.desired)
 	if not game.vm_write(game.vm_info().config_path, config): return false
@@ -39,8 +86,11 @@ func _apply_and_probe(game: Game, item: Dictionary) -> bool:
 			if snapshot.get("repository", "") == item.desired.get("repository", "") and snapshot.get("files", {}) == machine.RECORDS: has_valid = true
 		if not has_valid: game.vm_run("restic backup /srv/data")
 		game.vm_run("restic restore 00000001:/srv/data --target /restore" if item.has("latest_snapshot_overrides") else "restic restore latest --target /restore")
+		if str(game.state.contract.get("case_id","")) == "composite-corruption-response":
+			if not game.vm_run("cp /restore/ledger.txt /srv/data/ledger.txt").is_empty(): return false
 	if int(item.chapter) == 4: game.vm_run("cp /var/log/evidence.log /evidence/original.log")
 	preload("res://tests/identity_test_support.gd").authenticate_current(game)
+	if not measure: return true
 	# A probe such as an upload can legitimately mutate its result fixture. Re-run
 	# stale observations once the fixture has settled, as the terminal UI asks.
 	for pass_index in 3:
@@ -48,9 +98,13 @@ func _apply_and_probe(game: Game, item: Dictionary) -> bool:
 			if not (bool(probe.get("recorded", false)) and bool(probe.get("fresh", false)) and bool(probe.get("passed", false))):
 				game.run_diagnostic(str(probe.id))
 		if game.diagnostic_probes().all(func(p): return p.recorded and p.fresh and p.passed): break
-	return game.verify().all(func(check): return check.passed)
+	var checks: Array = game.verify()
+	if int(item.chapter)==2 and not checks.all(func(check): return check.passed):
+		print("NETWORK_DIAGNOSTIC_FAILURE ",JSON.stringify({"checks":checks,"probes":game.diagnostic_probes(),"applied":game._vm().state.applied}))
+	return checks.all(func(check): return check.passed)
 
 func _init() -> void:
+	_coverage_guard()
 	var game := _new_game()
 	for chapter in 6:
 		var item := {"id":str(["share","backup","network","account","incident","transfer"][chapter]),"chapter":chapter,"desired":game._legacy_desired() if game.has_method("_legacy_desired") else {}}
@@ -73,29 +127,44 @@ func _init() -> void:
 
 	var prior := ["share","backup","network","account","incident"]
 	for item in Catalog.all():
+		if not _owned(str(item.id)): continue
 		if item.has("targets") and item.targets is Array and not item.targets.is_empty(): continue
+		var before_failures := failures.size()
 		var cgame := _new_game(); _prepare(cgame, item, prior if int(item.chapter) > 0 else [])
 		_assert(_apply_and_probe(cgame, item), "catalog measured %s" % item.id)
 		_assert(cgame.can_deliver(), "catalog deliver gate %s" % item.id)
 		_assert(cgame.deliver(), "catalog delivery %s" % item.id)
+		coverage[str(item.id)].status = "passed" if failures.size()==before_failures else "failed"
 
 	for composite in Catalog.all():
+		if not _owned(str(composite.id)): continue
 		if composite.get("targets",[]).is_empty(): continue
+		var before_failures := failures.size()
 		var multi := _new_game(); _prepare(multi, composite, [])
 		_assert(multi.state.targets.size() == composite.targets.size(), "composite target count "+str(composite.id))
 		var original_budget: float = multi.work_status().budget
+		# Dependencies must first be repaired on every owner. Then measure all
+		# linked consumers against the final shared bytes and live sessions.
+		for target_index in multi.state.targets.size():
+			multi.select_target(target_index); multi.vm_run("ssh client")
+			_assert(_apply_and_probe(multi,multi._scenario(),false),"configure linked target %s/%d" % [composite.id,target_index])
 		for target_index in multi.state.targets.size():
 			multi.select_target(target_index); multi.vm_run("ssh client")
 			_assert(multi.work_status().budget == original_budget,"stable composite deadline")
-			var target_case := Catalog.by_id(str(multi.state.targets[target_index].case_id))
+			var target_case := multi._scenario()
 			_assert(_apply_and_probe(multi, target_case), "composite target %s/%d" % [composite.id,target_index])
 			_assert(multi.can_deliver() == (target_index == multi.state.targets.size()-1),"all services required")
 		_assert(multi.deliver(),"composite delivery "+str(composite.id))
+		coverage[str(composite.id)].status = "passed" if failures.size()==before_failures else "failed"
 	# Actual completed colleague work must preserve policy and leave delivery to the player.
-	var crew := _new_game(); crew.accept_mission(); crew.vm_run("ssh client")
+	# Both the investigator and recovery colleague can work on a backup case;
+	# the recovery role correctly refuses the initial SMB case.
+	var crew := _new_game(); _prepare(crew,{"id":"backup","chapter":1},["share"])
 	var original_config: String = crew.vm_read(crew.vm_info().config_path)
 	for id in ["aya","ren"]:
-		crew.assign_colleague(id); crew._finish_colleague(id,crew._assignments[id])
+		crew.assign_colleague(id)
+		_assert(crew._assignments.has(id),"eligible colleague receives assignment "+id)
+		if crew._assignments.has(id): crew._finish_colleague(id,crew._assignments[id])
 	_assert(crew.vm_read(crew.vm_info().config_path)==original_config,"crew never silently chooses policy")
 	_assert(not crew.vm_read("/home/operator/aya-inspection.txt").is_empty(),"crew writes actual report")
 	_assert(crew.capture_baseline(),"investigation does not lock configuration backup")
@@ -107,7 +176,7 @@ func _init() -> void:
 	# Transport negotiation is evaluated before the admin application policy:
 	# an HTTPS request with TLS disabled must not teach a learner that a 403
 	# authorization response was observed.
-	var legacy_network: Dictionary=JSON.parse_string(FileAccess.get_file_as_string(ProjectSettings.globalize_path("res://../artifacts/simulator/v124/legacy-v123-firewall.json")))
+	var legacy_network: Dictionary=preload("res://tests/legacy_service_fixture.gd").measured(2)
 	var tls_order := VM.new(); tls_order.setup(2,legacy_network); tls_order.run("ssh client")
 	tls_order.state.applied = {"dns":"on","business":"allow","admin_public":"deny","tls":"off"}
 	_assert(tls_order.run("curl https://admin.client.test/").begins_with("curl: (35) TLS handshake failed"),"TLS handshake precedes admin authorization")
@@ -231,6 +300,7 @@ func _init() -> void:
 	samba_mapping.run("systemctl restart samba")
 	_assert(samba_mapping.run("smbclient //client/share -U Never -c ls").contains("LOGON_FAILURE"),"Samba Never rejects unknown account")
 
+	_write_coverage()
 	var log := FileAccess.open("user://v14-diagnostics.log", FileAccess.WRITE)
 	if log:
 		log.store_string("DIAGNOSTICS failures=%d cases=%d\n" % [failures.size(), Catalog.all().size()])

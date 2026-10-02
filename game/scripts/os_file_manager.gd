@@ -35,6 +35,7 @@ static func build(d, parent: VBoxContainer) -> void:
 	address.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	toolbar.add_child(address)
 	var path := LineEdit.new()
+	path.name = "FilesAddress"
 	path.text = d.file_directory
 	path.placeholder_text = "/home/operator/Documents"
 	path.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -44,6 +45,7 @@ static func build(d, parent: VBoxContainer) -> void:
 	path.hide()
 	toolbar.add_child(_tool(d, "code", "アドレスへ移動  Ctrl+L", func(): _edit_address(d)))
 	var search := LineEdit.new()
+	search.name = "FilesSearch"
 	search.placeholder_text = "検索"
 	search.custom_minimum_size = Vector2(150, 30)
 	search.clear_button_enabled = true
@@ -154,6 +156,7 @@ static func build(d, parent: VBoxContainer) -> void:
 	actions.visible = true
 	var open_button: Button = _tool(d, "external", UI.copy("fidelity_open", "開く"), func(): _open_selected(d), "開く")
 	open_button.custom_minimum_size = Vector2(72, 30)
+	open_button.name = "FilesOpenSelected"
 	actions.add_child(open_button)
 	var copy_button: Button = _tool(d, "copy", UI.copy("fidelity_copy", "コピー"), func(): _copy_selected(d), "コピー")
 	copy_button.custom_minimum_size = Vector2(72, 30)
@@ -162,6 +165,7 @@ static func build(d, parent: VBoxContainer) -> void:
 	paste_button.custom_minimum_size = Vector2(86, 30)
 	actions.add_child(paste_button)
 	var status: Label = d._label("", 12, UI.MUTED)
+	status.name = "FilesSelectionStatus"
 	status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	status.autowrap_mode = TextServer.AUTOWRAP_OFF
 	status.clip_text = true
@@ -172,6 +176,9 @@ static func build(d, parent: VBoxContainer) -> void:
 	p.add_child(status_bar)
 	d.widgets.files = {"path": path, "search": search, "list": tree, "tree": tree, "open": open_button, "copy": copy_button, "paste": paste_button, "places": places, "places_scroll": places_scroll, "place_buttons":place_buttons, "breadcrumb_scroll":breadcrumb_scroll, "host": host, "status": status, "history": [], "forward_history": [], "backing": false, "location": {"path": d.file_directory, "remote": d.file_remote}, "back": back, "forward": forward, "breadcrumb": breadcrumb, "empty": empty}
 	d.path_edit = path
+	d.widgets.files.command_strip = command_strip
+	var saved_selections: Variant = d.game.state.get("desktop_sessions", {}).get(d.session_key, {}).get("file_selections", {})
+	d.widgets.files.selection_by_location = saved_selections.duplicate(true) if saved_selections is Dictionary else {}
 	d.file_list = tree
 	var network: VBoxContainer=d._scroll(right)
 	d.widgets.files.network=network; d.widgets.files.network_scroll=network.get_parent()
@@ -233,6 +240,7 @@ static func _navigate(d, path: String, remote := true) -> void:
 static func _back(d) -> void:
 	var w: Dictionary = d.widgets.files
 	if w.history.is_empty(): return
+	d.samba_ui.network_open = false
 	var previous: Dictionary = w.history.pop_back()
 	w.forward_history.append(w.location.duplicate())
 	d.file_remote = bool(previous.get("remote", false))
@@ -243,6 +251,7 @@ static func _back(d) -> void:
 static func _forward(d) -> void:
 	var w: Dictionary = d.widgets.files
 	if w.forward_history.is_empty(): return
+	d.samba_ui.network_open = false
 	var next: Dictionary = w.forward_history.pop_back()
 	w.history.append(w.location.duplicate())
 	d.file_remote = bool(next.get("remote", false))
@@ -252,6 +261,9 @@ static func _forward(d) -> void:
 
 static func _selected_item(d):
 	return d.widgets.files.tree.get_selected()
+
+static func _location_key(location: Dictionary) -> String:
+	return ("remote:" if bool(location.get("remote", false)) else "local:") + str(location.get("path", "/"))
 
 static func _copy_target(directory: String, source_path: String, existing_paths: Array) -> String:
 	var filename := source_path.get_file()
@@ -287,21 +299,24 @@ static func refresh(d) -> void:
 	var network: bool=d._samba_v2() and bool(d.samba_ui.get("network_open",false))
 	w.network_scroll.visible=network; w.network_link.visible=d._samba_v2()
 	w.tree.visible=not network; w.normal_actions.visible=not network; w.search.visible=not network
+	w.command_strip.visible=not network; w.host.visible=not network
 	w.up.disabled=network
+	UI.os_navigation(w.network_link, network, UI.app_accent("files"))
 	if network:
+		for place in w.place_buttons: UI.os_navigation(place.button, false, UI.app_accent("files"))
 		w.tree.clear(); w.back.disabled=true; w.forward.disabled=true
 		w.path.text="//files01.client.test/"+str(d.samba_ui.get("access_share","share"))
 		w.host.text=w.path.text
 		d._clear(w.breadcrumb); w.breadcrumb.add_child(d._label(w.path.text,13))
 		d._clear(w.network); preload("res://scripts/os_smb_browser.gd").render(d,w.network)
+		w.status.text = str(d.samba_ui.get("access_selected", ""))
 		return
 	var path := str(w.path.text).strip_edges()
 	d.file_directory = path if not path.is_empty() else "/"
 	w.path.text = d.file_directory
-	var selection = w.tree.get_selected()
-	var selected_meta := str(selection.get_metadata(0)) if selection != null else ""
 	w.tree.clear()
 	var location := {"path": d.file_directory, "remote": d.file_remote}
+	var selected_meta := str(w.selection_by_location.get(_location_key(location), ""))
 	w.location = location
 	w.back.disabled = w.history.is_empty()
 	w.forward.disabled = w.forward_history.is_empty()
@@ -408,8 +423,11 @@ static func _refresh_selection(d) -> void:
 	var item = _selected_item(d)
 	if item == null: return
 	var meta := str(item.get_metadata(0))
+	w.selection_by_location[_location_key(w.location)] = meta
 	var path := meta.trim_prefix("workstation:")
 	var is_dir := meta.ends_with("/")
+	w.open.text = "開く" if is_dir else "編集"
+	w.open.tooltip_text = "フォルダーを開く" if is_dir else "選択したファイルをエディターで開く"
 	w.open.disabled = false
 	w.copy.disabled = is_dir
 	w.paste.disabled = d.clipboard_path.is_empty()

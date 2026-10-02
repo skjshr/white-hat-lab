@@ -2,7 +2,7 @@ extends RefCounted
 class_name OSBusinessWorkspace
 
 ## Odoo-like sales and accounting workspace over the customer's real JSON response.
-## The renderer is read-only; order selection and search live in the desktop session.
+## Drafts and selection live in the desktop session; Game commits business changes.
 
 const UI = preload("res://scripts/ui_theme.gd")
 const Glyph = preload("res://scripts/service_glyph.gd")
@@ -214,16 +214,16 @@ static func _toolbar(d, parent: Node, state: Dictionary, view: String) -> LineEd
 	refresh.add_theme_stylebox_override("hover", UI.style(PURPLE_DARK, Color.TRANSPARENT, 12, 5, 3))
 	refresh.add_theme_color_override("font_color", Color.WHITE)
 	refresh.add_theme_color_override("font_hover_color", Color.WHITE)
-	var title := copy("statements") if view == "accounting" else copy("orders")
+	var title := copy("statements") if view == "accounting" else ("顧客一覧" if view == "customers" else copy("orders"))
 	if view == "sales" and not str(state.get("selected_order", "")).is_empty(): title += " / " + str(state.selected_order)
 	_label(d, row, title, 16, INK)
 	var search := LineEdit.new()
 	search.name = "BusinessSearch"
-	search.placeholder_text = copy("search", "Search")
+	search.placeholder_text = "顧客名または番号を検索" if view == "customers" else copy("search", "Search")
 	search.text = str(state.get("query", ""))
 	search.custom_minimum_size = Vector2(230, 32)
 	search.clear_button_enabled = true
-	search.visible = view == "sales" and str(state.get("selected_order", "")).is_empty()
+	search.visible = view == "customers" or (view == "sales" and str(state.get("selected_order", "")).is_empty())
 	search.add_theme_stylebox_override("normal", UI.style(Color.WHITE, LINE, 8, 4, 2))
 	search.add_theme_stylebox_override("focus", UI.style(Color.WHITE, PURPLE, 8, 4, 2))
 	row.add_child(search)
@@ -234,7 +234,7 @@ static func _toolbar(d, parent: Node, state: Dictionary, view: String) -> LineEd
 static func render(d, parent: VBoxContainer, url: String, response: String) -> void:
 	var state := _state(d)
 	var lower_url := url.to_lower()
-	var view := "accounting" if "/accounting" in lower_url else "sales"
+	var view := "accounting" if "/accounting" in lower_url else ("customers" if "/customers" in lower_url else "sales")
 	state["view"] = view
 	var payload := _payload(response)
 	var data := _data(payload)
@@ -256,6 +256,7 @@ static func render(d, parent: VBoxContainer, url: String, response: String) -> v
 	var head := HBoxContainer.new(); head.add_theme_constant_override("separation", 12); head.custom_minimum_size.y = 32; masthead.add_child(head)
 	Glyph.add_to(head, "process", 22, PURPLE)
 	_button(d, head, copy("sales"), "BusinessSales", func(): d._browse_url("https://intranet.client.test/sales", true), view == "sales")
+	_button(d, head, "顧客", "BusinessCustomers", func(): d._browse_url("https://intranet.client.test/customers", true), view == "customers")
 	_button(d, head, copy("accounting"), "BusinessAccounting", func(): d._browse_url("https://intranet.client.test/accounting", true), view == "accounting")
 	var host := _label(d, head, "intranet.client.test", 12, MUTED); host.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	var body := VBoxContainer.new(); body.size_flags_vertical = Control.SIZE_EXPAND_FILL; body.add_theme_constant_override("separation", 0); page.add_child(body)
@@ -264,10 +265,23 @@ static func render(d, parent: VBoxContainer, url: String, response: String) -> v
 	if not bool(payload.get("ok", false)):
 		if not storage_error_shown: _error(d, body, payload, response)
 		return
+	state["revision"] = str(payload.get("revision",""))
+	state["can_write"] = bool(payload.get("capabilities",{}).get("write",false))
+	if not str(state.get("notice","")).is_empty():
+		var notice := _label(d,body,str(state.notice),14,INK); notice.name = "BusinessFeedback"; notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	if not str(state.get("form","")).is_empty():
+		search.visible = false
+		_crud_form(d,body,data,state)
+		return
 	if view == "accounting":
+		if bool(state.can_write): _primary(d,body,"入出金を記録","BusinessNewLedger",func(): _begin_edit(d,"append_ledger"))
 		_accounting(d, body, data, response)
+	elif view == "customers":
+		_customers(d,body,data,state,search)
 	else:
+		if bool(state.can_write): _primary(d,body,"受注を登録","BusinessNewOrder",func(): _begin_edit(d,"create_order"))
 		_sales(d, body, data, state, search, response)
+	_history(d,body,data)
 
 static func _transport_error(d, parent: Node, payload: Dictionary, response: String, url: String) -> void:
 	var page := VBoxContainer.new(); page.size_flags_horizontal = Control.SIZE_EXPAND_FILL; page.add_theme_constant_override("separation", 12); parent.add_child(page)
@@ -368,6 +382,11 @@ static func _order_details(d, parent: Node, order: Dictionary) -> void:
 	grid.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN; grid.custom_minimum_size.x = 400
 	_field(d, grid, copy("customer", "Customer"), str(order.get("customer", "")))
 	_field(d, grid, copy("customer_id", "Customer ID"), str(order.get("customer_id", "")))
+	if bool(d.business_ui.get("can_write",false)):
+		var actions := HBoxContainer.new(); parent.add_child(actions)
+		var original := {"id":str(order.get("order","")),"customer":str(order.get("customer_id","")),"total":str(order.get("total",0))}
+		_button(d,actions,"変更","BusinessEditOrder",func(): _begin_edit(d,"update_order",original))
+		_button(d,actions,"この受注を取り消す","BusinessDeleteOrder",func(): _begin_edit(d,"delete_order",original))
 
 static func _accounting(d, parent: Node, data: Dictionary, response: String) -> void:
 	var entries: Array = _ledger(data)
@@ -386,6 +405,97 @@ static func _accounting(d, parent: Node, data: Dictionary, response: String) -> 
 			var values := [str(row.get("date", "")), _number(row.get("opening", "")), _number(row.get("closing", "")), _number(row.get("movement", ""))]
 			_ledger_row(d, table, values, false, index)
 	_source(d, parent, data, response, "/srv/data/ledger.txt")
+
+static func _primary(d, parent: Node, text: String, node_name: String, callback: Callable) -> Button:
+	var button := _button(d,parent,text,node_name,callback)
+	button.add_theme_stylebox_override("normal",UI.style(PURPLE,Color.TRANSPARENT,12,7,4))
+	button.add_theme_stylebox_override("hover",UI.style(PURPLE_DARK,Color.TRANSPARENT,12,7,4))
+	button.add_theme_color_override("font_color",Color.WHITE); button.add_theme_color_override("font_hover_color",Color.WHITE)
+	return button
+
+static func _begin_edit(d, action: String, values: Dictionary = {}) -> void:
+	d.business_ui.form = action; d.business_ui.form_values = values.duplicate(true)
+	d.business_ui.form_revision = str(d.business_ui.get("revision","")); d.business_ui.notice = ""
+	_persist(d); d._render_business_workspace()
+
+static func _customers(d, parent: Node, data: Dictionary, state: Dictionary, search: LineEdit) -> void:
+	if bool(state.get("can_write",false)): _primary(d,parent,"顧客を登録","BusinessNewCustomer",func(): _begin_edit(d,"create_customer"))
+	var rows: Array[Control] = []
+	for customer in data.get("customers",[]):
+		var row := HBoxContainer.new(); parent.add_child(row)
+		row.set_meta("business_search",(str(customer.id)+" "+str(customer.name)).to_lower()); rows.append(row)
+		_label(d,row,str(customer.id),14,MUTED)
+		_label(d,row,str(customer.name),16,INK).size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		if bool(state.get("can_write",false)):
+			_button(d,row,"変更","BusinessEditCustomer_"+str(customer.id),func(): _begin_edit(d,"update_customer",customer))
+			_button(d,row,"削除","BusinessDeleteCustomer_"+str(customer.id),func(): _begin_edit(d,"delete_customer",customer))
+	var count: Label = parent.find_child("BusinessOrderCount",true,false)
+	var empty := _label(d,parent,"該当する顧客はありません。",14,MUTED)
+	search.text_changed.connect(func(value): state.query=value; _filter(rows,value,empty,count); _persist(d))
+	_filter(rows,str(state.get("query","")),empty,count)
+
+static func _crud_form(d, parent: Node, data: Dictionary, state: Dictionary) -> void:
+	var action := str(state.form)
+	var titles := {"create_order":"受注を登録","update_order":"受注を変更","delete_order":"受注の取消","create_customer":"顧客を登録","update_customer":"顧客名を変更","delete_customer":"顧客の削除","append_ledger":"入出金を記録"}
+	var form := _panel(parent,PANEL,16)
+	_label(d,form,str(titles.get(action,action)),22,INK)
+	var values: Dictionary = state.get("form_values",{})
+	if action.begins_with("delete_"):
+		_label(d,form,"対象: "+str(values.get("id",""))+"  "+str(values.get("name","")),16,INK)
+		_label(d,form,"登録済みの受注がある顧客は削除できません。" if action=="delete_customer" else "この受注を一覧から取り消します。",14,MUTED)
+	elif action.ends_with("customer"):
+		_input(d,form,values,"name","顧客名","BusinessCustomerName","80字以内。カンマ・改行は使えません。")
+	elif action.ends_with("order"):
+		_label(d,form,"顧客",14,INK)
+		var select := OptionButton.new(); select.name = "BusinessCustomerChoice"; form.add_child(select)
+		for customer in data.get("customers",[]):
+			select.add_item(str(customer.name)+"  ("+str(customer.id)+")")
+			select.set_item_metadata(select.item_count-1,str(customer.id))
+			if str(values.get("customer","")) == str(customer.id): select.select(select.item_count-1)
+		if select.item_count > 0 and not values.has("customer"): values.customer = str(select.get_item_metadata(select.selected))
+		select.item_selected.connect(func(index): values.customer = str(select.get_item_metadata(index)); _persist(d))
+		_input(d,form,values,"total","受注金額（円）","BusinessOrderTotal","0以上の整数")
+	else:
+		_input(d,form,values,"date","記帳日","BusinessLedgerDate","YYYY-MM-DD（最終記帳日より後）")
+		_input(d,form,values,"amount","入出金額（円）","BusinessLedgerAmount","入金は正、出金は負の整数")
+		_label(d,form,"期首残高は前回の残高から引き継ぎます。訂正も新しい記帳として残します。",14,MUTED).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	state.form_values = values
+	var controls := HBoxContainer.new(); form.add_child(controls)
+	_primary(d,controls,"取り消す" if action.begins_with("delete_") else "保存","BusinessSave",func(): _submit(d,action))
+	_button(d,controls,"戻る","BusinessCancel",func(): state.form = ""; state.notice = ""; _persist(d); d._render_business_workspace())
+
+static func _input(d, parent: Node, values: Dictionary, key: String, title: String, node_name: String, placeholder: String) -> void:
+	_label(d,parent,title,14,INK)
+	var edit := LineEdit.new(); edit.name = node_name; edit.placeholder_text = placeholder; edit.text = str(values.get(key,"")); edit.custom_minimum_size.y = 36; parent.add_child(edit)
+	edit.text_changed.connect(func(value): values[key] = value; _persist(d))
+
+static func _submit(d, action: String) -> void:
+	var state: Dictionary = d.business_ui
+	var args: Dictionary = state.get("form_values",{}).duplicate(true)
+	for key in ["total","amount"]:
+		if args.has(key) and str(args[key]).is_valid_int(): args[key] = int(args[key])
+	args.expected_revision = str(state.get("form_revision","")); args.request_url = d.browser_url
+	var result: Dictionary = d.game.business_action(action,args)
+	if bool(result.get("ok",false)):
+		state.form = ""; state.form_values = {}; state.notice = "保存しました。"
+		if action.ends_with("order"): state.selected_order = str(result.get("item",{}).get("order","")) if not action.begins_with("delete_") else ""
+	else:
+		var messages := {"conflict":"別の画面で更新されました。入力は保留されています。戻って最新の内容を確認してください。","recovery_required":"復旧対象の原本がまだ一致しません。先に資料の復旧を確認してください。","storage_readonly":"共有元が読み取り専用です。","customer_has_orders":"受注がある顧客は削除できません。","invalid_name":"顧客名を80字以内で入力してください。カンマ・改行は使えません。","invalid_amount":"金額は範囲内の整数で入力してください。","unknown_customer":"登録済みの顧客を選択してください。","invalid_date":"日付をYYYY-MM-DDで入力してください。","date_must_follow_ledger":"最終記帳日より後の日付を入力してください。","invalid_balance":"残高が不足する、または上限を超える記帳です。","save_failed":"保存できませんでした。変更は反映していません。"}
+		state.notice = str(messages.get(str(result.get("error","")),"操作できません: "+str(result.get("error",""))))
+	_persist(d)
+	var resource := "ledger" if "/accounting" in d.browser_url else ("customers" if "/customers" in d.browser_url else "orders")
+	d.browser_response = str(d.game.business_read(resource,d.browser_url).get("response",""))
+	d._render_business_workspace()
+
+static func _history(d, parent: Node, data: Dictionary) -> void:
+	var records: Array = data.get("history",[])
+	if records.is_empty(): return
+	var box := _panel(parent,PANEL,10)
+	_label(d,box,"最近の操作",14,MUTED)
+	var names := {"create_customer":"顧客登録","update_customer":"顧客変更","delete_customer":"顧客削除","create_order":"受注登録","update_order":"受注変更","delete_order":"受注取消","append_ledger":"記帳"}
+	for row in records.slice(maxi(0,records.size()-3)):
+		var item: Dictionary = row.get("item",{})
+		_label(d,box,"%s  %s" % [str(names.get(str(row.action),str(row.action))),str(item.get("id",item.get("order",item.get("date",""))))],13,INK)
 
 static func _ledger_row(d, parent: Node, values: Array, header: bool, index: int) -> void:
 	var frame := PanelContainer.new()

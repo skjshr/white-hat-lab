@@ -78,6 +78,10 @@ static func _json_response(provider: Dictionary, resource: String) -> Dictionary
 	var customers_file := _file(provider, "customers.csv")
 	var orders_file := _file(provider, "orders.csv")
 	var ledger_file := _file(provider, "ledger.txt")
+	if resource == "customers":
+		if not customers_file.ok: customers_file.external_storage = external; return customers_file
+		var customers := parse_customers(str(customers_file.text)); if not customers.ok: customers.external_storage = external; return customers
+		return {"ok":true,"code":200,"data":{"customers":customers.rows,"sha256":str(customers_file.text).sha256_text()},"external_storage":external}
 	if resource == "orders":
 		if not customers_file.ok: customers_file.external_storage = external; return customers_file
 		if not orders_file.ok: orders_file.external_storage = external; return orders_file

@@ -22,6 +22,8 @@ func run() -> void:
 		push_error("Title must retain original background"); quit(1); return
 	await RenderingServer.frame_post_draw
 	var folder := ProjectSettings.globalize_path("res://../artifacts/simulator/ui-refinement-20260922/screens" if "--refinement-capture" in OS.get_cmdline_user_args() else "res://../artifacts/simulator/v220/ui" if "--v220-capture" in OS.get_cmdline_user_args() else "res://../artifacts/simulator/ui-polish-20260922/after")
+	if not OS.get_environment("WHL_CAPTURE_DIR").is_empty():
+		folder = OS.get_environment("WHL_CAPTURE_DIR")
 	DirAccess.make_dir_recursive_absolute(folder)
 	root.get_texture().get_image().save_png(folder.path_join("title" + ("-narrow" if narrow else "-wide") + ".png"))
 	print("TITLE_SCENE_OK original_background=true narrow=",narrow)

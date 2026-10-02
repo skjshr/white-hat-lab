@@ -60,12 +60,14 @@ static func build(d, parent: VBoxContainer) -> void:
 		var scale := float(d.game.settings.get("text_scale", 1.0))
 		var stacked := split.size.x < 880.0 * scale
 		split.vertical = stacked
-		rail.custom_minimum_size = Vector2(0, 160) if stacked else Vector2(220, 0)
+		rail.custom_minimum_size = Vector2(0, 54 if str(d.diagnostic_ui.get("mode", "checks")) == "http" else 115) if stacked else Vector2(220, 0)
 		left.size_flags_vertical = Control.SIZE_SHRINK_BEGIN if stacked else Control.SIZE_EXPAND_FILL
 		right.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	split.resized.connect(reflow)
 	reflow.call_deferred()
 	d.widgets.verify = {"left": left, "right": right, "body": right, "footer": null, "selected": "", "tally": tally, "signature": "", "raw_visible": false}
+	d.widgets.verify.selected = str(d.diagnostic_ui.get("selected", ""))
+	d.widgets.verify.reflow = reflow
 	refresh(d)
 
 static func _status(probe: Dictionary) -> String:
@@ -87,9 +89,11 @@ static func refresh(d) -> void:
 	var w: Dictionary = d.widgets.verify
 	var probes: Array = d.game.diagnostic_probes()
 	var ready: bool = d.game.can_deliver()
-	var signature := str(probes) + str(ready) + str(d.game.vm_info().connected) + str(d.game.state.get("validated_revision", -1)) + str(w.selected) + str(w.raw_visible)
+	var mode := str(d.diagnostic_ui.get("mode", "checks"))
+	var signature := str(probes) + str(ready) + str(d.game.vm_info().connected) + str(d.game.state.get("validated_revision", -1)) + str(w.selected) + str(w.raw_visible) + mode + str(d.diagnostic_ui.get("observations", []))
 	if str(w.signature) == signature: return
 	w.signature = signature
+	if w.has("reflow"): w.reflow.call()
 	var left: VBoxContainer = w.left
 	var right: VBoxContainer = w.right
 	d._clear(left)
@@ -98,6 +102,13 @@ static func refresh(d) -> void:
 	for item in probes:
 		if item.get("passed", false) and item.get("fresh", false): passed_count += 1
 	w.tally.text = "%d / %d" % [passed_count, probes.size()]
+	var modes := HFlowContainer.new(); modes.add_theme_constant_override("h_separation", 6); left.add_child(modes)
+	for entry in [["checks", "受入条件の計測"], ["http", "HTTP試験"]]:
+		var choice: Button = d._button(str(entry[1]), func(): d.diagnostic_ui["mode"] = str(entry[0]); d._save_session(false); refresh(d))
+		choice.name = "DiagnosticMode_" + str(entry[0]); choice.toggle_mode = true; choice.button_pressed = mode == str(entry[0]); modes.add_child(choice)
+	if mode == "http":
+		_request_workspace(d, right)
+		return
 	left.add_child(d._label("検証項目", 12, DIAG_ACCENT))
 	if probes.is_empty():
 		right.add_child(d._label(_copy("os_result_none", "未実行"), 14, MUTED))
@@ -234,7 +245,69 @@ static func refresh(d) -> void:
 
 static func _select(d, id: String) -> void:
 	d.widgets.verify.selected = id
+	d.diagnostic_ui["selected"] = id
+	d._save_session(false)
 	refresh(d)
+
+static func _request_workspace(d, parent: VBoxContainer) -> void:
+	parent.add_child(d._label("要求URL", 13, MUTED))
+	var url := LineEdit.new(); url.name = "DiagnosticRequestUrl"; url.placeholder_text = "https://..."; url.text = str(d.diagnostic_ui.get("url", "")); url.size_flags_horizontal = Control.SIZE_EXPAND_FILL; parent.add_child(url)
+	url.text_changed.connect(func(value): d.diagnostic_ui["url"] = value; d._save_session(false))
+	var options: Array = [{"id":"", "label":"未認証"}]
+	if d._portal_v2(): options = d.browser_identities()
+	elif d._identity_v2():
+		for session in d.game._vm().identity_snapshot().get("sessions", []):
+			options.append({"id":str(session.id), "label":str(session.user) + " · " + str(session.id) + (" · 失効済み" if bool(session.get("revoked", false)) else "")})
+	var controls := HFlowContainer.new(); controls.add_theme_constant_override("h_separation", 8); parent.add_child(controls)
+	var identity := OptionButton.new(); identity.name = "DiagnosticRequestIdentity"; identity.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN; controls.add_child(identity)
+	for option in options:
+		identity.add_item(str(option.label)); identity.set_item_metadata(identity.item_count - 1, str(option.id))
+		if str(option.id) == str(d.diagnostic_ui.get("identity", "")): identity.select(identity.item_count - 1)
+	identity.item_selected.connect(func(index): d.diagnostic_ui["identity"] = str(identity.get_item_metadata(index)); d._save_session(false))
+	var run: Button = d._primary("GETを実行", func(): _request(d, url.text, str(identity.get_item_metadata(identity.selected))))
+	run.name = "DiagnosticRequestRun"; run.disabled = not bool(d.game.vm_info().get("connected", false)) or d.game.current_done(); run.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN; controls.add_child(run)
+	var error := str(d.diagnostic_ui.get("error", ""))
+	if not error.is_empty(): parent.add_child(d._label(error, 13, RED))
+	var observations: Array = d.diagnostic_ui.get("observations", [])
+	if observations.is_empty(): parent.add_child(d._label("要求はまだ送信していません。", 13, MUTED)); return
+	for index in range(observations.size() - 1, -1, -1):
+		var observation: Dictionary = observations[index]
+		var panel := PanelContainer.new(); panel.add_theme_stylebox_override("panel", d._style(DIAG_PANEL, BORDER, 8, 8)); parent.add_child(panel)
+		var body: VBoxContainer = d._box(panel, 5)
+		var response := str(observation.get("response", ""))
+		var status: Label = d._label(_response_summary(response), 14, INK); status.name = "DiagnosticObservation_%d" % index; body.add_child(status)
+		body.add_child(d._label("GET " + str(observation.get("url", "")), 13, INK))
+		var fresh := str(observation.get("fingerprint", "")) == str(d.game._vm()._fingerprint())
+		body.add_child(d._label(("現在の状態で観測" if fresh else "状態変更前の観測") + " · " + str(observation.get("identity_label", "未認証")), 12, MUTED))
+		var detail: VBoxContainer = d._disclosure(body, "応答本文")
+		var raw := CodeEdit.new(); raw.editable = false; raw.text = response; raw.custom_minimum_size.y = 140; detail.add_child(raw)
+		var retry: Button = d._button("この要求を再送", func(): _request(d, str(observation.get("url", "")), str(observation.get("identity", ""))))
+		retry.name = "DiagnosticReplay_%d" % index; retry.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN; retry.disabled = run.disabled; body.add_child(retry)
+
+static func _request(d, raw_url: String, identity: String) -> void:
+	var url := raw_url.strip_edges()
+	d.diagnostic_ui["url"] = raw_url; d.diagnostic_ui["identity"] = identity
+	if (not url.begins_with("https://") and not url.begins_with("http://")) or url.length() > 2048 or url.contains("\n") or url.contains("\r") or url.contains("\t") or url.contains(" "):
+		d.diagnostic_ui["error"] = "http:// または https:// から始まるURLを入力してください。"
+	else:
+		d.diagnostic_ui.erase("error")
+		var command := "curl "
+		if not identity.is_empty(): command += "-H 'Authorization: Bearer " + identity.replace("'", "'\"'\"'") + "' "
+		command += "'" + url.replace("'", "'\"'\"'") + "'"
+		var response: String = d.game.vm_run(command)
+		var observations: Array = d.diagnostic_ui.get("observations", [])
+		observations.append({"url":url, "identity":identity, "identity_label":identity if not identity.is_empty() else "未認証", "response":response, "fingerprint":str(d.game._vm()._fingerprint())})
+		if observations.size() > 8: observations.pop_front()
+		d.diagnostic_ui["observations"] = observations
+	d._save_session(false)
+	d.widgets.verify.signature = ""
+	refresh(d)
+
+static func _response_summary(response: String) -> String:
+	var status := response.get_slice("\n", 0)
+	var code := status.get_slice(" ", 1)
+	var meaning := str({"200":"読み込み成功", "401":"認証できませんでした", "403":"アクセス拒否", "404":"対象が見つかりません", "410":"リンク期限切れ", "503":"サービス利用不可"}.get(code, "要求の結果"))
+	return meaning + " · " + status
 
 static func _build_comparison(d, parent: Control, probe: Dictionary) -> void:
 	if not bool(probe.get("recorded", false)): return

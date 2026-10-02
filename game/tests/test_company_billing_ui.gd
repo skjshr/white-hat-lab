@@ -130,10 +130,10 @@ func run() -> void:
 	check(bool(posted.get("ok", false)), "post deferred invoice through Game")
 	check(str(_invoice(posted_id).get("status", "")) == "posted", "deferred invoice remains posted")
 	check(str(_invoice(immediate_id).get("status", "")) == "draft" and str(_invoice(draft_id).get("status", "")) == "draft", "immediate and later invoices remain drafts")
-	ui.open_panel("board")
+	ui.open_panel("company")
 	await frames(8)
-	var operations_billing := find_name(ui.root, "OperationsBilling")
-	press(operations_billing, "OperationsBilling")
+	var operations_billing := find_name(ui.root, "CompanyBilling")
+	press(operations_billing, "CompanyBilling")
 	await frames(10)
 	pc = ui.desktop
 	check(pc != null, "billing desktop opened from operations")
@@ -179,8 +179,8 @@ func run() -> void:
 	check(str(_invoice(immediate_id).get("status", "")) == "draft", "save failure keeps draft")
 	var failure_feedback := find_name(pc.widgets.billing.page, "BillingPostFeedback")
 	check(failure_feedback is Label and not str((failure_feedback as Label).text).is_empty(), "save failure feedback")
-	# Dismiss the deliberate failure notification using its existing close control.
-	for node in pc.notification.find_children("*", "Button", true, false): node.pressed.emit()
+	# Desktop notifications are inline status feedback and do not block retry.
+	check(pc.status is Label and not pc.status.text.is_empty(), "inline save failure status")
 	game.save_path = original_save
 	game.backup_path = original_backup
 	game.previous_path = original_previous

@@ -158,6 +158,53 @@ static func run(d, command: String) -> void:
 static func device_name(value: String) -> String:
 	return value.to_upper().replace("_","-")
 
+static func _business_state(snap: Dictionary, selected: String) -> String:
+	var record := recovery_device_record(snap, selected)
+	var processes: Array = snap.get("processes", []).filter(func(item): return item is Dictionary and str(item.get("device", "")) == selected)
+	var files: Array = snap.get("files", []).filter(func(item): return item is Dictionary and str(item.get("device", "")) == selected)
+	return JSON.stringify({"device":record, "processes":processes, "files":files}, "", true)
+
+static func _business_probe(d, selected: String) -> void:
+	# Exercise the same endpoint as the browser and shell, including isolation
+	# and remediation effects. A device status badge is not an HTTP observation.
+	var url := "https://edr.client.test/" + selected.replace("_", "-") + "/business"
+	var response: String = d.game.vm_run("curl " + url)
+	var observations: Dictionary = d.edr_ui.get("business_observations", {})
+	var previous: Dictionary = observations.get(selected, {})
+	observations[selected] = {"url":url, "response":response, "state":_business_state(d.game._vm().edr_snapshot(), selected), "previous":str(previous.get("response", ""))}
+	d.edr_ui["business_observations"] = observations
+	d._save_session(false)
+	if d.widgets.has("verify"): d._refresh_checks()
+	d._render_endpoint()
+
+static func _normal_use(d, body: VBoxContainer, state: Dictionary, snap: Dictionary, selected: String) -> void:
+	var panel := frame(body, Color("f5f8fa"))
+	panel.name = "EdrBusinessVerification"
+	var controls := HFlowContainer.new(); controls.add_theme_constant_override("h_separation", 8); panel.add_child(controls)
+	button(d, controls, "端末から業務接続を確認", "EdrBusinessProbe_" + selected, func(): _business_probe(d, selected))
+	button(d, controls, "端末状態を再読込", "EdrRefresh_" + selected, func(): d._render_endpoint())
+	var observation: Dictionary = state.get("business_observations", {}).get(selected, {})
+	if observation.is_empty():
+		label(d, panel, "この端末の接続結果は未確認です。隔離や復旧の後に実際の応答を確認できます。", 12, MUTED)
+	else:
+		var response := str(observation.get("response", ""))
+		var fresh := str(observation.get("state", "")) == _business_state(snap, selected)
+		var status := response.get_slice("\n", 0)
+		var meaning := str({"200":"業務サイトを利用できました", "403":"業務接続は拒否されました", "503":"業務サービスを利用できません"}.get(status.get_slice(" ", 1), "業務接続の結果"))
+		var result := label(d, panel, ("" if fresh else "変更前の結果 · 再確認が必要: ") + meaning + " · " + status, 13, INK if fresh else MUTED)
+		result.name = "EdrBusinessResult_" + selected
+		var details: VBoxContainer = d._disclosure(panel, "要求と応答")
+		label(d, details, "GET " + str(observation.get("url", "")) + "\n" + response, 12, MUTED)
+		var previous := str(observation.get("previous", ""))
+		if not previous.is_empty() and previous != response: label(d, details, "前回の応答\n" + previous, 12, MUTED)
+	if bool(snap.get("recovery_enabled", false)):
+		var processes: VBoxContainer = d._disclosure(panel, "稼働プロセス")
+		processes.name = "EdrProcesses_" + selected
+		for process in snap.get("processes", []):
+			if not process is Dictionary or str(process.get("device", "")) != selected: continue
+			var file := recovery_file(snap, str(process.get("file_id", "")))
+			label(d, processes, str(file.get("name", process.get("file_id", ""))) + "  ·  " + ("稼働中" if bool(process.get("running", false)) else "停止"), 13, INK)
+
 static func frame(parent: Node, color := Color.WHITE) -> VBoxContainer:
 	var panel := PanelContainer.new()
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -327,6 +374,7 @@ static func recovery_device(d, body: VBoxContainer, state: Dictionary, snap: Dic
 	var isolated:=bool(current.get("isolated",false))
 	var isolate_button:=button(d,controls,copy("edr_release" if isolated else "edr_isolate"),("EdrRelease_" if isolated else "EdrIsolate_")+selected,func():run(d,("release " if isolated else "isolate ")+selected))
 	isolate_button.disabled=not bool(current.get("management_connected",false))
+	_normal_use(d, body, state, snap, selected)
 	var tab_row:=HFlowContainer.new();tab_row.name="EdrRecoveryTabs";tab_row.add_theme_constant_override("h_separation",8);body.add_child(tab_row)
 	var active_tab:=str(state.get("recovery_tab","timeline"))
 	for tab_id in ["timeline","files"]:
@@ -532,6 +580,7 @@ static func devices(d, body: VBoxContainer, state: Dictionary, snap: Dictionary)
 	var action := button(d,controls,copy("edr_release" if isolated else "edr_isolate"),("EdrRelease_" if isolated else "EdrIsolate_")+selected,func():run(d,("release " if isolated else "isolate ")+selected))
 	action.disabled = not current.management_connected
 	button(d,controls,copy("edr_collect"),"EdrCollect",func():run(d,"collect"))
+	_normal_use(d, body, state, snap, selected)
 	tabline(d,body,copy("edr_timeline"),"EdrTab_timeline")
 	var toolbar := HBoxContainer.new();body.add_child(toolbar)
 	var search := LineEdit.new();search.name="EdrSearch";search.placeholder_text=copy("edr_search");search.text=str(state.get("query",""));search.size_flags_horizontal=Control.SIZE_EXPAND_FILL;toolbar.add_child(search)

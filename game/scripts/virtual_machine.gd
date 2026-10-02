@@ -120,7 +120,27 @@ func _business_provider() -> Dictionary:
 	var scenario: Dictionary = state.get("scenario", {}) if state.get("scenario", {}) is Dictionary else {}
 	if bool(scenario.get("linked_business", false)):
 		return _linked_business_provider
-	return {"available":true,"fs":state.fs.duplicate(true)}
+	return {"available":true,"writable":true,"fs":state.fs.duplicate(true)}
+
+## A UI refresh must not record traffic, consume work time, or grant a probe PASS.
+func business_read(resource: String = "orders", request_url: String = "") -> Dictionary:
+	var result: Dictionary
+	var url := _url_parts(request_url if not request_url.is_empty() else "https://intranet.client.test/")
+	var port := 443 if str(url.scheme) == "https" else 80
+	if str(url.host) != "intranet.client.test" or int(url.port) != port or str(url.scheme) not in ["http","https"]: result = {"ok":false,"code":404,"error":"unknown_service"}
+	elif _chapter != 2 or not _firewall_model_v2(): result = {"ok":false,"code":400,"error":"unsupported_model"}
+	elif not bool(state.get("connected",false)) or not bool(state.get("active",false)): result = {"ok":false,"code":503,"error":"service_unavailable"}
+	elif str(state.applied.get("dns","off")) != "on": result = {"ok":false,"code":503,"error":"dns_unavailable"}
+	else:
+		var dns := FirewallPolicy.evaluate(state.applied,"lan",FirewallPolicy.STAFF_ADDRESS,FirewallPolicy.LAN_ADDRESS,"udp",40000,53)
+		var http := FirewallPolicy.evaluate(state.applied,"lan",FirewallPolicy.STAFF_ADDRESS,FirewallPolicy.BUSINESS_ADDRESS,"tcp",40000,port)
+		if str(dns.get("action","block")) != "pass" or str(http.get("action","block")) != "pass": result = {"ok":false,"code":403,"error":"network_denied"}
+		elif str(url.scheme) == "https" and str(state.applied.get("tls","off")) != "on": result = {"ok":false,"code":503,"error":"tls_unavailable"}
+		else: result = BusinessWorkspace.handle_get(_business_provider(),resource)
+	var provider := _business_provider()
+	result.revision = BusinessWorkspace.fingerprint(provider,true)
+	result.capabilities = {"write":bool(result.get("ok",false)) and bool(provider.get("writable",true))}
+	return result
 
 func has_linked_identity() -> bool:
 	var scenario: Dictionary = state.get("scenario", {}) if state.get("scenario", {}) is Dictionary else {}
@@ -970,6 +990,7 @@ func _clear_probe_measurement(probe: Dictionary) -> void:
 func _normalize_transport_probes() -> void:
 	if _chapter != 2: return
 	var desired: Dictionary = state.get("scenario", {}).get("desired", {}) if state.get("scenario", {}) is Dictionary else {}
+	if desired.is_empty(): desired = _legacy_desired()
 	for probe in _active_probes():
 		if _firewall_model_v2() and str(probe.get("id", "")) == "admin-check":
 			var admin_command := "curl https://admin.client.test:8443"
@@ -1632,7 +1653,7 @@ func _http(args: Array[String]) -> String:
 			return "HTTP/1.1 200 OK\n" + state.fs.get("/srv/share/report.txt", "") if _permission(role, method == "PUT") else "HTTP/1.1 403 Forbidden"
 		2:
 			if parts.host not in ["intranet.client.test", "admin.client.test"]: return "curl: (6) Could not resolve host"
-			if parts.path not in ["/", "", "/api/business/orders", "/api/business/ledger"]: return "HTTP/1.1 404 Not Found\nunknown gateway route"
+			if parts.path not in ["/", "", "/api/business/orders", "/api/business/customers", "/api/business/ledger"]: return "HTTP/1.1 404 Not Found\nunknown gateway route"
 			if parts.path.begins_with("/api/business/") and parts.host != "intranet.client.test": return "HTTP/1.1 404 Not Found\nunknown business route"
 			if parts.path.begins_with("/api/business/") and method != "GET": return "HTTP/1.1 405 Method Not Allowed\nread-only business route"
 			if c.dns != "on": return "curl: (6) Could not resolve host"
@@ -1647,7 +1668,7 @@ func _http(args: Array[String]) -> String:
 				if str(decision.get("action", "block")) != "pass": return _firewall_denial(decision, "curl")
 				if parts.scheme == "https" and c.tls != "on": return "curl: (35) TLS handshake failed"
 				if parts.path.begins_with("/api/business/"):
-					var resource := "orders" if parts.path.ends_with("/orders") else "ledger"
+					var resource := str(parts.path).get_file()
 					var business := BusinessWorkspace.handle_get(_business_provider(), resource)
 					var status := int(business.get("code", 500)); var phrase := "OK" if status == 200 else ("Forbidden" if status == 403 else ("Not Found" if status == 404 else ("Unprocessable Entity" if status == 422 else "Service Unavailable")))
 					return "HTTP/1.1 %d %s\nContent-Type: application/json\n\n%s" % [status, phrase, JSON.stringify(business)]

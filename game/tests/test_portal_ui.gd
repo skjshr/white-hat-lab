@@ -40,11 +40,11 @@ func share(role: String,permission: int,expiry: int) -> void:
 	if control("PortalPermission_"+role)==null:press("PortalShare_"+role)
 	select("PortalPermission_"+role,permission);select("PortalExpiry_"+role,expiry);press("PortalApply_"+role)
 func legacy() -> void:
-	var saved: Dictionary=JSON.parse_string(FileAccess.get_file_as_string(ProjectSettings.globalize_path("res://../artifacts/simulator/v123/legacy-v122-portal.json")))
-	check(not saved.has("portal_model_version"),"actual released v122 fixture")
+	var saved: Dictionary=preload("res://tests/legacy_service_fixture.gd").measured(5)
+	check(not saved.has("portal_model_version"),"representative legacy flat fixture has no v2 marker")
 	var machine=load("res://scripts/virtual_machine.gd").new();machine.setup(5,saved)
 	check(int(machine.state.get("portal_model_version",1))==1 and not machine.state.fs.has(FILE),"legacy data not invented")
-	check(machine.probes().all(func(p):return bool(p.passed) and bool(p.fresh)),"legacy measurements preserved")
+	check(machine.probes().size()>0 and machine.probes().all(func(p):return bool(p.passed) and bool(p.fresh)),"actual legacy measurements preserved through JSON roundtrip")
 	check(machine.run("curl -H 'Authorization: Bearer partner-mfa-session' https://portal.client.test/partner").begins_with("HTTP/1.1 200"),"legacy route remains usable")
 func run() -> void:
 	legacy()

@@ -12,6 +12,8 @@ const STATE_VERSION := 1
 const OPERATIONS = preload("res://scripts/operations_dispatch.gd")
 const DAY_LEDGER = preload("res://scripts/day_ledger.gd")
 const BILLING = preload("res://scripts/company_billing.gd")
+const BUSINESS_TRANSACTIONS = preload("res://scripts/business_transactions.gd")
+const BUSINESS_DATA = preload("res://scripts/business_workspace.gd")
 const BUSINESS_START_MINUTE := 9 * 60
 const BUSINESS_END_MINUTE := 18 * 60
 const DELIVERY_WAIT_SECONDS := 30.0
@@ -104,6 +106,10 @@ func _ready() -> void:
 		_reset_state()
 
 func _process(delta: float) -> void:
+	# The isolated exercise advances only through explicit response actions.
+	# Keep delivery, maintenance and crew clocks outside that simulated time.
+	if incident_active():
+		return
 	if _delivery_clock_enabled and not _delivery_clock_paused:
 		advance_delivery(delta)
 	if _office_clock_paused:
@@ -467,7 +473,13 @@ func _advanced_mission() -> Dictionary:
 	var view := advanced_view()
 	var checks: Array = _advanced_engine().checks(state.advanced)
 	var reward := int(contract.get("reward", 0))
-	return {"id":case_id,"title":str(contract.get("title", UI_COPY.copy("adv_%s_title" % case_id.trim_prefix("advanced-")))),"client":str(contract.get("client", "")),"brief":str(contract.get("brief", UI_COPY.copy("adv_%s_brief" % case_id.trim_prefix("advanced-")))),"contract_brief":str(contract.get("brief", "")),"target_title":UI_COPY.copy("adv_environment"),"service":UI_COPY.copy("adv_service"),"console":"advanced","asset":"","evidence":view.get("events",[]),"hints":[],"debrief":UI_COPY.copy("adv_check_summary"),"fields":[],"checks":checks,"reward":reward,"base_reward":reward,"difficulty":str(contract.get("difficulty", UI_COPY.copy("adv_difficulty", "tier3"))),"required_level":int(contract.get("required_level", 1)),"required_credit":int(contract.get("required_credit", 0)),"estimated_cost":700,"expected_profit":reward-700,"current_credit":int(state.get("credit", 0)),"category":str(contract.get("category", "response")),"estimated_workload":int(contract.get("advanced_work_minutes", 0))}
+	var result := {"id":case_id,"title":str(contract.get("title", UI_COPY.copy("adv_%s_title" % case_id.trim_prefix("advanced-")))),"client":str(contract.get("client", "")),"brief":str(contract.get("brief", UI_COPY.copy("adv_%s_brief" % case_id.trim_prefix("advanced-")))),"contract_brief":str(contract.get("brief", "")),"target_title":UI_COPY.copy("adv_environment"),"service":UI_COPY.copy("adv_service"),"console":"advanced","asset":"","evidence":view.get("events",[]),"hints":[],"debrief":UI_COPY.copy("adv_check_summary"),"fields":[],"checks":checks,"reward":reward,"base_reward":reward,"difficulty":str(contract.get("difficulty", UI_COPY.copy("adv_difficulty", "tier3"))),"required_level":int(contract.get("required_level", 1)),"required_credit":int(contract.get("required_credit", 0)),"estimated_cost":700,"expected_profit":reward-700,"current_credit":int(state.get("credit", 0)),"category":str(contract.get("category", "response")),"estimated_workload":int(contract.get("advanced_work_minutes", 0))}
+	if case_id == "advanced-portal":
+		result.service = UI_COPY.copy("adv_portal_service")
+		result.target_title = "portal.mihama.test"
+		result.debrief = UI_COPY.copy("adv_portal_debrief")
+		result.difficulty = UI_COPY.copy("portal_difficulty")
+	return result
 
 func _specialist_reward(chapter: int, base: int, category_override: String = "") -> int:
 	var category := category_override if not category_override.is_empty() else str(CATEGORIES[chapter])
@@ -1063,6 +1075,8 @@ func rollback_configuration() -> bool:
 	return not result.begins_with("Job failed") and bool(_vm().state.get("active", false))
 
 func case_review() -> Dictionary:
+	if str(state.get("contract", {}).get("case_id", "")) == "advanced-portal" and advanced_active():
+		return _portal_case_review()
 	var total := maxi(1, state.get("targets", []).size())
 	var recorded_sites := 0
 	var current_recorded := false
@@ -1089,6 +1103,24 @@ func case_review() -> Dictionary:
 	objectives.append({"id":"safe","title":"安全な作業","detail":"再起動・リセット失敗なし","done":safe})
 	objectives.append({"id":"deadline","title":"期限内の納品","detail":"納期内完了","done":on_time})
 	return {"available":available,"can_capture":available and int(state.get("target_index",0)) < state.targets.size() and not bool(state.targets[int(state.get("target_index",0))].get("baseline_locked",false)) and bool(_vm().state.get("connected",false)),"recorded":recorded,"current_recorded":current_recorded,"recorded_sites":recorded_sites,"total_sites":total,"score":score,"grade":grade,"bonus":bonus,"objectives":objectives,"record_path":"/home/operator/baseline-report.txt"}
+
+func _portal_case_review() -> Dictionary:
+	# A tester preserves HTTP evidence, not a customer's server configuration.
+	var checks: Array = _advanced_engine().checks(state.advanced)
+	var report_saved := false
+	var retested := true
+	for check in checks:
+		if str(check.get("id", "")) == "report": report_saved = bool(check.get("passed", false))
+		else: retested = retested and bool(check.get("passed", false))
+	var status := work_status()
+	var on_time := float(status.get("elapsed_minutes", status.get("minutes", 0.0))) <= float(status.get("budget", 0.0))
+	var score := int(report_saved) + int(retested) + int(on_time)
+	var objectives: Array = [
+		{"id":"evidence","title":UI_COPY.copy("portal_review_evidence"),"detail":UI_COPY.copy("portal_review_evidence_detail"),"done":report_saved},
+		{"id":"retest","title":UI_COPY.copy("portal_review_retest"),"detail":UI_COPY.copy("portal_review_retest_detail"),"done":retested},
+		{"id":"deadline","title":UI_COPY.copy("portal_review_deadline"),"detail":UI_COPY.copy("portal_review_deadline_detail"),"done":on_time}
+	]
+	return {"available":not current_done() and not state.get("game_complete", false),"can_capture":false,"recorded":report_saved,"current_recorded":report_saved,"recorded_sites":1 if report_saved else 0,"total_sites":1,"score":score,"grade":"S" if score == 3 else ("A" if score == 2 else ("B" if score == 1 else "C")),"bonus":roundi(int(status.get("estimated_fee", 0)) * 0.05) if report_saved else 0,"objectives":objectives,"record_path":""}
 
 func _vm_key(index: int = -1) -> String:
 	var contract_id := str(state.current_contract_id) if state.career_mode else "story-%d" % int(state.chapter)
@@ -1126,7 +1158,7 @@ func _bind_linked_business(machine) -> void:
 		if source == null:
 			source = load("res://scripts/virtual_machine.gd").new()
 			source.setup(1, state.get("vm_states", {}).get(provider_key, {}), _scenario(provider_index))
-		provider = {"available":true,"fs":source.state.fs.duplicate(true)}
+		provider = {"available":true,"writable":bool(source.state.get("active",false)),"fs":source.state.fs.duplicate(true)}
 		break
 	machine.set_linked_business_provider(provider)
 
@@ -1284,11 +1316,15 @@ func vm_info() -> Dictionary:
 func advanced_active() -> bool:
 	return bool(state.get("accepted", false)) and _advanced_case_id(str(state.get("contract", {}).get("case_id", ""))) and state.get("advanced", {}) is Dictionary and not state.advanced.is_empty()
 
+func incident_active() -> bool:
+	return advanced_active() and str(state.advanced.get("kind", "")) == "advanced-portal" and bool(state.advanced.get("exercise", {}).get("active", false))
+
 func _advanced_case_id(case_id: String) -> bool:
-	return case_id in ["advanced-hunt","advanced-pentest","advanced-recovery","advanced-ddos","advanced-api","advanced-supplychain","advanced-cloud","advanced-malware","advanced-detection"]
+	return case_id in ["advanced-hunt","advanced-pentest","advanced-recovery","advanced-ddos","advanced-api","advanced-supplychain","advanced-cloud","advanced-malware","advanced-detection","advanced-portal"]
 
 func _advanced_engine(case_id: String = ""):
 	var id := case_id if not case_id.is_empty() else str(state.get("contract", {}).get("case_id", ""))
+	if id == "advanced-portal": return load("res://scripts/pentest_portal.gd")
 	if id in ["advanced-cloud","advanced-malware","advanced-detection"]: return load("res://scripts/advanced_threats.gd")
 	if id in ["advanced-ddos","advanced-api","advanced-supplychain"]: return load("res://scripts/advanced_assurance.gd")
 	return load("res://scripts/advanced_operations.gd")
@@ -1309,7 +1345,8 @@ func _advanced_result_message(result: Dictionary) -> String:
 	return text
 
 func advanced_action(action: String, args: Dictionary = {}) -> Dictionary:
-	if not advanced_active():
+	var exercise_request := advanced_active() and str(state.advanced.get("kind", "")) == "advanced-portal" and (action.begins_with("incident_") or incident_active())
+	if not advanced_active() or ((current_done() or bool(state.get("game_complete", false))) and not exercise_request):
 		var unavailable := {"ok":false,"changed":false,"minutes":0,"result_key":"adv_unavailable","result_args":[]}
 		unavailable.message = _advanced_result_message(unavailable)
 		return unavailable
@@ -1319,9 +1356,23 @@ func advanced_action(action: String, args: Dictionary = {}) -> Dictionary:
 	var before_machine_key := _machine_key
 	var result: Dictionary = _advanced_engine().act(state.advanced, action, args)
 	if not bool(result.get("changed", false)):
+		# Engines may populate last_result even for a rejected action. Keep the
+		# persistent context unchanged unless the observation can be saved.
+		state = before
 		result.message = _advanced_result_message(result)
 		return result
 	state.advanced = result.get("state", state.advanced)
+	if bool(result.get("exercise_only", false)):
+		# The operational exercise has its own clock and result. Persist its
+		# branch atomically without invalidating paid work or company progress.
+		if not save_game():
+			state = before; _assignments = before_assignments; _machine = before_machine; _machine_key = before_machine_key
+			var exercise_save_failed := {"ok":false,"changed":false,"exercise_only":true,"minutes":0,"result_key":"queue_save_failed","result_args":[]}
+			exercise_save_failed.message = _advanced_result_message(exercise_save_failed)
+			return exercise_save_failed
+		changed.emit()
+		result.message = _advanced_result_message(result)
+		return result
 	if bool(result.get("observed", true)): state.inspected = true
 	state.revision = int(state.revision) + 1
 	if action in ["verify", "measure", "retest"] and state.advanced.has("measurement_revision"):
@@ -1496,6 +1547,126 @@ func portal_request(role: String, method: String, age: String, token: String, co
 		changed.emit()
 		return "HTTP/1.1 507 Insufficient Storage\nsave_failed"
 	return response
+
+func _business_response(result: Dictionary) -> Dictionary:
+	var out := result.duplicate(true)
+	var code := int(out.get("code",500))
+	var phrase := str({200:"OK",201:"Created",400:"Bad Request",403:"Forbidden",404:"Not Found",409:"Conflict",422:"Unprocessable Entity",429:"Too Many Requests",503:"Service Unavailable",507:"Insufficient Storage"}.get(code,"Error"))
+	out.response = "HTTP/1.1 %d %s\nContent-Type: application/json\n\n%s" % [code,phrase,JSON.stringify(result)]
+	return out
+
+func _business_owner() -> Dictionary:
+	var machine = _vm()
+	if machine.has_linked_branch_storage(): return _branch_storage_source()
+	if machine.has_linked_business():
+		for index in state.get("targets",[]).size():
+			if _current_chapter(index) != 1: continue
+			var key := _vm_key(index)
+			var source = load("res://scripts/virtual_machine.gd").new()
+			source.setup(1,state.get("vm_states",{}).get(key,{}),_scenario(index))
+			return {"key":key,"index":index,"machine":source}
+		return {}
+	return {"key":_vm_key(),"index":int(state.get("target_index",0)),"machine":machine}
+
+func business_read(resource: String = "orders", request_url: String = "") -> Dictionary:
+	if not bool(state.get("accepted",false)): return _business_response({"ok":false,"code":409,"error":"contract_unavailable"})
+	if advanced_active(): return _business_response({"ok":false,"code":400,"error":"unsupported_model"})
+	if not _customer_hardware_connected(): return _business_response({"ok":false,"code":503,"error":"hardware_unavailable"})
+	var result: Dictionary = _vm().business_read(resource,request_url)
+	if result.get("data") is Dictionary:
+		var owner := _business_owner()
+		result.data.history = owner.machine.state.get("business_journal",[]).duplicate(true) if not owner.is_empty() else []
+	if current_done(): result.capabilities.write = false
+	return _business_response(result)
+
+func _business_source_path(path: String, branch: bool) -> String:
+	if branch and path == BUSINESS_DATA.CUSTOMERS_FILE: return "/srv/share/customers.csv"
+	if branch and path == BUSINESS_DATA.ORDERS_FILE: return "/srv/share/partner-order.csv"
+	return path
+
+## Current-data probes may follow a committed business change. Recovery snapshots
+## and hashes of restored/evidence files retain their original expectations.
+func _business_current_probes() -> Array:
+	var out: Array = []
+	for target in state.get("targets",[]):
+		for probe in target.get("scenario",{}).get("probes",[]):
+			var command := str(probe.get("command",""))
+			if command.begins_with("sha256sum /srv/share/") or command.contains("/api/business/"): out.append(probe)
+	return out
+
+func _business_recovery_ready(provider: Dictionary) -> bool:
+	for probe in _business_current_probes():
+		var command := str(probe.get("command","")); var expected := str(probe.get("expectation",""))
+		for name in ["customers.csv","orders.csv","ledger.txt"]:
+			var matches: bool = command.contains(name) or (name == "orders.csv" and (command.contains("partner-order.csv") or command.contains("/api/business/orders"))) or (name == "ledger.txt" and command.contains("/api/business/ledger"))
+			if not matches: continue
+			var file := BUSINESS_DATA._file(provider,name)
+			if not bool(file.get("ok",false)) or not expected.contains(str(file.text).sha256_text()): return false
+	return true
+
+func _business_follow_hashes(before_provider: Dictionary, writes: Dictionary) -> void:
+	var replacements := {}
+	for path in writes:
+		var old := BUSINESS_DATA._file(before_provider,str(path).get_file())
+		if bool(old.get("ok",false)): replacements[str(old.text).sha256_text()] = str(writes[path]).sha256_text()
+	for index in state.get("targets",[]).size():
+		var target: Dictionary = state.targets[index]
+		var key := _vm_key(index)
+		var containers: Array = [target.get("scenario",{})]
+		if state.vm_states.get(key) is Dictionary: containers.append(state.vm_states[key].get("scenario",{}))
+		if index == int(state.get("target_index",0)): containers.append(_vm().state.get("scenario",{}))
+		for scenario in containers:
+			for probe in scenario.get("probes",[]):
+				var command := str(probe.get("command",""))
+				if not command.begins_with("sha256sum /srv/share/") and not command.contains("/api/business/"): continue
+				var expectation := str(probe.get("expectation",""))
+				for prior in replacements: expectation = expectation.replace(str(prior),str(replacements[prior]))
+				if expectation != str(probe.get("expectation","")):
+					probe.expectation = expectation
+					for field in ["recorded","passed","fresh","result","fingerprint","initial_result"]: probe.erase(field)
+
+func business_action(action: String, payload: Dictionary = {}) -> Dictionary:
+	if not bool(state.get("accepted",false)) or current_done(): return _business_response(BUSINESS_TRANSACTIONS.rejected(409,"contract_unavailable"))
+	var resource := "ledger" if action == "append_ledger" else "orders"
+	var current := business_read(resource,str(payload.get("request_url","")))
+	if not bool(current.get("ok",false)): return current
+	var machine = _vm()
+	var provider: Dictionary = machine._business_provider().duplicate(true)
+	var owner := _business_owner()
+	if owner.is_empty(): return _business_response(BUSINESS_TRANSACTIONS.rejected(503,"provider_unavailable"))
+	provider.sequences = owner.machine.state.get("business_sequences",{}).duplicate(true)
+	if not _business_recovery_ready(provider): return _business_response(BUSINESS_TRANSACTIONS.rejected(409,"recovery_required"))
+	var plan := BUSINESS_TRANSACTIONS.plan(provider,action,payload)
+	if not bool(plan.get("ok",false)) or not bool(plan.get("changed",false)): return _business_response(plan)
+	var previous := state.duplicate(true); var previous_vm: Dictionary = machine.export_state()
+	var previous_provider: Dictionary = machine.linked_business_provider_fs()
+	var source = owner.machine
+	var branch: bool = machine.has_linked_branch_storage()
+	for path in plan.writes: source.state.fs[_business_source_path(str(path),branch)] = plan.writes[path]
+	if not source.state.has("business_sequences"): source.state.business_sequences = {}
+	source.state.business_sequences.merge(plan.get("sequence",{}),true)
+	if not source.state.has("business_journal"): source.state.business_journal = []
+	var sequence := 1 if source.state.business_journal.is_empty() else int(source.state.business_journal.back().get("sequence",0))+1
+	source.state.business_journal.append({"sequence":sequence,"action":action,"item":plan.item.duplicate(true),"actor":"staff","day":int(state.day)})
+	if source.state.business_journal.size() > 256: source.state.business_journal.pop_front()
+	source._touch("business " + action)
+	state.vm_states[str(owner.key)] = source.export_state()
+	_business_follow_hashes(provider,plan.writes)
+	# Every dependent service must be measured again against the current bytes.
+	for index in state.get("targets",[]).size():
+		var target: Dictionary = state.targets[index]
+		if index == int(owner.index) or bool(target.get("scenario",{}).get("linked_business",false)) or bool(target.get("scenario",{}).get("linked_branch_storage",false)):
+			target.revision = int(target.get("revision",0))+1; target.validated_revision = -1; target.checks = []
+	state.revision += 1; state.validated_revision = -1; state.checks = []
+	_bind_linked_business(machine)
+	_work_add(3.0)
+	if not save_game():
+		state = previous; machine.state = previous_vm; machine.restore_linked_business_provider_fs(previous_provider); changed.emit()
+		return _business_response(BUSINESS_TRANSACTIONS.rejected(507,"save_failed"))
+	changed.emit()
+	var result := business_read(resource,str(payload.get("request_url","")))
+	result.erase("response"); result.changed = true; result.code = int(plan.code); result.item = plan.item
+	return _business_response(result)
 
 func vm_list(path: String) -> Array:
 	return _vm().list_files(path) if state.accepted else []
@@ -1700,7 +1871,7 @@ func _vm_checks(index: int = -1) -> Array:
 	return result
 
 func verify() -> Array:
-	if not state.accepted or current_done() or state.game_complete: return []
+	if not state.accepted or current_done() or state.game_complete or incident_active(): return []
 	if advanced_active():
 		var before := state.duplicate(true)
 		var before_assignments := _assignments.duplicate(true)
@@ -1726,6 +1897,7 @@ func verify() -> Array:
 	return result
 
 func can_deliver() -> bool:
+	if incident_active(): return false
 	for queue in _dispatch_queue_map().values():
 		for job in queue:
 			if str(job.get("kind","normal"))=="normal" and str(job.get("contract_id",""))==str(state.get("current_contract_id","")): return false
@@ -1940,6 +2112,10 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 			var recent_case_id := str(receipt.get("case_id", ""))
 			if not recent_case_id.is_empty() and recent_case_id not in recent_case_ids: recent_case_ids.append(recent_case_id)
 	var priority_ids: Array = []
+	# Reserve one ordinary demand slot on a fresh board. This keeps the first
+	# hands-on engagement visible without expanding daily category limits.
+	if existing_leads.is_empty() and not completed_cases.has("advanced-portal") and candidate_offers.any(func(candidate): return str(candidate.get("case_id", "")) == "advanced-portal"):
+		existing_leads.append("advanced-portal")
 	if not previous_skills.is_empty():
 		var promoted: Array = candidate_offers.filter(func(candidate): return not _case_skills_met(candidate,previous_skills))
 		promoted.sort_custom(func(a,b):
@@ -2177,6 +2353,25 @@ func select_target(index: int) -> bool:
 func lab_snapshot() -> Array:
 	return _vm().snapshot()
 
+func _delivery_results() -> Array:
+	# Preserve only measurements already made. Receipt rendering must never evaluate
+	# a live machine or invent an earlier observation for an older save.
+	var results: Array = []
+	for index in maxi(1, state.get("targets", []).size()):
+		var target: Dictionary = state.targets[index] if index < state.get("targets", []).size() else {}
+		var current := index == int(state.get("target_index", 0))
+		var machine_state: Dictionary = _machine.export_state() if current and _machine != null else state.get("vm_states", {}).get(_vm_key(index), {})
+		var scenario: Dictionary = machine_state.get("scenario", {})
+		var probes: Array = []
+		for probe in scenario.get("probes", []) if not scenario.is_empty() else machine_state.get("probes", []):
+			if not bool(probe.get("recorded", false)): continue
+			var saved: Dictionary = {}
+			for field in ["id", "label", "command", "recorded", "passed", "result", "initial_result"]:
+				if probe.has(field): saved[field] = probe[field]
+			probes.append(saved)
+		results.append({"target":str(target.get("name", "")), "host":str(machine_state.get("host", "")), "checks":(state.get("checks", []) if current else target.get("checks", [])).duplicate(true), "probes":probes})
+	return results
+
 func deliver() -> bool:
 	if not can_deliver(): return false
 	if state.get("contract", {}).has("maintenance_incident_id"): return CARE.finish_ticket(self)
@@ -2229,6 +2424,8 @@ func deliver() -> bool:
 	var renewal_outcome := "none"
 	if state.care_agreements.has(client): renewal_outcome = "active" if bool(state.care_agreements[client].get("active",false)) else "suspended"
 	state.last_receipt = {"day":int(state.day),"client":mission().client,"title":mission().title,"fee":fee,"bonus":bonus,"baseline_bonus":baseline_bonus,"quality_score":int(review.get("score",0)),"grade":str(review.get("grade","C")),"baseline_sites":int(review.get("recorded_sites",0)),"baseline_total_sites":int(review.get("total_sites",1)),"cost":int(status.costs),"material_cost":material_cost,"material_billable":invoiced and material_cost > 0,"hardware_serial":str(_customer_hardware().get("serial","")),"net":net,"minutes":status.minutes,"elapsed_minutes":status.get("elapsed_minutes",status.minutes),"budget":status.budget,"rating":status.quality,"credit_gain":int(state.credit)-credit_before,"credit_before":credit_before,"credit_after":state.credit,"checks":state.checks.duplicate(true),"plan":state.contract_plan,"level_before":level_before,"level_after":int(company_level().level),"xp_gain":maxi(net,0),"satisfaction_before":satisfaction_before,"satisfaction_after":int(relation.satisfaction),"renewal_outcome":renewal_outcome,"price_satisfaction_delta":price_satisfaction_delta,"quality_satisfaction_delta":quality_satisfaction_delta,"agreed_fee":agreed_fee,"reference_fee":reference_fee}
+	state.last_receipt.case_id = str(state.contract.get("case_id", ""))
+	state.last_receipt.delivery_results = _delivery_results()
 	if invoiced:
 		var draft: Dictionary = BILLING.create_draft(state, id, state.contract, state.last_receipt)
 		if not bool(draft.get("ok", false)):

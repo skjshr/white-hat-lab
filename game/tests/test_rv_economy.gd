@@ -389,6 +389,7 @@ func _maintenance_flow() -> void:
 	g.save_path = good_save; g.backup_path = good_backup
 
 func _solve_public_case(target: Node, late: bool) -> bool:
+	if str(target.state.contract.get("case_id", "")) == "advanced-portal": return _solve_portal_case(target, late)
 	if target.vm_run("ssh client").is_empty(): return false
 	var config_path: String = str(target.vm_info().config_path)
 	var desired_text := ""
@@ -411,6 +412,48 @@ func _solve_public_case(target: Node, late: bool) -> bool:
 		for i in 15: target.advance_office_time(10.0)
 	var checks: Array = target.verify()
 	return checks.all(func(check): return check.passed)
+
+func _portal_request(target: Node, args: Dictionary, expected: int, label: String) -> Dictionary:
+	var result: Dictionary = target.advanced_action("request", args)
+	_assert(bool(result.get("ok", false)) and int(result.get("response", {}).get("status", 0)) == expected, "quote portal "+label)
+	return result
+
+func _solve_portal_case(target: Node, late: bool) -> bool:
+	# The first free-career quote can be the portal. Earn its delivery through
+	# actual authenticated evidence and retests, just as ordinary quotes use probes.
+	var failures_before := failures.size()
+	var sessions := {}
+	for account in target.advanced_view().get("accounts", []):
+		var username := str(account.get("username", ""))
+		if username not in ["alice", "beth"]: continue
+		var login := _portal_request(target, {"method":"POST","path":"/api/auth/login","body":{"username":username,"password":str(account.get("password", ""))}}, 200, "login "+username)
+		sessions[username] = str(login.get("response", {}).get("data", {}).get("session", ""))
+	if str(sessions.get("alice", "")).is_empty() or str(sessions.get("beth", "")).is_empty(): return false
+	var listed := _portal_request(target, {"method":"GET","path":"/api/invoices","session":sessions.alice}, 200, "normal listing")
+	var invoices: Array = listed.get("response", {}).get("data", {}).get("invoices", [])
+	if invoices.is_empty(): return false
+	var created := _portal_request(target, {"method":"POST","path":"/api/exports","session":sessions.alice,"body":{"invoice_id":str(invoices[0].id)},"headers":{"idempotency-key":"quote-export"}}, 202, "create export")
+	var job: Dictionary = created.get("response", {}).get("data", {})
+	if not job.has("status_url") or not job.has("download_url"): return false
+	_portal_request(target, {"method":"GET","path":str(job.status_url),"session":sessions.alice}, 202, "export processing")
+	_portal_request(target, {"method":"GET","path":str(job.status_url),"session":sessions.alice}, 200, "export ready")
+	var normal_request := {"method":"GET","path":str(job.download_url),"session":sessions.alice}
+	var attack_request := normal_request.duplicate(true)
+	attack_request.session = sessions.beth
+	var normal := _portal_request(target, normal_request, 200, "own CSV")
+	var attack := _portal_request(target, attack_request, 200, "cross tenant CSV")
+	_assert(normal.get("response", {}).get("body", "") == attack.get("response", {}).get("body", ""), "quote portal observes original CSV bytes")
+	for record in [normal, attack]:
+		_assert(bool(target.advanced_action("pin", {"id":str(record.get("request_id", ""))}).get("ok", false)), "quote portal pins proof")
+	_assert(bool(target.advanced_action("submit_report", {"claim":"authenticated_cross_tenant_read","evidence_ids":[normal.get("request_id", ""),attack.get("request_id", "")]}).get("ok", false)), "quote portal reports actual evidence")
+	_assert(bool(target.advanced_action("customer_fix").get("ok", false)), "quote portal receives customer fix")
+	for args in [normal_request, attack_request]:
+		var replay := _portal_request(target, args, 200 if str(args.session) == str(sessions.alice) else 403, "original request retest")
+		_assert(bool(target.advanced_action("pin", {"id":str(replay.get("request_id", ""))}).get("ok", false)), "quote portal pins retest")
+	if late:
+		for i in 15: target.advance_office_time(10.0)
+	var checks: Array = target.verify()
+	return failures.size() == failures_before and not checks.is_empty() and checks.all(func(check): return bool(check.passed))
 
 func _probe_mutates(probe: Dictionary) -> bool:
 	var command := str(probe.get("command", "")).to_lower()

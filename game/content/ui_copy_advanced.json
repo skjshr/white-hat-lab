@@ -2,6 +2,7 @@
   "source": "Gemini Web Flash",
   "model_selector": "Flash",
   "extraction": "Visible response code text, UTF-8 LF, values verbatim",
+  "portal_copy_source": "Codex: pentest portal engagement and progression copy, 2026-10-01",
   "sources": [
     {
       "raw_file": "artifacts/simulator/advanced/gemini-advanced-01-raw.json",
@@ -59,6 +60,25 @@
     }
   ],
   "entries": {
+    "adv_portal_title": "ミハマ請求ポータル・公開前診断",
+    "adv_portal_client": "ミハマ経理サービス",
+    "adv_portal_service": "Webペネトレーションテスト",
+    "portal_difficulty": "実務体験",
+    "adv_portal_brief": "来週、取引先への請求書をメールからポータルへ移します。通常利用では気づけない問題がないか、公開前の診断をお願いします。対象は検証環境 portal.mihama.test と架空データのみ。北営業 Alice・南営業 Beth のテストアカウントで、通常操作と通信の変更・再送を許可します。削除・大量送信・範囲外への接続は対象外です。再現できる証拠と業務への影響を報告し、弊社の修正版も確認してください。開発担当・高橋",
+    "adv_portal_debrief": "保存した通信で発見を説明し、修正版と通常利用を確認しました。",
+    "portal_check_report": "調査結果の根拠",
+    "portal_check_security_retest": "修正版の再検証",
+    "portal_check_business_retest": "通常操作の確認",
+    "portal_review_evidence": "再現できる報告",
+    "portal_review_evidence_detail": "保存した要求と応答で影響を説明",
+    "portal_review_retest": "修正版の確認",
+    "portal_review_retest_detail": "報告した通信と通常利用を再検証",
+    "portal_review_deadline": "期限内の納品",
+    "portal_review_deadline_detail": "合意した時間内に診断を完了",
+    "portal_next_explore": "対象サイトを使い、通信と応答から調べてください。",
+    "portal_next_customer": "報告が受理されました。顧客から修正版を受け取れます。",
+    "portal_next_retest": "修正版で報告した通信と通常利用を確認してください。",
+    "portal_next_verify": "保存した報告と再検証の証拠を確認します。",
     "adv_app": "セキュリティ運用コンソール",
     "adv_no_case": "案件一覧から受託済みの高度案件を選択してください。",
     "adv_search": "ログ・レコードを検索",

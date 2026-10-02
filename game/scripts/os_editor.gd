@@ -74,6 +74,7 @@ static func build(d, parent: VBoxContainer) -> void:
 	toolbar.add_child(spacer)
 	var save: Button = _tool(d, "save", "保存  Ctrl+S", d._save_editor, "保存")
 	save.icon = null
+	save.name = "EditorSave"
 	toolbar.add_child(save)
 
 	var path_row = d._row(p, 3)
@@ -81,6 +82,7 @@ static func build(d, parent: VBoxContainer) -> void:
 	path_label.custom_minimum_size.x = 34
 	path_row.add_child(path_label)
 	var path := LineEdit.new()
+	path.name = "EditorAddress"
 	path.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	path.text = d.editor_path
 	path.placeholder_text = "ファイルパス"
@@ -234,9 +236,9 @@ static func build(d, parent: VBoxContainer) -> void:
 	flow.add_theme_constant_override("separation", 5)
 	p.add_child(flow)
 	var hint = d._label("", 13, UI.WARNING)
+	hint.name = "EditorSaveResult"
 	hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	hint.autowrap_mode = TextServer.AUTOWRAP_OFF
-	hint.clip_text = true
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	flow.add_child(hint)
 	var next = _tool(d, "settings", "サービス管理", d._show_app.bind("monitor"), "サービス管理")
 	flow.add_child(next)
@@ -271,11 +273,13 @@ static func build(d, parent: VBoxContainer) -> void:
 		if index >= 0 and index < d.widgets.editor.opened.size(): d._open_editor(str(d.widgets.editor.opened[index])))
 	tabs.tab_close_pressed.connect(func(index):
 		var w: Dictionary = d.widgets.editor
+		var closing_active: bool = str(w.opened[index]) == str(d.editor_path)
 		w.opened.remove_at(index)
 		tabs.set_block_signals(true)
 		tabs.remove_tab(index)
 		tabs.set_block_signals(false)
-		if not w.opened.is_empty(): d._open_editor(str(w.opened[mini(index, w.opened.size() - 1)]))
+		if not closing_active: refresh(d)
+		elif not w.opened.is_empty(): d._open_editor(str(w.opened[mini(index, w.opened.size() - 1)]))
 		else: d._open_editor(""))
 	d.editor = code
 	d.path_edit = path
@@ -349,7 +353,9 @@ static func refresh(d) -> void:
 	var local := path.begins_with("workstation:")
 	var vm: Dictionary = d.game.vm_info()
 	var accessible := not path.is_empty() and (local or bool(vm.connected))
-	var unsaved: bool = accessible and w.editor.text != d._read(path)
+	if not w.has("saved_contents"): w.saved_contents = {}
+	if accessible: w.saved_contents[path] = d._read(path)
+	var unsaved: bool = not path.is_empty() and w.editor.text != str(w.saved_contents.get(path, d._read(path)))
 	if not path.is_empty(): d.drafts[path] = w.editor.text
 	var title: String = path.get_file() + (" ●" if unsaved else "") + " — エディタ" if not path.is_empty() else "エディタ"
 	d.windows.editor.title_text = title
@@ -365,7 +371,8 @@ static func refresh(d) -> void:
 	w.tabs.set_block_signals(true)
 	for index in w.opened.size():
 		var item_path: String = w.opened[index]
-		var dirty: bool = str(d.drafts.get(item_path, d._read(item_path))) != d._read(item_path)
+		var saved_text: String = d._read(item_path) if bool(vm.connected) or item_path.begins_with("workstation:") else str(w.saved_contents.get(item_path, d._read(item_path)))
+		var dirty: bool = str(d.drafts.get(item_path, saved_text)) != saved_text
 		w.tabs.set_tab_title(index, item_path.get_file() + (" ●" if dirty else ""))
 		w.tabs.set_tab_tooltip(index, item_path)
 		if item_path == path: w.tabs.current_tab = index
@@ -373,19 +380,29 @@ static func refresh(d) -> void:
 	w.owner.text = str(vm.host).get_slice(".", 0) if vm.connected else "このPC"
 	w.editor.editable = accessible
 	w.replace_button.disabled = not accessible
-	w.save.disabled = not accessible or not unsaved
+	var result_for_path: bool = str(w.get("save_result_path", "")) == path
+	var save_error: String = str(w.get("save_error", "")) if result_for_path else ""
+	var pending: bool = result_for_path and bool(w.get("save_pending", false))
+	w.save.disabled = not accessible or (not unsaved and not pending)
+	w.save.text = "再試行" if pending else "保存"
 	w.cursor.text = "%d : %d" % [w.editor.get_caret_line() + 1, w.editor.get_caret_column() + 1]
 	w.info.text = (("このPC" if local else str(vm.host)) + "   ·   " + UI.copy("os_unsaved" if unsaved else "os_saved")) if accessible else (UI.copy("os_disconnected") if not path.is_empty() else "UTF-8")
-	# Keep operational state in the status bar; the editor surface stays a
-	# workbench instead of showing a permanent tutorial footer.
+	# Keep results next to the document; service configuration stays in its console.
 	w.flow.visible = false
 	w.next.visible = false
 	w.next.disabled = unsaved
 	if path.is_empty(): w.hint.text = ""
 	elif not accessible: w.hint.text = "未接続 · 下書き保持"
-	elif live.get("dirty", false): w.hint.text = "未反映の変更あり"
-	elif not live.get("active", false): w.hint.text = "サービス停止中"
+	elif config and live.get("dirty", false): w.hint.text = "未反映の変更あり"
+	elif config and not live.get("active", false): w.hint.text = "サービス停止中"
 	else: w.hint.text = ""
+	if not save_error.is_empty(): w.hint.text = save_error
+	elif result_for_path and not str(w.get("save_result", "")).is_empty() and not unsaved:
+		w.hint.text = str(w.save_result)
+	elif unsaved: w.hint.text = "未保存の変更があります。保存するとファイルに反映されます。" if accessible else "未接続です。下書きは保持されています。再接続後に保存できます。"
+	w.hint.add_theme_color_override("font_color", Color("ffb4ab") if not save_error.is_empty() else Color("e5c07b") if unsaved else EDITOR_INK)
+	w.flow.visible = not str(w.hint.text).is_empty()
+	w.hint.tooltip_text = w.hint.text
 	_fill_tree(d, w, vm)
 	if w.find_panel.visible: _find_count(d)
 	if w.has("view_popup"):

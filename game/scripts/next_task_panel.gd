@@ -161,9 +161,18 @@ func locate_task() -> void:
 	var route := str(task.get("route", ""))
 	if route.is_empty(): return
 	management_open = false
-	if route == "board":
+	if route == "sales":
+		ui.board_selected_id = ""; ui.sales_view = "inquiries"
+		ui.open_panel("sales")
+	elif route == "door":
+		ui.open_panel("door")
+	elif route == "board":
 		var destination := "sales" if str(task.get("id", "")) == "board" else "board"
-		if ui.current_kind != destination: ui.open_panel(destination)
+		if task.has("contract_id"):
+			ui.operations_choices.view = "contracts"
+			ui.operations_choices.dispatch_selected = {"kind":"contract", "id":str(task.contract_id), "target":0, "member":""}
+			ui.open_panel(destination)
+		elif ui.current_kind != destination: ui.open_panel(destination)
 	elif route == "shop":
 		if ui.current_kind != "shop" or ui.shop_view != "stock":
 			ui.shop_view = "stock"; ui.open_panel("shop")

@@ -77,18 +77,23 @@ func run() -> void:
 	_finish()
 
 func _priority_dispatch() -> void:
-	var fixture := ProjectSettings.globalize_path("res://../artifacts/simulator/v122/legacy-v121-care.json")
-	var destination := ProjectSettings.globalize_path(str(game.save_path))
-	check(DirAccess.copy_absolute(fixture, destination) == OK and game.load_game(), "genuine care fixture reloads")
+	var fixture=preload("res://tests/care_fixture.gd")
+	var rebuilt: Dictionary=fixture.build(game)
+	check(bool(rebuilt.get("ok",false)),"build reconstructed care fixture: "+str(rebuilt.get("error","")))
+	if not bool(rebuilt.get("ok",false)):return
+	check(fixture.load_into(game,rebuilt.state),"reconstructed legacy-scope fixture reloads")
 	if game.state.get("care_agreements", {}).is_empty():
 		check(false, "care fixture has an agreement")
 		return
 	var existing_client := str(game.state.care_agreements.keys()[0])
 	check(game.end_day(), "fixture advances to a maintenance day")
 	game.set_offer_plan("care")
+	# This probe dispatches ordinary VM maintenance; a manual-only pentest may
+	# sort first on the modern board. Request a stable different-client service.
+	game.state.market_leads=["service-0-case-0"];game.state.market_day=int(game.state.day);game._make_offers()
 	var care_offer: Dictionary = {}
 	for offer in game.state.offers:
-		if bool(offer.get("unlocked", false)) and str(offer.get("client", "")) != existing_client and not game.state.care_agreements.has(str(offer.get("client", ""))):
+		if str(offer.get("case_id",""))=="service-0-case-0" and bool(offer.get("market_available",false)) and bool(offer.get("unlocked", false)) and str(offer.get("client", "")) != existing_client and not game.state.care_agreements.has(str(offer.get("client", ""))):
 			care_offer = offer
 			break
 	check(not care_offer.is_empty() and game.choose_contract(str(care_offer.get("id", ""))), "second real care client accepted")

@@ -44,9 +44,23 @@ func capture(label: String,visible_id: String="") -> void:
 	var folder:=ProjectSettings.globalize_path("res://../artifacts/simulator/experience/ui");DirAccess.make_dir_recursive_absolute(folder)
 	check(root.get_texture().get_image().save_png(folder.path_join(label+("-narrow" if narrow else "-wide")+".png"))==OK,"capture")
 func legacy() -> void:
-	var saved: Dictionary=JSON.parse_string(FileAccess.get_file_as_string(ProjectSettings.globalize_path("res://../artifacts/simulator/v124/legacy-v123-firewall.json")))
-	check(not saved.has("firewall_model_version"),"released v123 fixture")
-	var vm=load("res://scripts/virtual_machine.gd").new();vm.setup(2,saved)
+	# Build the documented pre-v2 flat schema instead of depending on an absent,
+	# untracked artifacts/simulator fixture. Measurements are produced by actual
+	# legacy requests before the JSON roundtrip; passed/fresh flags are never set.
+	var VM=load("res://scripts/virtual_machine.gd")
+	var source=VM.new();source.setup(2)
+	var saved: Dictionary=source.export_state()
+	for key in saved.keys():
+		if str(key).begins_with("firewall_"):saved.erase(key)
+	saved.applied={"dns":"on","business":"allow","admin_public":"deny","tls":"on"}
+	saved.fs[str(saved.config_path)]="dns=on\nbusiness=allow\nadmin_public=deny\ntls=on\n"
+	saved.erase("probes")
+	var measured=VM.new();measured.setup(2,saved);measured.run("ssh client")
+	for probe in measured.probes():measured.execute_probe(str(probe.id))
+	check(measured.probes().size()>0 and measured.probes().all(func(p):return bool(p.passed) and bool(p.fresh)),"legacy requests produce successful fresh measurements")
+	saved=JSON.parse_string(JSON.stringify(measured.export_state()))
+	check(not saved.has("firewall_model_version"),"legacy flat fixture has no v2 marker")
+	var vm=VM.new();vm.setup(2,saved)
 	check(int(vm.state.get("firewall_model_version",1))==1 and not vm.state.applied.has("rules"),"legacy configuration preserved")
 	check(vm.probes().all(func(p):return bool(p.passed) and bool(p.fresh)),"legacy measurements stay fresh")
 	check(vm.run("curl https://admin.client.test").begins_with("HTTP/1.1 403"),"legacy response contract preserved")
@@ -55,15 +69,21 @@ func run() -> void:
 	ui=load("res://scripts/interface.gd").new();root.add_child(ui);await frames(1);game=ui._game();game.set_process(false)
 	check(game.save_path.begins_with("user://qa-"),"QA storage")
 	ui._new_game();game.choose_strategy("advisory");game.state.peak_profit=200000;game.state.cash=100000;game.state.skills.advisory=3;game.start_free_career()
+	# This two-site contract remains playable in old saves, but is deliberately
+	# retired from fresh market generation. Recreate a previously displayed lead
+	# through the documented save fields, then use the real load/accept APIs.
+	# Fresh-market DNS/network coverage lives in test_service_workflows.gd.
+	check(not game.state.offers.any(func(item):return str(item.get("case_id",""))=="service-2-case-2" and bool(item.get("market_available",false))),"retired network case is absent from fresh market")
+	game.state.market_day=int(game.state.day);game.state.market_leads=["service-2-case-2"];game._make_offers()
+	check(game.save_game() and game.load_game(),"legacy pending network lead survives actual save reload")
+	game.set_process(false)
 	var offer: Dictionary={}
-	for day_index in 60:
-		game.state.day=day_index+1;game._make_offers()
-		for item in game.state.offers:
-			if str(item.case_id)=="service-2-case-2" and bool(item.get("market_available",false)):offer=item;break
-		if not offer.is_empty():break
+	for item in game.state.offers:
+		if str(item.case_id)=="service-2-case-2" and bool(item.get("market_available",false)):offer=item;break
 	var accepted: bool=not offer.is_empty() and game.choose_contract(str(offer.get("id","")))
-	check(accepted,"real network contract accepted")
+	check(accepted,"persisted legacy network contract accepted through real API")
 	if not accepted:quit(1);return
+	check(game.state.targets.size()==2,"legacy two-site scope preserved")
 	game.vm_run("ssh client")
 	game.set_settings({"resolution":"960x600" if narrow else "1920x1080","window_mode":"windowed","text_scale":1.3 if narrow else 1.0,"volume":0},false);root.size=Vector2i(960,600) if narrow else Vector2i(1920,1080)
 	ui.open_panel("terminal");pc=ui.desktop;pc._show_app("browser");await frames()

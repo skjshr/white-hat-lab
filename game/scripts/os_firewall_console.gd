@@ -46,6 +46,7 @@ static func action(d,name: String,payload: Dictionary={}) -> Dictionary:
 	if not was_refreshing:d.refreshing=false
 	d.get_node("/root/Soundscape").play_ui("work_success" if bool(result.get("ok",false)) else "work_failure")
 	if bool(result.get("ok",false)):
+		if name=="trace":d.firewall_ui["trace_policy"]=_trace_signature(d)
 		if name=="save_rule":d.firewall_ui.erase("editor")
 		if name=="delete":d.firewall_ui.erase("delete_id")
 		if name=="services":d.firewall_ui.erase("service_draft")
@@ -73,7 +74,7 @@ static func port(value: String) -> String:return "*" if value=="any" else value
 static func browser_width(d) -> float:
 	if d.windows.has("browser") and is_instance_valid(d.windows.browser): return float(d.windows.browser.size.x)
 	return 1280.0
-static func compact_layout(d) -> bool:return false
+static func compact_layout(d) -> bool:return browser_width(d)/maxf(1.0,float(d.game.settings.get("text_scale",1.0)))<1100.0
 static func dense_layout(d) -> bool:return browser_width(d)<1200.0
 static func column_widths(d) -> Array:
 	# Keep the native rule-list columns intact. The viewport scrolls on narrow
@@ -83,19 +84,23 @@ static func rule_table_width(widths: Array) -> float:
 	var width:=0.0
 	for value in widths:width+=float(value)
 	return width+56.0
-static func chain_item(parent: Node,symbol: String,title: String,value: String,color: Color) -> void:
+static func _trace_signature(d) -> String:
+	var live: Dictionary=d.game._vm().state
+	return JSON.stringify({"active":live.get("active",false),"applied":live.get("applied",{})})
+static func chain_item(parent: Node,symbol: String,title: String,value: String,color: Color,scale:=1.0) -> void:
 	var item:=VBoxContainer.new();item.size_flags_horizontal=Control.SIZE_EXPAND_FILL;item.add_theme_constant_override("separation",2);parent.add_child(item)
 	GLYPH.add_to(item,symbol,25,color)
-	var title_label:=Label.new();title_label.text=title;title_label.add_theme_color_override("font_color",MUTED);title_label.add_theme_font_size_override("font_size",11);title_label.autowrap_mode=TextServer.AUTOWRAP_OFF;item.add_child(title_label)
-	var value_label:=Label.new();value_label.text=value;value_label.add_theme_color_override("font_color",INK);value_label.add_theme_font_size_override("font_size",12);value_label.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART;item.add_child(value_label)
+	var title_label:=Label.new();title_label.text=title;title_label.add_theme_color_override("font_color",MUTED);title_label.add_theme_font_size_override("font_size",int(11*scale));title_label.autowrap_mode=TextServer.AUTOWRAP_OFF;item.add_child(title_label)
+	var value_label:=Label.new();value_label.text=value;value_label.add_theme_color_override("font_color",INK);value_label.add_theme_font_size_override("font_size",int(12*scale));value_label.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART;item.add_child(value_label)
 static func chain_arrow(parent: Node) -> void:GLYPH.add_to(parent,"arrow",22,BLUE)
 static func evidence_chain(d,parent: Node,trace: Dictionary) -> void:
+	var scale:=float(d.game.settings.get("text_scale",1.0))
 	var row:=HBoxContainer.new();row.add_theme_constant_override("separation",7);row.size_flags_horizontal=Control.SIZE_EXPAND_FILL;parent.add_child(row)
-	chain_item(row,"network",copy("source_address"),str(trace.get("source",""))+":"+str(trace.get("source_port","")),BLUE);chain_arrow(row)
-	chain_item(row,"device",copy("interface"),str(trace.get("interface","lan")).to_upper(),BLUE);chain_arrow(row)
+	chain_item(row,"network",copy("source_address"),str(trace.get("source",""))+":"+str(trace.get("source_port","")),BLUE,scale);chain_arrow(row)
+	chain_item(row,"device",copy("interface"),str(trace.get("interface","lan")).to_upper(),BLUE,scale);chain_arrow(row)
 	var rule_id:=str(trace.get("rule_id","default"));var rule_text:=copy("default_deny") if rule_id=="default" else rule_id
-	chain_item(row,"process",copy("matched_rule"),rule_text+" / "+copy(str(trace.get("action","block"))),GREEN if str(trace.get("action",""))=="pass" else RED);chain_arrow(row)
-	chain_item(row,"device",copy("destination_address"),str(trace.get("destination",""))+":"+str(trace.get("destination_port","")),BLUE)
+	chain_item(row,"process",copy("matched_rule"),rule_text+" / "+copy(str(trace.get("action","block"))),GREEN if str(trace.get("action",""))=="pass" else RED,scale);chain_arrow(row)
+	chain_item(row,"device",copy("destination_address"),str(trace.get("destination",""))+":"+str(trace.get("destination_port","")),BLUE,scale)
 
 static func render(d,parent: VBoxContainer) -> void:
 	var state: Dictionary=d.firewall_ui;var snap: Dictionary=d.game._vm().firewall_snapshot()
@@ -139,23 +144,29 @@ static func render(d,parent: VBoxContainer) -> void:
 
 static func rules(d,parent: VBoxContainer,snap: Dictionary,state: Dictionary) -> void:
 	if state.has("editor"):editor(d,parent,state);return
+	_trace_context(d,parent,snap,state)
 	var tabs:=flow(parent);var iface:=str(state.get("interface","wan"));tabs.custom_minimum_size.y=58
 	for name in ["wan","lan"]:
 		var tab:=button(d,tabs,name.to_upper(),"FirewallTab_"+name,func():state["interface"]=name;render_again(d),RED)
 		var style:=UI.style(Color.TRANSPARENT,RED,18,12,0);style.set_border_width_all(0);style.border_width_bottom=4 if iface==name else 0;tab.add_theme_stylebox_override("normal",style)
 	var bar:=panel(parent,Color("414141"));bar.add_theme_constant_override("separation",0);label(d,bar,copy("rules"),15,Color.WHITE)
-	var scroll:=ScrollContainer.new();scroll.name="FirewallRuleTable";scroll.horizontal_scroll_mode=ScrollContainer.SCROLL_MODE_AUTO;scroll.vertical_scroll_mode=ScrollContainer.SCROLL_MODE_DISABLED;parent.add_child(scroll)
+	var compact:=compact_layout(d)
+	var scroll:=ScrollContainer.new();scroll.name="FirewallRuleTable";scroll.horizontal_scroll_mode=ScrollContainer.SCROLL_MODE_DISABLED if compact else ScrollContainer.SCROLL_MODE_AUTO;scroll.vertical_scroll_mode=ScrollContainer.SCROLL_MODE_DISABLED;parent.add_child(scroll)
 	var widths:=column_widths(d)
-	var table_width:=rule_table_width(widths)
+	var table_width:=0.0 if compact else rule_table_width(widths)
 	var table:=VBoxContainer.new();table.name="FirewallRuleColumns";table.size_flags_horizontal=Control.SIZE_EXPAND_FILL;table.custom_minimum_size.x=table_width;table.add_theme_constant_override("separation",0);scroll.add_child(table)
 	var head:=HBoxContainer.new();head.add_theme_constant_override("separation",8);head.custom_minimum_size=Vector2(table_width,34);table.add_child(head)
+	head.visible=not compact
 	for index in 8:
 		var key: String=["action","protocol","source","source_port","destination","destination_port","description",""][index]
 		var cell:=label(d,head,"" if index in [0,7] else copy(key),12,INK);cell.custom_minimum_size.x=float(widths[index]);cell.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART;cell.size_flags_horizontal=Control.SIZE_EXPAND_FILL if index==6 else Control.SIZE_FILL
 	var shown:=0
 	for raw in snap.get("rules",[]):
 		if str(raw.get("interface",""))!=iface:continue
-		shown+=1;rule_row(d,table,raw,false,state,widths)
+		shown+=1
+		var row_rule: Dictionary=raw.duplicate(true);row_rule["display_order"]=shown
+		row_rule["last_match"]=str(snap.get("last_trace",{}).get("rule_id",""))==str(raw.get("id",""))
+		rule_row(d,table,row_rule,compact,state,widths)
 	if shown==0:label(d,table,copy("no_rules"),14,MUTED)
 	var addbar:=HBoxContainer.new();addbar.add_theme_constant_override("separation",8);addbar.size_flags_horizontal=Control.SIZE_SHRINK_END;parent.add_child(addbar)
 	for entry in [["add_top","FirewallAddTop","top","↑"],["add_bottom","FirewallAddBottom","bottom","↓"]]:
@@ -165,24 +176,49 @@ static func rules(d,parent: VBoxContainer,snap: Dictionary,state: Dictionary) ->
 		var buttons:=flow(confirm);button(d,buttons,copy("delete"),"FirewallDeleteConfirm",func():action(d,"delete",{"id":str(state.get("delete_id",""))}),RED)
 		button(d,buttons,copy("cancel"),"FirewallDeleteCancel",func():state.erase("delete_id");render_again(d),MUTED)
 
-static func rule_row(d,parent: VBoxContainer,rule: Dictionary,_compact: bool,state: Dictionary,widths: Array) -> void:
-	var id:=str(rule.id);var wrapper:=PanelContainer.new();wrapper.name="FirewallRule_"+id;wrapper.size_flags_horizontal=Control.SIZE_EXPAND_FILL;wrapper.custom_minimum_size.x=rule_table_width(widths);wrapper.add_theme_stylebox_override("panel",UI.style(Color("f8f8f8"),LINE,0,1,0));parent.add_child(wrapper)
-	var row:=HBoxContainer.new();row.custom_minimum_size=Vector2(rule_table_width(widths),38);row.add_theme_constant_override("separation",8);wrapper.add_child(row)
+static func rule_row(d,parent: VBoxContainer,rule: Dictionary,compact: bool,state: Dictionary,widths: Array) -> void:
+	var id:=str(rule.id);var wrapper:=PanelContainer.new();wrapper.name="FirewallRule_"+id;wrapper.size_flags_horizontal=Control.SIZE_EXPAND_FILL;wrapper.custom_minimum_size.x=0 if compact else rule_table_width(widths);wrapper.add_theme_stylebox_override("panel",UI.style(Color("eef6fc") if bool(rule.get("last_match",false)) else Color("f8f8f8"),BLUE if bool(rule.get("last_match",false)) else LINE,10 if compact else 0,8 if compact else 1,2));parent.add_child(wrapper)
+	var row:=BoxContainer.new();row.vertical=compact;row.custom_minimum_size=Vector2(0 if compact else rule_table_width(widths),38);row.add_theme_constant_override("separation",8);wrapper.add_child(row)
 	var color:=MUTED if bool(rule.disabled) else GREEN if str(rule.action)=="pass" else RED
+	if compact:
+		var title:=label(d,row,str(rule.get("display_order",0))+". "+copy(str(rule.action))+"  "+str(rule.description)+("（無効）" if bool(rule.disabled) else ""),14,color);title.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART
+		var route:=label(d,row,address(str(rule.source))+":"+port(str(rule.source_port))+" → "+address(str(rule.destination))+":"+port(str(rule.destination_port))+"  "+protocol(str(rule.protocol)),13,INK);route.name="FirewallRoute_"+id;route.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART
 	var cells: Array=["✓" if str(rule.action)=="pass" else "×" if str(rule.action)=="block" else "−",protocol(str(rule.protocol)),address(str(rule.source)),port(str(rule.source_port)),address(str(rule.destination)),port(str(rule.destination_port)),str(rule.description)]
 	for index in cells.size():
+		if compact:break
 		var cell:=label(d,row,str(cells[index]),13,color if index==0 else MUTED if bool(rule.disabled) else INK)
 		cell.custom_minimum_size.x=float(widths[index]);cell.clip_text=index==6;cell.tooltip_text=copy(str(rule.action)) if index==0 else str(cells[index]);cell.size_flags_horizontal=Control.SIZE_EXPAND_FILL if index==6 else Control.SIZE_FILL
 		if index==6:cell.custom_minimum_size.x=120
 		if index==0:cell.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER;cell.add_theme_font_size_override("font_size",19)
-	var actions:=HBoxContainer.new();actions.add_theme_constant_override("separation",0);actions.custom_minimum_size.x=float(widths[7]);row.add_child(actions)
+	var actions:=HFlowContainer.new();actions.add_theme_constant_override("h_separation",4);actions.custom_minimum_size.x=0 if compact else float(widths[7]);row.add_child(actions)
 	for item in [["✎","Edit","edit"],["⧉","Clone","clone"],["○" if bool(rule.disabled) else "⊘","Toggle","enable" if bool(rule.disabled) else "disable"],["×","Delete","delete"],["↑","Up","move_up"],["↓","Down","move_down"]]:
-		var kind:=str(item[1]);var control:=button(d,actions,str(item[0]),"Firewall"+kind+"_"+id,func():
-			if kind=="Edit":open_editor(d,rule,"",str(rule.interface))
+		var kind:=str(item[1]);var control:=button(d,actions,copy(str(item[2])) if compact else str(item[0]),"Firewall"+kind+"_"+id,func():
+			if kind=="Edit":
+				var editable:=rule.duplicate(true);editable.erase("display_order");editable.erase("last_match");open_editor(d,editable,"",str(rule.interface))
 			elif kind=="Delete":state["delete_id"]=id;render_again(d)
 			elif kind in ["Up","Down"]:action(d,"move",{"id":id,"direction":kind.to_lower()})
 			else:action(d,kind.to_lower(),{"id":id})
-		);control.tooltip_text=copy(str(item[2]));control.custom_minimum_size.x=30;control.add_theme_font_size_override("font_size",18)
+		);control.tooltip_text=copy(str(item[2]));control.custom_minimum_size.x=30;control.add_theme_font_size_override("font_size",12 if compact else 18)
+
+static func _trace_context(d,parent: VBoxContainer,snap: Dictionary,state: Dictionary) -> void:
+	var body:=panel(parent,Color("f0f6fb"));body.name="FirewallRuleTrace"
+	var controls:=flow(body)
+	label(d,controls,"適用中のルールで通信を確認",14,INK)
+	button(d,controls,"通信条件を編集","FirewallTraceEdit",func():state["view"]="diagnostics";render_again(d))
+	var trace: Dictionary=snap.get("last_trace",{})
+	button(d,controls,"同じ通信を再検査" if not trace.is_empty() else "LAN の通信を検査","FirewallTraceReplay",func():
+		var payload: Dictionary={"interface":"lan","source":"192.168.10.10","destination":"192.0.2.20","protocol":"tcp","source_port":49152,"destination_port":443}
+		if not trace.is_empty():
+			for key in payload:payload[key]=trace.get(key,payload[key])
+		action(d,"trace",payload)
+	)
+	if trace.is_empty():
+		label(d,body,"LAN 192.168.10.10 → 192.0.2.20:443 / TCP",12,MUTED).autowrap_mode=TextServer.AUTOWRAP_WORD_SMART
+		return
+	var fresh:=str(state.get("trace_policy",""))==_trace_signature(d)
+	var caption:=label(d,body,("前回の実測" if fresh else "適用ルールが変わりました。再検査してください")+" / "+copy(str(trace.get("action","block"))),13,GREEN if str(trace.get("action",""))=="pass" else RED);caption.name="FirewallTraceContextStatus";caption.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART
+	evidence_chain(d,body,trace)
+	if bool(snap.get("pending",false)):label(d,body,"下の一覧には未適用の変更があります。通信検査は適用中のルールを使用します。",12,MUTED).autowrap_mode=TextServer.AUTOWRAP_WORD_SMART
 
 static func open_editor(d,rule: Dictionary,insert: String,iface: String) -> void:
 	var draft: Dictionary=rule.duplicate(true) if not rule.is_empty() else {"interface":iface,"action":"pass","protocol":"tcp","source":"any","source_port":"any","destination":"any","destination_port":"any","disabled":false,"log":true,"description":""}

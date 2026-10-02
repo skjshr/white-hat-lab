@@ -42,6 +42,23 @@ func _init() -> void:
 	if restart != null: restart.emit_signal("pressed")
 	await process_frame
 	_assert(game._vm().state.events.size() > before_events, "restart appends a real service event")
+	_assert(str(monitor.get("operation_feedback", "")) == "再起動完了", "restart feedback uses successful VM response")
+	var config_path: String = str(game.vm_info().config_path)
+	var saved_config: String = game.vm_read(config_path)
+	game.vm_write(config_path, "invalid configuration")
+	monitor.body.find_child("ServiceRestart", true, false).pressed.emit()
+	_assert(not bool(game._vm().state.active) and not bool(monitor.get("operation_ok", true)), "invalid configuration restart reports actual failure")
+	game.vm_write(config_path, saved_config)
+	monitor.body.find_child("ServiceRestart", true, false).pressed.emit()
+	_assert(bool(game._vm().state.active) and bool(monitor.get("operation_ok", false)), "corrected configuration can restart successfully")
+	var paths := [game.save_path, game.backup_path, game.previous_path, game.settings_path]
+	game.save_path = "user://missing-monitor-" + str(OS.get_process_id()) + "/save.json"
+	game.backup_path = game.save_path + ".bak"; game.previous_path = game.save_path + ".previous"; game.settings_path = game.save_path + ".settings"
+	monitor.body.find_child("ServiceRestart", true, false).pressed.emit()
+	_assert(bool(game._vm().state.active) and str(monitor.get("operation_feedback", "")).contains("保存できませんでした"), "save failure cannot be reported successful merely because rollback remains active")
+	game.save_path = paths[0]; game.backup_path = paths[1]; game.previous_path = paths[2]; game.settings_path = paths[3]
+	monitor.body.find_child("ServiceRestart", true, false).pressed.emit()
+	_assert(bool(monitor.get("operation_ok", false)), "restart succeeds after storage is restored")
 	pc._show_app("monitor")
 	await process_frame
 	var log_tab: Button = _find_button(pc.widgets.monitor.body, "ログ")

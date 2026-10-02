@@ -60,10 +60,11 @@ static func _shift_label(spec: Variant) -> String:
 	return str(spec.get("label", "")) if spec is Dictionary else str(spec.label)
 
 static func _chosen_shift(record: Dictionary) -> String:
-	var chosen := str(record.get("pending_shift", record.get("shift", "day")))
-	return "day" if chosen.is_empty() else chosen
+	var pending := str(record.get("pending_shift", ""))
+	return str(record.get("shift", "day")) if pending.is_empty() else pending
 
 static func _select_shift(control: OptionButton, shifts: Array, chosen: String) -> void:
+	control.clear()
 	var index := 0
 	for spec in shifts:
 		control.add_item(_shift_label(spec))
@@ -111,6 +112,7 @@ static func build(ui) -> void:
 	if int(summary.arrears) > 0:
 		var pay := _button(ui, summary_row, _copy("staffing_pay_arrears"), func():
 			if g.pay_staff_arrears(): ui.open_panel("staffing")
+			else: ui._management_feedback(_copy("staffing_save_failed"))
 		, "PayrollArrears", "secondary")
 		pay.disabled = int(g.state.cash) <= 0
 		if pay.disabled: pay.tooltip_text = _copy("staffing_funds")
@@ -172,9 +174,13 @@ static func _active_detail(ui, parent: Node, g, member_id: String) -> void:
 	var shifts := _shift_catalog(g); _select_shift(shift, shifts, _chosen_shift(record))
 	shift.item_selected.connect(func(_index: int):
 		if g.set_staff_shift(member_id, _shift_for_control(shift, shifts)): ui.open_panel("staffing")
+		else:
+			_select_shift(shift, shifts, _chosen_shift(g.state.staff.get(member_id, {})))
+			ui._management_feedback(_copy("staffing_save_failed"))
 	)
 	var release := _button(ui, shift_row, _copy("staffing_release"), func():
 		if g.release_staff(member_id): ui.open_panel("staffing")
+		else: ui._management_feedback(_copy("staffing_save_failed"))
 	, "Release_" + member_id, "secondary")
 	var queued: bool = g._dispatch_has_queued(member_id) if g.has_method("_dispatch_has_queued") else false
 	release.disabled = queued or str(g.state.assignments.get(member_id, {}).get("status", "")) == "working"
@@ -194,6 +200,9 @@ static func _candidate_detail(ui, parent: Node, g, candidate_id: String) -> void
 	var hire := _button(ui, shift_row, _copy("staffing_hire"), func():
 		if g.hire_staff(candidate_id, _shift_for_control(shift, shifts)):
 			ui.set_meta("staff_view", "active"); ui.set_meta("staff_selected_id", candidate_id); ui.open_panel("staffing")
+		else:
+			var reason := str(g.staff_hire_reason(candidate_id, _shift_for_control(shift, shifts)))
+			ui._management_feedback(reason if not reason.is_empty() else _copy("staffing_save_failed"))
 	, "Hire_" + candidate_id, "primary")
 	var terms := _label(ui, "", 14, M.INK); terms.name = "StaffTerms"; terms.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; parent.add_child(terms)
 	var reason := _label(ui, "", 13, M.DANGER); reason.name = "StaffHireReason"; reason.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; parent.add_child(reason)

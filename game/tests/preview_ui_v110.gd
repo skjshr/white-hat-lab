@@ -167,24 +167,55 @@ func run_review111() -> void:
 	# this unlock fixture as player-progression acceptance.
 	game.state.credit=1000; game.state.peak_profit=100000; game.state.skills.advisory=3; game._make_offers()
 	game.set_contract_plan("standard")
+	var portal_selected := false
 	for offer in game.state.offers:
-		if offer.case_id == "service-5-case-0": game.choose_contract(str(offer.id)); break
+		if offer.case_id == "service-5-case-0":
+			# A screenshot fixture is independent of today's rotating lead set.
+			offer.market_available = true
+			portal_selected = game.choose_contract(str(offer.id))
+			break
+	if not portal_selected: push_error("Review fixture could not open the portal case"); quit(2); return
 	office.ui.open_panel("terminal"); desktop=office.ui.desktop
 	desktop._run_command("ssh client")
-	game.vm_write(game.vm_info().config_path,"staff=write\npartner=read\npublic=none\nexpires=7d\nmfa=on\ntls=on\naudit=on\n")
+	game.vm_write(game.vm_info().config_path,game._vm().configuration_text({"staff":"write","partner":"read","public":"none","expires":"7d","mfa":"on","tls":"on","audit":"on"}))
 	game.vm_run("systemctl restart portal")
 	desktop._show_app("browser")
 	desktop._browse_url("https://portal.client.test/partner?link=current",true)
 	await capture("portal-anonymous")
-	desktop.widgets.browser.account.select(1); desktop.widgets.browser.account.item_selected.emit(1)
+	if not await preview_portal_access(desktop, 1): quit(2); return
 	await capture("portal-mfa")
-	desktop.widgets.browser.account.select(2); desktop.widgets.browser.account.item_selected.emit(2)
+	if not await preview_portal_access(desktop, 2): quit(2); return
 	await capture("portal-allowed")
-	desktop.widgets.browser.link.select(1); desktop.widgets.browser.link.item_selected.emit(1)
+	if not await preview_portal_access(desktop, 2, 1): quit(2); return
 	await capture("portal-expired")
 	desktop._open_config(); desktop.EDITOR.show_find(desktop,true)
 	desktop.widgets.editor.find_input.text="partner"; desktop.widgets.editor.find_input.text_changed.emit("partner")
 	await capture("editor-find")
+
+func preview_portal_access(desktop, identity_index: int, age_index := 0) -> bool:
+	# Current portals own these controls inside the page; legacy saves keep
+	# the older browser toolbar. Exercise whichever surface is actually shown.
+	if desktop._portal_v2():
+		var identity: OptionButton = desktop.widgets.browser.page.find_child("PortalIdentity", true, false)
+		if not is_instance_valid(identity): push_error("PortalIdentity unavailable"); return false
+		identity.select(identity_index); identity.item_selected.emit(identity_index)
+		await frames(2)
+		var age: OptionButton = desktop.widgets.browser.page.find_child("PortalAge", true, false)
+		if not is_instance_valid(age): push_error("PortalAge unavailable"); return false
+		age.select(age_index); age.item_selected.emit(age_index)
+		await frames(2)
+		var read: Button = desktop.widgets.browser.page.find_child("PortalRead", true, false)
+		if not is_instance_valid(read): push_error("PortalRead unavailable"); return false
+		read.pressed.emit()
+	else:
+		if not desktop.widgets.browser.has("account") or not desktop.widgets.browser.has("link"):
+			push_error("Legacy portal access controls unavailable"); return false
+		desktop.widgets.browser.account.select(identity_index)
+		desktop.widgets.browser.account.item_selected.emit(identity_index)
+		desktop.widgets.browser.link.select(age_index)
+		desktop.widgets.browser.link.item_selected.emit(age_index)
+	await frames(3)
+	return true
 
 func run_market112() -> void:
 	game.start_free_career()

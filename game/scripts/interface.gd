@@ -606,6 +606,11 @@ func open_panel(kind: String) -> void:
 		desktop.company_requested.connect(func(): open_panel("company"))
 		desktop.staffing_requested.connect(func(): open_panel("staffing"))
 		desktop.contracts_requested.connect(func(): open_panel("board"))
+		desktop.next_task_requested.connect(next_task_guide.locate_task)
+		desktop.sales_requested.connect(func():
+			board_selected_id = ""
+			sales_view = "inquiries"
+			open_panel("sales"))
 		desktop.equipment_requested.connect(func(): open_panel("shop"))
 		return
 	if controls.menu.visible: controls.menu.modulate.a = 0.0
@@ -657,6 +662,7 @@ func open_panel(kind: String) -> void:
 			var options_content := PanelContainer.new(); options_content.size_flags_vertical=Control.SIZE_EXPAND_FILL; options_content.add_theme_stylebox_override("panel",GAME_THEME.surface(GAME_THEME.CANVAS,GAME_THEME.LINE,5,12)); layout.add_child(options_content)
 			var options_layout := VBoxContainer.new(); options_layout.add_theme_constant_override("separation",8); options_content.add_child(options_layout); content_host=options_layout
 		modal_scroll = ScrollContainer.new(); modal_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED; modal_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL; content_host.add_child(modal_scroll)
+		modal_scroll.follow_focus = true
 		modal_body = VBoxContainer.new(); modal_body.add_theme_constant_override("separation", 14); modal_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL; modal_scroll.add_child(modal_body)
 		if kind == "sales":
 			# Keep the quote and sales reading column legible on wide displays while
@@ -785,7 +791,25 @@ func _refresh_operations() -> void:
 		if node is ScrollContainer:node.set_deferred("scroll_vertical",int(positions[id]))
 
 func _operations_feedback(message: String) -> void:
-	var feedback:=_label(message,14,WARNING);modal_body.add_child(feedback)
+	_management_feedback(message)
+
+func _management_feedback(message: String) -> void:
+	# Keep an action failure beside the persistent actions, including when the
+	# reading area is scrolled. Replace the previous message on repeated clicks.
+	if not is_instance_valid(modal): return
+	var feedback = modal.find_child("ManagementActionFeedback", true, false)
+	if not feedback is Label:
+		feedback = _label("", maxi(13, roundi(14 * text_scale)), WARNING)
+		feedback.name = "ManagementActionFeedback"
+		feedback.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		var footer = modal.find_child("ManagementFooter", true, false)
+		if footer is Control:
+			var host = footer.get_parent()
+			host.add_child(feedback)
+			host.move_child(feedback, footer.get_index())
+		else: modal_body.add_child(feedback)
+	feedback.text = message
+	feedback.visible = not message.is_empty()
 
 func _operations_open(id: String, target_index: int, app: String = "") -> void:
 	var g:=_game()
@@ -996,7 +1020,8 @@ func _contract_detail(offer: Dictionary) -> void:
 	var save_draft:=_button(UI.copy("board_save_draft"),func():
 		price.apply()
 		if g.set_offer_quote(str(offer.id),roundi(price.value)):
-			sales_quote_drafts.erase(str(offer.id)); board_selected_id="";sales_view="inquiries";open_panel("sales"))
+			sales_quote_drafts.erase(str(offer.id)); board_selected_id="";sales_view="inquiries";open_panel("sales")
+		else: _management_feedback("見積を保存できませんでした。入力を残しています。受注状況と保存先を確認して再試行してください。"))
 	save_draft.name="SaveQuoteDraft";save_draft.disabled=not offer.unlocked or not bool(offer.get("market_available",true));actions.add_child(save_draft)
 	var accept:=_button(UI.copy("board_send_quote"),func(): price.apply(); _submit_quote(str(offer.id),roundi(price.value))); accept.name="AcceptContract"; accept.disabled=not offer.unlocked or not bool(offer.get("market_available",true)) or not care_reason.is_empty(); actions.add_child(accept); M.button(accept,"primary")
 	var existing_contract := false
@@ -1170,7 +1195,9 @@ func _submit_quote(id: String, amount: int) -> void:
 			if not failed.is_empty() and is_instance_valid(status_label): status_label.text = failed
 			return
 	var quote_ok: bool = bool(g.set_offer_quote(id,amount))
-	if not quote_ok: return
+	if not quote_ok:
+		_management_feedback("見積を送信できませんでした。入力を残しています。受注済み・受付終了の案件でないか確認し、再試行してください。")
+		return
 	sales_quote_drafts.erase(id)
 	if g.choose_contract(id):
 		board_selected_id = ""
@@ -1350,9 +1377,9 @@ func _company_care(g) -> void:
 				if not progress_template.is_empty():
 					var progress_label := _label(progress_template % [int(float(maintenance.get("total", 0)) - float(maintenance.get("remaining", 0))), int(maintenance.get("total", 0))], 12, MUTED); progress_label.custom_minimum_size.x = 72; care_row.add_child(progress_label)
 					_maintenance_progress_labels[client_name] = progress_label
-			var result := _button(UI.copy("care_result", ""), Callable(self, "_show_maintenance_result").bind(client_name)); result.disabled = care_status not in ["done", "failed"]; care_row.add_child(result)
+			var result := _button(UI.copy("care_result", ""), Callable(self, "_show_maintenance_result").bind(client_name)); result.name = "CareResult_" + client_name.sha256_text().left(10); result.disabled = care_status not in ["done", "failed"]; care_row.add_child(result)
 			var self_check_text := UI.copy("care_incident_reinspect", "") if incident_status == "recheck" else UI.copy("care_self_check", "")
-			var self_check := _button(self_check_text, Callable(self, "_run_maintenance").bind(client_name)); self_check.disabled = not g.has_method("can_run_maintenance") or not g.can_run_maintenance(client_name); care_row.add_child(self_check)
+			var self_check := _button(self_check_text, Callable(self, "_run_maintenance").bind(client_name)); self_check.name = "CareSelfCheck_" + client_name.sha256_text().left(10); self_check.disabled = not g.has_method("can_run_maintenance") or not g.can_run_maintenance(client_name); care_row.add_child(self_check)
 			if incident_status in ["detected", "working"] and g.has_method("open_maintenance_incident"):
 				var incident_button := _button(UI.copy("care_incident_open", ""), Callable(self, "_open_maintenance_incident").bind(client_name)); incident_button.name = "CareIncident_"+client_name.sha256_text().left(10)
 				var incident_reason := str(g.maintenance_incident_reason(client_name)) if g.has_method("maintenance_incident_reason") else ""
@@ -1425,6 +1452,7 @@ func _operating_attention_row(host: VBoxContainer, title: String, count: int, ac
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(label)
 	var button := _button(UI.copy("business_details", "開く"), action)
+	if action.get_method() == "_open_company_billing": button.name = "CompanyBilling"
 	button.custom_minimum_size.x = 70
 	M.button(button, "primary" if host.get_child_count() == 2 else "quiet")
 	row.add_child(button)
@@ -1488,7 +1516,13 @@ func _show_delivery_help() -> void:
 
 
 func _buy(id: String) -> void:
-	var g := _game(); if g != null and g.buy_equipment(id): open_panel("shop")
+	var g := _game()
+	if g == null: return
+	if g.buy_equipment(id): open_panel("shop")
+	else:
+		var reason := str(g.equipment_unavailable_reason(id))
+		if reason.is_empty() and int(g.state.cash) < int(g.equipment_price(id)): reason = "購入資金が不足しています。"
+		_management_feedback(reason if not reason.is_empty() else "発注を保存できませんでした。残高と注文を確認して再試行してください。")
 
 func _door() -> void:
 	var g := _game(); if g == null: return

@@ -51,20 +51,21 @@ func _new_game(case_id: String) -> Node:
 	check(g.choose_contract(selected), case_id + " accept")
 	return g
 
-func _step(g: Node, step: Array, case_id: String) -> void:
+func _step(g: Node, step: Array, case_id: String) -> Dictionary:
 	var action := str(step[0])
 	var args: Dictionary = {}
-	if step.size() > 1 and not str(step[1]).is_empty(): args.target = str(step[1])
+	if step.size()>1 and step[1] is Dictionary: args=step[1].duplicate(true)
+	elif step.size() > 1 and not str(step[1]).is_empty(): args.target = str(step[1])
 	if action == "set_source" and step.size() > 2 and not str(step[2]).is_empty(): args.enabled = str(step[2]) in ["on", "true", "enabled"]
 	elif step.size() > 2 and not str(step[2]).is_empty(): args.option = str(step[2])
 	var result: Dictionary = g.advanced_action(action, args)
 	check(bool(result.get("changed", false)), case_id + " action " + action)
+	return result
 
 func _steps(case_id: String) -> Array:
 	match case_id:
-		"advanced-hunt": return [["correlate_gateway"],["correlate_workstation"],["correlate_fileserver"],["pin_event","evt-05"],["pin_event","evt-06"],["isolate_host","gw01"],["probe_business"],["reconnect_host","gw01"],["probe_security"],["isolate_host","ws17"],["revoke_session","sid-r44"],["disable_task","task-sync"],["probe_security"],["reconnect_host","ws17"],["probe_security"],["probe_business"]]
-		"advanced-pentest": return [["discover_assets"],["inspect_permissions"],["connect_target","share01"],["read_credential","share01"],["authenticate_service","svc-report"],["read_proof","evidence/proof.csv"],["modify_grant","share01"],["retest_path","evidence/proof.csv"]]
-		"advanced-recovery": return [["compare_snapshots","snap-1410"],["stage_restore"],["scan_stage"],["isolate_network"],["compare_snapshots","snap-0730"],["stage_restore"],["scan_stage"],["repair_identity"],["remove_persistence"],["scan_stage"],["restore_business"],["reconnect_business"]]
+		"advanced-hunt": return [["correlate",{"event_ids":["evt-00","evt-01"]}],["correlate",{"event_ids":["evt-04","evt-05","evt-06"]}],["pin_event","evt-05"],["pin_event","evt-06"],["pin_event","CHG-114"],["isolate_host","gw01"],["probe_business"],["reconnect_host","gw01"],["probe_security"],["isolate_host","ws17"],["revoke_session","sid-r44"],["disable_task","task-sync"],["probe_security"],["reconnect_host","ws17"],["probe_security"],["probe_business"]]
+		"advanced-recovery": return [["inspect_snapshot","snap-1410"],["stage_restore"],["scan_stage"],["isolate_network"],["inspect_snapshot","snap-0730"],["stage_restore"],["scan_stage"],["rotate_identity",{"account":"restore-operator"}],["revoke_session","sid-sync-17"],["start_service","identity"],["start_service","database"],["start_service","app"],["probe_business"],["restore_business"],["reconnect_business"]]
 		# Pin the actual audit record for the affected grant; app-72 is only
 		# the control target and is not an evidence record ID.
 		"advanced-cloud": return [["disable_grant","app-72"],["revoke_app_session","app-72"],["probe_request","app-19"],["probe_request","app-72"],["pin","audit-2"],["verify"]]
@@ -78,7 +79,11 @@ func _run_case(case_id: String) -> void:
 	var g := _new_game(case_id)
 	check(int(g.mission().estimated_workload) >= 240, case_id + " workload shown")
 	check(int(g.state.contract.estimated_budget) == int(CaseCatalog.by_id(case_id).advanced_work_minutes), case_id + " scoped deadline budget")
-	for step in _steps(case_id): _step(g, step, case_id)
+	check(not g.verify().all(func(row): return bool(row.get("passed",false))),case_id+" unobserved state fails verification")
+	check(not g.can_deliver(),case_id+" unobserved state cannot deliver")
+	if case_id=="advanced-pentest": _network_steps(g,case_id)
+	else:
+		for step in _steps(case_id): _step(g, step, case_id)
 	var verified: Array = g.verify()
 	check(verified.all(func(row: Dictionary): return bool(row.get("passed", false))), case_id + " verify")
 	if case_id == "advanced-hunt": _transaction_edges(g, case_id)
@@ -91,7 +96,7 @@ func _transaction_edges(g: Node, case_id: String) -> void:
 	var before_revision := int(g.state.revision)
 	var good_path: String = str(g.save_path)
 	g.save_path = "user://missing-advanced-save-dir-%s/contract.json" % str(OS.get_process_id())
-	var failed: Dictionary = g.advanced_action("correlate_gateway")
+	var failed: Dictionary = g.advanced_action("probe_security")
 	check(not bool(failed.get("ok", false)), case_id + " failed save rejected")
 	check(g.state.advanced == before_advanced and int(g.state.revision) == before_revision, case_id + " failed save rollback")
 	g.save_path = good_path
@@ -117,6 +122,19 @@ func _transaction_edges(g: Node, case_id: String) -> void:
 	resumed.settings_path = g.settings_path
 	check(resumed.load_game(), case_id + " reload")
 	check(str(resumed.state.contract.get("case_id", "")) == case_id and not resumed.state.advanced.is_empty(), case_id + " advanced state reload")
+
+func _network_steps(g: Node,case_id: String) -> void:
+	_step(g,["browse",{"path":"share01"}],case_id)
+	var leak: Dictionary=_step(g,["read",{"path":"share01/deploy.env"}],case_id).data.record
+	var token: String=str(leak.data.bytes).split("TOKEN=")[1].strip_edges()
+	_step(g,["authenticate",{"username":"svc-report","credential":token}],case_id)
+	var proof: Dictionary=_step(g,["read",{"path":"evidence/proof.csv"}],case_id).data.record
+	_step(g,["submit_finding",{"evidence_ids":[leak.id,proof.id]}],case_id)
+	_step(g,["customer_fix"],case_id); _step(g,["reset_session"],case_id)
+	var denied: Dictionary=_step(g,["read",{"path":"share01/deploy.env"}],case_id)
+	check(int(denied.data.record.status)==403,case_id+" same employee operation denied")
+	var normal: Dictionary=_step(g,["read",{"path":"share01/daily.csv"}],case_id)
+	check(int(normal.data.record.status)==200,case_id+" normal employee work retained")
 
 func run() -> void:
 	check("--qa-profile=advanced-contracts" in OS.get_cmdline_user_args(), "QA profile guard")

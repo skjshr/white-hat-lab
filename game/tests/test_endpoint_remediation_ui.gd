@@ -112,7 +112,8 @@ func run() -> void:
 	var failed_output: Dictionary = pc.edr_ui.get("output",{})
 	check(int(failed_output.get("code",0))==507, "quarantine save failure code"); check(JSON.stringify(game._vm().export_state(),"",true)==before_state, "quarantine save failure rollback")
 	game.save_path=old_save; game.backup_path=old_backup; game.previous_path=old_previous; game.settings_path=old_settings
-	for close_button in pc.notification.find_children("*","Button",true,false): close_button.pressed.emit()
+	# Desktop notifications are a status label; Node.notification is a method.
+	if is_instance_valid(pc.status): pc.status.hide()
 	press_id("EdrQuarantine_pc_a-sync", "quarantine malicious sync-agent"); await frames(6)
 	press_id("RecoveryBackFiles"); await frames(4)
 	var file_search = control("EdrRecoveryFileSearch")

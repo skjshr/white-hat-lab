@@ -210,6 +210,7 @@ static func render(d, parent: VBoxContainer) -> void:
 		select.icon=_tree_icon(false);select.custom_minimum_size.y = 42;select.alignment = HORIZONTAL_ALIGNMENT_LEFT;select.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		label(d, snapshot_row, "; ".join(PackedStringArray(snapshot.get("paths", []))), 12, MUTED)
 		label(d,snapshot_row,UI.copy("fidelity_file_count")+" "+str(snapshot.get("files",{}).size())+"    "+str(bytes)+" B",12,MUTED)
+		label(d,snapshot_row,"保存順 " + str(shown) + " / " + str(snapshot.get("repository", "")),12,MUTED)
 		if id == str(s.get("snapshot", "")):
 			chosen = snapshot;select.add_theme_stylebox_override("normal", UI.style(Color("242629"), LINE, 10, 7, 3))
 	if shown == 0:label(d, inventory, copy("no_snapshots", "No snapshots"), 13, MUTED)
@@ -342,8 +343,31 @@ static func _snapshot(d, parent: Node, s: Dictionary, snapshot: Dictionary, repo
 	if not str(s.get("path", "")).is_empty():
 		var path_row := HBoxContainer.new();path_row.add_theme_constant_override("separation", 8);parent.add_child(path_row);label(d, path_row, str(s.path), 12, MUTED)
 		button(d, path_row, copy("restore_to_path", "Restore selected"), "BackupRestoreToPath", func():s["restore_scope"] = "selected";s["restore_open"] = true;s.erase("restore_plan");rerender(d))
-		if str(s.get("preview", "")).is_empty() == false:
-			var preview := TextEdit.new();preview.name = "BackupPreview";preview.editable = false;preview.text = str(s.get("preview", ""));preview.custom_minimum_size.y = 115;preview.add_theme_font_override("font", d.mono);_dark_input(preview);parent.add_child(preview)
+		var relative := str(s.path).trim_prefix(source.trim_suffix("/") + "/")
+		if snapshot.get("files", {}).has(relative): _compare_contents(d, parent, s, snapshot, source, relative)
+
+static func _compare_contents(d, parent: Node, s: Dictionary, snapshot: Dictionary, source: String, relative: String) -> void:
+	var card := box(parent, Color("14191d"), 10); card.name = "BackupContentComparison"
+	var live: Dictionary = d.game._vm().state
+	var controls := HFlowContainer.new(); controls.add_theme_constant_override("h_separation", 8); card.add_child(controls)
+	label(d, controls, "内容を比較", 15)
+	button(d, controls, "稼働中のファイル", "BackupCompareLive", func(): s["compare_target"] = "live"; rerender(d))
+	var last: Dictionary = live.get("last_restore", {})
+	var restored := str(last.get("snapshot", "")) == str(snapshot.get("id", "")) and not last.is_empty()
+	if restored: button(d, controls, "復元先のファイル", "BackupCompareRestored", func(): s["compare_target"] = "restored"; rerender(d))
+	var destination := source.path_join(relative)
+	if restored and str(s.get("compare_target", "live")) == "restored": destination = str(last.get("target", "/restore")).path_join(source.trim_prefix("/")).path_join(relative)
+	var saved := str(snapshot.files[relative])
+	var exists: bool = live.get("fs", {}).has(destination)
+	var current := str(live.get("fs", {}).get(destination, ""))
+	var status := "内容が一致" if exists and current == saved else "内容が異なります" if exists else "比較先にファイルがありません"
+	var outcome := label(d, card, status + "  /  " + destination, 12, GREEN if exists and current == saved else Color("efc45d")); outcome.name = "BackupComparisonStatus"; outcome.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; outcome.clip_text = false; outcome.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING; outcome.custom_minimum_size.y = 24
+	var panes := BoxContainer.new(); panes.vertical = float(d.windows.browser.size.x) / maxf(1.0, float(d.game.settings.get("text_scale", 1.0))) < 1100; panes.add_theme_constant_override("separation", 8); card.add_child(panes)
+	for entry in [["保存 " + str(snapshot.get("id", "")), saved, "BackupPreview"], ["現在 " + destination, current if exists else "（ファイルなし）", "BackupCurrentPreview"]]:
+		var column := VBoxContainer.new(); column.size_flags_horizontal = Control.SIZE_EXPAND_FILL; panes.add_child(column)
+		var bytes := str(str(entry[1]).to_utf8_buffer().size()) + " B" if str(entry[2]) == "BackupPreview" or exists else "未作成"
+		var heading := label(d, column, str(entry[0]) + "  " + bytes, 12, MUTED); heading.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; heading.clip_text = false; heading.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING; heading.custom_minimum_size.y = 24
+		var preview := TextEdit.new(); preview.name = str(entry[2]); preview.editable = false; preview.text = str(entry[1]); preview.custom_minimum_size.y = 110; preview.add_theme_font_override("font", d.mono); _dark_input(preview); column.add_child(preview)
 
 static func _restore_form(d, parent: Node, s: Dictionary, snapshot: Dictionary, repo: String, _source: String) -> void:
 	var restore := box(parent, Color("17191c"));restore.name="BackupRestorePane"

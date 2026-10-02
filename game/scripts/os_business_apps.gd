@@ -329,7 +329,7 @@ static func refresh_mail(d) -> void:
 			_mail_row(d,list,str(history_mail.get("company",item.get("client",""))),str(history_mail.get("subject",item.get("title",""))),history_body,"DAY %02d" % int(item.get("day",0)),func(): w.history_index=filtered_index; w.reading=true; refresh_mail(d), filtered_index == int(w.get("history_index", -1)))
 	if not reading:
 		if list.get_child_count() == 1:
-			var empty: VBoxContainer=d._box(list,12); empty.add_child(d._icon("mail",80)); empty.add_child(d._label("メールなし" if query.is_empty() else "該当メールなし",14,MUTED))
+			var empty: VBoxContainer=d._box(list,12); empty.name = "MailNoResults"; empty.add_child(d._icon("mail",80)); empty.add_child(d._label("メールなし" if query.is_empty() else "該当メールなし",14,MUTED))
 		if wide:
 			var empty: VBoxContainer=d._box(body,16); empty.custom_minimum_size.y=220
 			var mark: TextureRect=d._icon("mail",72); mark.size_flags_horizontal=Control.SIZE_SHRINK_CENTER; empty.add_child(mark)
@@ -440,11 +440,16 @@ static func refresh_mail_status(d) -> void:
 static func build_team(d, parent: VBoxContainer) -> void:
 	var p = d._pad(parent); var row = d._row(p)
 	var title = d._label("チーム",24,_team_accent()); title.size_flags_horizontal = Control.SIZE_EXPAND_FILL; title.autowrap_mode = TextServer.AUTOWRAP_OFF; row.add_child(title)
+	var queue = d._button("業務一覧・時間配分", d._contracts); queue.name = "TeamOperations"; row.add_child(queue)
 	row.add_child(d._button(UI.copy("staffing_title"),d._staffing))
 	var refresh = d._button("更新",func(): refresh_team(d)); refresh.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN; row.add_child(refresh)
+	var context = d._label("", 14, MUTED); context.name = "TeamWorkContext"; context.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; p.add_child(context)
+	d.widgets.team.context = context
 	d.widgets.team.body = d._scroll(p); d.widgets.team.cards = []; d.widgets.team.cards_built = false
 static func refresh_team(d) -> void:
 	var w: Dictionary = d.widgets.team; var body: VBoxContainer = w.body; var g = d.game
+	if w.get("context") is Label:
+		w.context.text = "現在の案件: %s / %s\nここでは現在の対象への調査を依頼します。複数案件の順番と工数は業務一覧で調整します。" % [str(g.mission().get("client", "")), str(g.mission().get("title", ""))] if bool(g.state.get("accepted", false)) and not g.current_done() else "作業中の案件がありません。業務一覧から受注済み案件を開くと、担当者へ調査を依頼できます。"
 	var members: Array = g.team_members()
 	var signature := JSON.stringify(members)
 	if not bool(w.get("cards_built", false)) or str(w.get("member_signature", "")) != signature:
@@ -489,7 +494,12 @@ static func refresh_team(d) -> void:
 		elif state in ["done","failed"]: card.phase.text=str(job.get("phase","作業終了"))
 		else: card.phase.text=""
 		card.assign.disabled=not unavailable.is_empty() or (role!="maintenance" and (not g.state.accepted or g.current_done()))
-		card.assign.tooltip_text=unavailable
+		var assign_reason := unavailable
+		if role != "maintenance" and (not g.state.accepted or g.current_done()): assign_reason = "業務一覧から作業中の案件を開いてください。"
+		card.assign.tooltip_text=assign_reason
+		if card.assign.disabled and state != "working" and not assign_reason.is_empty():
+			card.phase.text = assign_reason
+			card.phase.visible = true
 		card.result.visible=not maintenance and role!="maintenance"; card.result.disabled=state!="done"
 		card.care_result.visible=maintenance; card.care_result.disabled=state not in ["done","failed"]
 		if maintenance: card.description.text=UI.copy("care_client_status") % str(job.get("client",""))
@@ -510,6 +520,80 @@ static func _show_maintenance_result(d, member_id: String) -> void:
 
 static func build_receipt(d, parent: VBoxContainer) -> void:
 	var p = d._pad(parent,22); d.widgets.receipt.body = d._scroll(p); d.widgets.receipt.footer = d._row(p)
+
+static func delivery_measurement_counts(probes: Array) -> Dictionary:
+	var counts := {"unrecorded":0, "stale":0, "failed":0, "passed":0}
+	for probe in probes:
+		var status := "unrecorded" if not bool(probe.get("recorded", false)) else "stale" if not bool(probe.get("fresh", false)) else "passed" if bool(probe.get("passed", false)) else "failed"
+		counts[status] += 1
+	return counts
+
+static func _measurement_summary(counts: Dictionary) -> String:
+	var parts: Array[String] = []
+	for item in [["unrecorded", "未確認"], ["stale", "過去の結果"], ["failed", "不合格"], ["passed", "合格"]]:
+		if int(counts[item[0]]) > 0: parts.append("%s %d件" % [item[1], int(counts[item[0]])])
+	return " / ".join(parts)
+
+static func delivery_blockers(g) -> Array:
+	var s: Dictionary = g.state
+	var out: Array = []
+	if g.current_done() or g.can_deliver(): return out
+	if not bool(s.get("accepted", false)):
+		return [{"id":"accept", "message":UI.copy("delivery_blocked_accept"), "action":UI.copy("delivery_open_mail"), "route":"mail", "target_index":-1}]
+	var contract_id := str(s.get("current_contract_id", ""))
+	var queued := false
+	for queue in s.get("dispatch_queues", {}).values():
+		for job in queue:
+			if str(job.get("kind", "normal")) == "normal" and str(job.get("contract_id", "")) == contract_id: queued = true
+	if queued: out.append({"id":"queue", "message":UI.copy("delivery_blocked_queue"), "action":UI.copy("delivery_open_queue"), "route":"board", "target_index":-1})
+	for job in g._assignments.values():
+		if str(job.get("kind", "normal")) == "normal" and str(job.get("status", "")) == "working" and str(job.get("contract_id", "")) == contract_id:
+			out.append({"id":"working", "message":UI.copy("delivery_blocked_working"), "action":UI.copy("delivery_open_team"), "route":"team", "target_index":-1})
+			break
+	var targets: Array = s.get("targets", [])
+	for index in maxi(1, targets.size()):
+		var current := index == int(s.get("target_index", 0))
+		var target: Dictionary = targets[index] if index < targets.size() else {}
+		var projection: Dictionary = s if current else target
+		var name := str(target.get("name", ""))
+		if name.is_empty(): name = str(g.mission().get("title", "対象"))
+		var checks: Array = projection.get("checks", [])
+		var message := ""
+		var kind := "verify"
+		var route := "verify"
+		var counts := delivery_measurement_counts(g.diagnostic_probes()) if current and bool(s.get("diagnostics_required", false)) and not g.advanced_active() else {}
+		if not bool(projection.get("inspected", false)):
+			message = UI.copy("delivery_blocked_inspect") % name
+		elif not counts.is_empty() and int(counts.unrecorded) + int(counts.stale) + int(counts.failed) > 0:
+			message = name + "：" + _measurement_summary(counts) + "。診断ラボで未確認・過去の結果を測定し、不合格の原因を確認してください。"
+		elif int(projection.get("validated_revision", -1)) != int(projection.get("revision", 0)) or checks.is_empty():
+			message = UI.copy("delivery_blocked_verify") % name
+		else:
+			var failed: Array = checks.filter(func(row): return not bool(row.get("passed", false)))
+			var non_hardware: Array = failed.filter(func(row): return not bool(row.get("hardware", false)))
+			if not failed.is_empty() and non_hardware.is_empty():
+				message = UI.copy("delivery_blocked_hardware") % name; kind = "hardware"; route = "office"
+			elif not failed.is_empty(): message = UI.copy("delivery_blocked_failed") % [name, failed.size()]
+			elif g._vm_checks(index).any(func(row): return not bool(row.get("passed", false))):
+				message = UI.copy("delivery_blocked_changed") % name
+		if not message.is_empty(): out.append({"id":kind+"-"+str(index), "message":message, "action":UI.copy("delivery_open_office") if route == "office" else UI.copy("delivery_open_checks") % name, "route":route, "target_index":index})
+	if out.is_empty(): out.append({"id":"refresh", "message":UI.copy("delivery_blocked_other"), "action":UI.copy("delivery_open_checks") % str(g.mission().get("title", "対象")), "route":"verify", "target_index":-1})
+	return out
+
+static func _open_delivery_blocker(d, blocker: Dictionary) -> void:
+	var index := int(blocker.get("target_index", -1))
+	if index >= 0 and index != int(d.game.state.get("target_index", 0)):
+		if not d._select_target(index): return
+	var route := str(blocker.get("route", "verify"))
+	if route == "board": d._contracts()
+	elif route == "office": d._close()
+	else: d._show_app(route)
+
+static func _verify_receipt(d) -> void:
+	var results: Array = d.game.verify()
+	if results.is_empty(): d._notify(UI.copy("delivery_verify_failed"))
+	refresh_receipt(d)
+
 static func refresh_receipt(d) -> void:
 	var body = d.widgets.receipt.body; var footer = d.widgets.receipt.footer; d._clear(body); d._clear(footer); var g = d.game
 	if not g.current_done():
@@ -517,10 +601,22 @@ static func refresh_receipt(d) -> void:
 		body.add_child(d._label("納品前確認",27)); body.add_child(d._label(g.mission().title,17))
 		var work: Dictionary = g.work_status()
 		body.add_child(d._label("作業時間 %d / %d 分  ·  報酬 ¥%s  ·  経費 ¥%s" % [work.minutes,work.budget,d._money(work.estimated_fee),d._money(work.costs)],14,MUTED))
+		var blockers := delivery_blockers(g)
+		if not blockers.is_empty():
+			var blocked: VBoxContainer = d._box(body, 7); blocked.name = "ReceiptBlockers"
+			blocked.add_child(d._label(UI.copy("delivery_blocked_title"),17,ORANGE))
+			for blocker in blockers:
+				blocked.add_child(d._label(str(blocker.message),14,INK))
+				var action: Button = d._button(str(blocker.action),_open_delivery_blocker.bind(d,blocker))
+				action.name = "ReceiptResolve_"+str(blocker.id); action.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; action.custom_minimum_size.y = 36
+				blocked.add_child(action)
 		if g.state.checks.is_empty():
 			body.add_child(d._label("未検証",15,MUTED))
 		else:
 			var passed := 0
+			var measured_by_id := {}
+			if bool(g.state.get("diagnostics_required", false)) and not g.advanced_active():
+				for probe in g.diagnostic_probes(): measured_by_id[str(probe.get("id", ""))] = probe
 			for item in g.state.checks:
 				if bool(item.passed): passed += 1
 			var stale: bool = int(g.state.get("validated_revision", -1)) != int(g.state.get("revision", 0))
@@ -532,15 +628,23 @@ static func refresh_receipt(d) -> void:
 			if passed == 0: body.add_child(d._label(summary,15,ORANGE))
 			details.name = "DeliveryCheckDetails"
 			for item in g.state.checks:
+				if bool(item.get("probe", false)) and measured_by_id.has(str(item.get("id", ""))):
+					var probe: Dictionary = measured_by_id[str(item.id)]
+					if not bool(probe.get("recorded", false)):
+						body.add_child(d._label("未確認  " + str(item.label),15,MUTED)); continue
+					if not bool(probe.get("fresh", false)):
+						body.add_child(d._label("過去の結果・再測定  " + str(item.label),15,ORANGE)); continue
 				if bool(item.passed): details.add_child(d._label("✓  "+str(item.label),15,MUTED if stale else TEAL))
 				else: body.add_child(d._label("×  "+str(item.label),15,ORANGE))
 		if bool(g.case_review().get("available", false)):
 			var baseline: VBoxContainer = d._disclosure(body, "変更前の記録")
+			baseline.name = "ReceiptBaselineSection"
 			_add_case_review(d, baseline, footer, true)
-		footer.add_child(d._button("設定編集",d._open_config)); footer.add_child(d._button("再判定",func():
-			if g.has_method("verify"): g.verify()
-			refresh_receipt(d)
-		)); footer.add_child(d._button("診断ラボ表示",d._show_app.bind("verify")))
+		if g.advanced_active():
+			var back: Button = d._button(UI.copy("delivery_return_to_work"),d._show_app.bind("advanced")); back.name = "ReceiptReturnToWork"; footer.add_child(back)
+		else:
+			footer.add_child(d._button("設定編集",d._open_config)); footer.add_child(d._button("診断ラボ表示",d._show_app.bind("verify")))
+		footer.add_child(d._button("再判定",_verify_receipt.bind(d)))
 		var spacer := Control.new(); spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL; footer.add_child(spacer)
 		var report = d._primary("納品・精算",d._report); report.name="GuideDeliver"; report.disabled = not g.can_deliver(); footer.add_child(report); return
 	var receipt: Dictionary = g.completion_receipt()
@@ -558,7 +662,11 @@ static func refresh_receipt(d) -> void:
 	var first_receipt_view := str(body.get_meta("receipt_key", "")) != receipt_key
 	body.set_meta("receipt_key", receipt_key)
 	preload("res://scripts/receipt_panel.gd").render(d, body, receipt, first_receipt_view)
-	footer.add_child(d._primary(preload("res://scripts/ui_theme.gd").copy("ops_open_tasks"),d._contracts)); footer.add_child(d._button("会社・スキル",d._company)); footer.add_child(d._button("受注履歴",func(): d._show_app("mail"); d.widgets.mail.folder = "history"; refresh_mail(d)))
+	var next: Dictionary = preload("res://scripts/next_task_guide.gd").after_delivery(g)
+	if str(next.id) != "recheck":
+		var next_button: Button = d._primary(str(next.title),d._next_task)
+		next_button.name = "ReceiptNextWork"; footer.add_child(next_button)
+	footer.add_child(d._button("会社・スキル",d._company)); footer.add_child(d._button("受注履歴",func(): d._show_app("mail"); d.widgets.mail.folder = "history"; refresh_mail(d)))
 	if first_receipt_view:
 		body.modulate = Color(1,1,1,0.45)
 		body.create_tween().tween_property(body,"modulate",Color.WHITE,0.25)

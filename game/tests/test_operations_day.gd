@@ -127,8 +127,11 @@ func run() -> void:
 	print("OPERATIONS_DAY failures=",failures.size());quit(0 if failures.is_empty() else 1)
 
 func maintenance_controls() -> void:
-	var fixture:=ProjectSettings.globalize_path("res://../artifacts/simulator/v122/legacy-v121-care.json")
-	check(DirAccess.copy_absolute(fixture,ProjectSettings.globalize_path(game.save_path))==OK and game.load_game(),"load isolated real maintenance fixture")
+	var fixture=preload("res://tests/care_fixture.gd")
+	var rebuilt: Dictionary=fixture.build(game)
+	check(bool(rebuilt.get("ok",false)),"build reconstructed care fixture: "+str(rebuilt.get("error","")))
+	if not bool(rebuilt.get("ok",false)):return
+	check(fixture.load_into(game,rebuilt.state),"load isolated reconstructed legacy-scope fixture")
 	check(game.end_day(),"prepare actual maintenance day")
 	var client:=str(game.state.care_agreements.keys()[0])
 	ui.open_panel("board");await frames();press("OperationsView_maintenance");await frames()

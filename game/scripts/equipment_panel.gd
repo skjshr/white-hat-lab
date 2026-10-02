@@ -40,7 +40,16 @@ static func build(ui) -> void:
 	panes.custom_minimum_size.y = 360 if float(ui.text_scale) >= 1.2 else 430
 	panes.add_theme_constant_override("separation", 12)
 	body.add_child(panes)
-	ui.get_tree().process_frame.connect(func(): _fit_panes(ui, body, panes), CONNECT_ONE_SHOT)
+	var ui_ref: WeakRef = weakref(ui)
+	var body_ref: WeakRef = weakref(body)
+	var panes_ref: WeakRef = weakref(panes)
+	ui.get_tree().process_frame.connect(func():
+		var current_ui = ui_ref.get_ref()
+		var current_body = body_ref.get_ref()
+		var current_panes = panes_ref.get_ref()
+		if is_instance_valid(current_ui) and is_instance_valid(current_body) and is_instance_valid(current_panes):
+			_fit_panes(current_ui, current_body, current_panes)
+	, CONNECT_ONE_SHOT)
 
 	var left_frame := PanelContainer.new()
 	left_frame.name = "EquipmentSelectorPane"
@@ -69,13 +78,21 @@ static func build(ui) -> void:
 		list.add_child(_selection_row(ui, game, item, selected_id == str(item.get("id", ""))))
 	list.add_child(_expansion_selection_row(ui, game, selected_id == EXPANSION_ID))
 	var saved_selector_scroll := int(ui.get_meta("equipment_selector_scroll", 0)) if ui.has_meta("equipment_selector_scroll") else 0
+	var scroll_ref: WeakRef = weakref(left_scroll)
 	left_scroll.get_tree().process_frame.connect(func():
-		if is_instance_valid(left_scroll): left_scroll.scroll_vertical = saved_selector_scroll
+		var current_scroll = scroll_ref.get_ref()
+		if is_instance_valid(current_scroll): current_scroll.scroll_vertical = saved_selector_scroll
 	, CONNECT_ONE_SHOT)
 	var selected_row: Node = list.find_child("EquipmentSelect_" + selected_id, true, false)
+	var row_ref: WeakRef = weakref(selected_row)
 	left_scroll.get_tree().process_frame.connect(func():
-		left_scroll.get_tree().process_frame.connect(func():
-			if is_instance_valid(left_scroll) and selected_row is Control: left_scroll.ensure_control_visible(selected_row)
+		var current_scroll = scroll_ref.get_ref()
+		if not is_instance_valid(current_scroll) or not current_scroll.is_inside_tree(): return
+		current_scroll.get_tree().process_frame.connect(func():
+			var final_scroll = scroll_ref.get_ref()
+			var final_row = row_ref.get_ref()
+			if is_instance_valid(final_scroll) and is_instance_valid(final_row) and final_row is Control and final_scroll.is_ancestor_of(final_row):
+				final_scroll.ensure_control_visible(final_row)
 		, CONNECT_ONE_SHOT)
 	, CONNECT_ONE_SHOT)
 
@@ -352,11 +369,15 @@ static func _add_footer_expansion(ui, game, expansion: Dictionary, status: Strin
 
 static func _right_align_footer_action(ui, action: Button) -> void:
 	if not is_instance_valid(ui) or not is_instance_valid(ui.modal_footer): return
+	var footer_ref: WeakRef = weakref(ui.modal_footer)
+	var action_ref: WeakRef = weakref(action)
 	ui.get_tree().process_frame.connect(func():
-		if not is_instance_valid(action) or not is_instance_valid(ui.modal_footer): return
-		var close: Node = ui.modal_footer.find_child("CloseButton", true, false)
+		var current_footer = footer_ref.get_ref()
+		var current_action = action_ref.get_ref()
+		if not is_instance_valid(current_footer) or not is_instance_valid(current_action) or current_action.get_parent() != current_footer: return
+		var close: Node = current_footer.find_child("CloseButton", true, false)
 		if close is Control:
-			ui.modal_footer.move_child(action, close.get_index())
+			current_footer.move_child(current_action, close.get_index())
 	, CONNECT_ONE_SHOT)
 
 static func _equipment_state(game, id: String) -> String:

@@ -24,6 +24,7 @@ func _init() -> void:
 	Input.warp_mouse(Vector2(173, 241))
 	await process_frame
 	var before := root.get_viewport().get_mouse_position()
+	_assert(before.distance_to(Vector2(173,241)) <= 1.5, "native pointer moved to the requested viewport coordinate")
 	interface.open_panel("shop")
 	await process_frame
 	interface.open_panel("company")

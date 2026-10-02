@@ -1,5 +1,7 @@
 extends RefCounted
 
+const INVESTIGATION = preload("res://scripts/advanced_investigation.gd")
+
 static func create(case_id: String) -> Dictionary:
 	var s: Dictionary = {"kind":case_id,"revision":0,"flags":{},"nodes":[],"edges":[],"events":[],"records":[],"actions":[],"checks":[],"last_result":{}}
 	if case_id not in ["advanced-hunt","advanced-pentest","advanced-recovery"]: return {}
@@ -24,6 +26,7 @@ static func create(case_id: String) -> Dictionary:
 	else: _seed_recovery(s)
 	if s.events.is_empty(): s.events = [{"id":"event-1","time":"00:00","source":"telemetry","asset":str(s.nodes[0].id),"detail":"initial evidence available","pinned":false}]
 	if s.records.is_empty(): s.records = [{"id":"record-1","label":"adv_record_initial","detail":"adv_record_initial_detail","status_key":"adv_status_available"}]
+	INVESTIGATION.upgrade(s)
 	return s
 
 static func support(s: Dictionary) -> bool:
@@ -69,6 +72,9 @@ static func _seed_recovery(s: Dictionary) -> void:
 	s.world = {"snapshots":{"snap-0730":{"ledger":"id,amount\n001,100\n","startup":"none","revision":7},"snap-1405":{"ledger":"id,amount\n001,100\n","startup":"sync-persistence","revision":14},"snap-1410":{"ledger":"id,amount\n001,999999\n","startup":"sync-persistence","revision":14}},"expected_ledger_sha":"id,amount\n001,100\n".sha256_text(),"production":{"ledger":"id,amount\n001,999999\n","startup":"sync-persistence"},"staged":{},"identity":{"compromised":true},"network_isolated":false,"services":{"identity":false,"database":false,"app":false},"observations":[]}
 
 static func view(s: Dictionary, selected: String = "") -> Dictionary:
+	return INVESTIGATION.view(s, selected)
+
+static func _legacy_view(s: Dictionary, selected: String = "") -> Dictionary:
 	var out: Dictionary = s.duplicate(true); out.erase("flags"); out.erase("world"); out.selected = selected
 	var w: Dictionary = s.world
 	out.records = []
@@ -96,6 +102,9 @@ static func view(s: Dictionary, selected: String = "") -> Dictionary:
 	return out
 
 static func act(s: Dictionary, action: String, args: Dictionary = {}) -> Dictionary:
+	return INVESTIGATION.act(s, action, args)
+
+static func _legacy_act(s: Dictionary, action: String, args: Dictionary = {}) -> Dictionary:
 	var target := str(args.get("option", "")); var r: Dictionary
 	if target.is_empty(): target = str(args.get("target", ""))
 	if action == "pin": action = "pin_event"
@@ -110,6 +119,9 @@ static func act(s: Dictionary, action: String, args: Dictionary = {}) -> Diction
 	s.last_result = r.duplicate(true); return r
 
 static func checks(s: Dictionary) -> Array:
+	return INVESTIGATION.checks(s)
+
+static func _legacy_checks(s: Dictionary) -> Array:
 	var out: Array = []
 	for c in s.get("checks",[]): var row: Dictionary = c.duplicate(true); row.passed = _passed(s,str(c.id)); out.append(row)
 	return out

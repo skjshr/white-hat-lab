@@ -34,6 +34,14 @@ func tick_world(seconds: float) -> void:
 
 func select_owner(client: String,owner: String) -> void:
 	office.ui.open_panel("company")
+	var tab=office.ui.modal_body.find_child("CompanyView_care",true,false)
+	check(tab is BaseButton,"customer maintenance tab exists")
+	if not tab is BaseButton:return
+	tab.pressed.emit()
+	var details=office.ui.modal_body.find_child("CompanyClient_"+client.sha256_text().left(10),true,false)
+	check(details is BaseButton,"maintained customer is selectable")
+	if not details is BaseButton:return
+	details.pressed.emit()
 	var picker=office.ui.modal_body.find_child("CareOwner_"+client.sha256_text().left(10),true,false)
 	check(picker!=null,"persistent owner dropdown exists")
 	if picker==null:return
@@ -62,11 +70,14 @@ func capture(label: String) -> void:
 func run() -> void:
 	game=root.get_node("Game");game.set_process(false)
 	check(game.save_path.begins_with("user://qa-"),"QA profile")
-	var source:=ProjectSettings.globalize_path("res://../artifacts/simulator/v122/legacy-v121-care.json")
-	var legacy: Dictionary=JSON.parse_string(FileAccess.get_file_as_string(source))
+	var fixture=preload("res://tests/care_fixture.gd")
+	var rebuilt: Dictionary=fixture.build(game)
+	check(bool(rebuilt.get("ok",false)),"build reconstructed care fixture: "+str(rebuilt.get("error","")))
+	if not bool(rebuilt.get("ok",false)):quit(1);return
+	var legacy: Dictionary=rebuilt.state
 	var client:=str(legacy.maintenance_targets.keys()[0])
-	check(legacy.maintenance_targets[client].size()==1,"distributed v1.21 actually dropped older service")
-	check(DirAccess.copy_absolute(source,ProjectSettings.globalize_path(game.save_path))==OK and game.load_game(),"load genuine old save")
+	check(legacy.maintenance_targets[client].size()==1,"reconstructed pre-scope-v2 representation retains only latest service")
+	check(fixture.load_into(game,legacy),"load reconstructed legacy-scope save")
 	check(game._maintenance_targets_for(client).size()==2,"recover recorded older contracted service")
 	check(str(game._maintenance_job_for(client).status)=="pending" and int(game.maintenance_summary().earned)==0,"new delivery did not verify restored older scope")
 	var backup: Dictionary={}

@@ -18,13 +18,21 @@ func run() -> void:
 	var suffix: String = "forecast-%d" % OS.get_process_id();game.save_path="user://qa-"+suffix+".json";game.backup_path=game.save_path+".bak";game.previous_path=game.save_path+".previous";game.settings_path=game.save_path+".settings";game._reset_state()
 	check(game.choose_strategy("advisory") and game.start_free_career(),"career setup")
 	game.state.credit=1000000;game.state.peak_profit=1000000;game.state.skills={"advisory":10,"operations":10,"response":10};game._make_offers()
-	var available:=offers();check(available.size()>=2,"two forecast contracts")
-	if available.size()<2: quit(1);return
-	var a:=str(available[0].id);var b:=str(available[1].id);var specialist_offer: Dictionary={}
+	# Forecast labor on worker-supported jobs. Offer order also includes the
+	# operator-only advanced console and hardware jobs that cannot start before
+	# staging; neither is a valid fixture for the initially unblocked queue.
+	var available:=offers().filter(func(item): return not game._advanced_case_id(str(item.get("case_id",""))) and item.get("supply_requirement",{}).is_empty())
+	var specialist_offer: Dictionary={}
 	for offer in available:
 		if int(offer.get("chapter",-1)) == 1 and int(offer.get("targets",1)) >= 2:
 			specialist_offer=offer;break
-	var c:=str(specialist_offer.get("id", ""));check(not c.is_empty() and game.choose_contract(a) and game.choose_contract(b) and game.choose_contract(c),"accept forecast contracts")
+	var c:=str(specialist_offer.get("id", ""))
+	var ordinary:=available.filter(func(item): return str(item.id)!=c)
+	check(ordinary.size()>=2 and not c.is_empty(),"two forecast contracts and distinct supported observer contract")
+	if ordinary.size()<2 or c.is_empty(): quit(1);return
+	var a:=str(ordinary[0].id);var b:=str(ordinary[1].id)
+	print("FORECAST_FIXTURES ",ordinary[0].case_id," / ",ordinary[1].case_id," / ",specialist_offer.case_id)
+	check(game.choose_contract(a) and game.choose_contract(b) and game.choose_contract(c),"accept forecast contracts")
 	check(game.staff_workload("aya").get("jobs",[]).is_empty(),"empty workload has no jobs")
 	check(game.dispatch_enqueue("aya",a,0),"enqueue active forecast job")
 	var queued: Dictionary=game.staff_workload("aya");check(queued.jobs.size()==1 and float(queued.jobs[0].remaining_minutes)>0.0,"queued job has labor duration")

@@ -91,7 +91,11 @@ func _init() -> void:
 			if not bool(scan_a.get("ok", false)) or not bool(scan_a.get("clean", false)) or not bool(scan_b.get("ok", false)) or not bool(scan_b.get("clean", false)):
 				failures += 1; print("endpoint clean scans failed ", item.id, " pc_a=", scan_a, " pc_b=", scan_b)
 		var result: Array = vm.evaluate()
-		if result.size() != item.checks.size() or not result.all(func(v): return v): failures += 1; print("manual solve fail ", item.id, " result=", result, " expected=", item.checks.size())
+		# Appliance commissioning has one customer-facing summary check, while
+		# VM.evaluate checks every desired setting plus restored snapshot contents.
+		# Keep exact condition-count and all-pass assertions at the VM boundary.
+		var expected_checks: int=item.desired.size()+1 if bool(item.get("hardware_commissioning",false)) else item.checks.size()
+		if result.size() != expected_checks or not result.all(func(v): return v): failures += 1; print("manual solve fail ", item.id, " result=", result, " expected=", expected_checks)
 		var saved: Dictionary = vm.export_state()
 		var restored = VM.new(); restored.setup(int(item.chapter), saved, item)
 		if restored.evaluate() != result: failures += 1; print("restore mismatch ", item.id)

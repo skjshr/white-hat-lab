@@ -34,12 +34,11 @@ func _init() -> void:
 		_finish()
 		return
 	expect(game.start_free_career(), "career starts")
-	var offer: Dictionary = {}
-	for candidate in game.state.offers:
-		if bool(candidate.get("unlocked", false)):
-			offer = candidate
-			break
+	var offer := _service_offer("service-1-case-0")
 	expect(not offer.is_empty(), "care offer exists")
+	if offer.is_empty():
+		_finish()
+		return
 	expect(game.set_offer_plan("care"), "care plan selected")
 	var client := str(offer.get("client", ""))
 	expect(game.choose_contract(str(offer.get("id", ""))), "care contract accepted")
@@ -62,15 +61,24 @@ func _init() -> void:
 	var incident: Dictionary = game.care_incident(client)
 	expect(str(incident.get("status", "")) == "detected", "failed inspection becomes detected incident")
 	ui.open_panel("company")
+	var care_tab = ui.modal_body.find_child("CompanyView_care", true, false)
+	expect(care_tab != null and not care_tab.disabled, "customer care tab available")
+	if care_tab != null and not care_tab.disabled: care_tab.pressed.emit()
+	var client_details = ui.modal_body.find_child("CompanyClient_"+client.sha256_text().left(10), true, false)
+	expect(client_details != null and not client_details.disabled, "customer care details available")
+	if client_details != null and not client_details.disabled: client_details.pressed.emit()
 	await capture("care-detected", true)
 	var button = ui.modal_body.find_child("CareIncident_"+client.sha256_text().left(10),true,false)
 	expect(button != null and not button.disabled,"incident action visible and enabled")
 	var other_id := ""
 	game.set_offer_plan("standard")
-	for other in game.state.offers:
-		if bool(other.get("unlocked",false)) and str(other.get("client","")) != client and game.choose_contract(str(other.id)):
-			other_id = str(other.id); game.vm_run("ssh client"); game.vm_write("/home/operator/context.txt","OTHER_CONTEXT"); break
+	var other := _service_offer("service-3-case-0")
+	if not other.is_empty() and str(other.get("client","")) != client and game.choose_contract(str(other.id)):
+		other_id = str(other.id); game.vm_run("ssh client"); game.vm_write("/home/operator/context.txt","OTHER_CONTEXT")
 	expect(not other_id.is_empty(),"independent normal contract opened")
+	if other_id.is_empty():
+		_finish()
+		return
 	var other_vm: Dictionary = JSON.parse_string(JSON.stringify(game.state.vm_states.get(other_id+"/site-0",{})))
 	var saved_state: Dictionary = game.state.duplicate(true)
 	var saved_path: String = game.save_path
@@ -133,6 +141,21 @@ func _init() -> void:
 	print("CARE_LIFECYCLE_PASS" if failures == 0 else "CARE_LIFECYCLE_FAIL count="+str(failures))
 	_finish()
 
+func _service_offer(case_id: String) -> Dictionary:
+	# Keep maintenance fixtures independent of demand ordering and advanced engines.
+	# Publish an ordinary lead, then retain the normal unlock and acceptance gates.
+	if case_id not in game.state.market_leads:
+		game.state.market_leads.append(case_id)
+	game.state.market_day = int(game.state.day)
+	game._make_offers()
+	for candidate in game.state.offers:
+		if str(candidate.get("case_id", "")) != case_id: continue
+		expect(bool(candidate.get("unlocked", false)), "fixture unlocked: " + case_id)
+		expect(bool(candidate.get("market_available", false)), "fixture on market: " + case_id)
+		if bool(candidate.get("unlocked", false)) and bool(candidate.get("market_available", false)):
+			return candidate
+	return {}
+
 func _finish_contract() -> void:
 	for index in game.state.targets.size():
 		game.select_target(index)
@@ -173,4 +196,3 @@ func capture(label: String, company: bool) -> void:
 	var folder := ProjectSettings.globalize_path("res://../artifacts/simulator/v118/ui")
 	DirAccess.make_dir_recursive_absolute(folder)
 	expect(root.get_texture().get_image().save_png(folder.path_join(label+("-narrow" if narrow else "-wide")+".png"))==OK,"capture "+label)
-

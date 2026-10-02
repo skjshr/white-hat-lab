@@ -222,11 +222,9 @@ func run() -> void:
 	quit(1 if not failures.is_empty() else 0)
 
 func _legacy_boundary() -> void:
-	var path := ProjectSettings.globalize_path("res://../artifacts/simulator/v123/legacy-v122-portal.json")
-	_assert(FileAccess.file_exists(path), "legacy portal fixture exists")
-	if not FileAccess.file_exists(path): return
-	var saved: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
-	_assert(saved is Dictionary, "legacy portal fixture is valid JSON object")
+	var saved: Variant = preload("res://tests/legacy_service_fixture.gd").measured(5)
+	_assert(saved is Dictionary and not saved.is_empty(), "representative legacy portal fixture was constructed")
+	_assert(saved is Dictionary, "legacy portal fixture survives JSON roundtrip")
 	if not saved is Dictionary: return
 	var machine = load("res://scripts/virtual_machine.gd").new()
 	_assert(not saved.has("portal_model_version"), "legacy portal fixture has no v2 marker")

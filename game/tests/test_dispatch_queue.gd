@@ -39,7 +39,7 @@ func _queue_item(member: String, job_id: String = "") -> Dictionary:
 func _first_offers() -> Array:
 	var result: Array = []
 	for offer in game.state.get("offers", []):
-		if offer is Dictionary and bool(offer.get("unlocked", false)) and bool(offer.get("market_available", true)):
+		if offer is Dictionary and str(offer.get("case_id", "")) in ["service-0-case-0", "service-2-case-0"] and bool(offer.get("unlocked", false)) and bool(offer.get("market_available", true)):
 			result.append(offer)
 	return result
 
@@ -58,6 +58,10 @@ func run() -> void:
 	game.state.credit = 1000000
 	game.state.peak_profit = 1000000
 	game.state.skills = {"advisory":10,"operations":10,"response":10}
+	# Dispatch applies to ordinary client VMs. Catalog order may place a manual-only
+	# advanced investigation first, so request two stable eligible ordinary leads.
+	game.state.market_leads = ["service-0-case-0", "service-2-case-0"]
+	game.state.market_day = int(game.state.day)
 	game._make_offers()
 	var offers := _first_offers()
 	_assert(offers.size() >= 2, "two queue contracts available")
@@ -82,6 +86,7 @@ func run() -> void:
 	_assert(_ok(_call("dispatch_enqueue", ["aya", second_id, 0])), "enqueue second Aya job")
 	var queue_before: Array = _queue("aya")
 	_assert(queue_before.size() == 2, "queue stores two Aya jobs")
+	if queue_before.size() != 2: _finish(); return
 	var first_job_id := str(queue_before[0].get("id", ""))
 	var second_job_id := str(queue_before[1].get("id", ""))
 	_assert(_ok(_call("dispatch_move", ["aya", second_job_id, -1])), "urgent job moves to front")
@@ -166,9 +171,11 @@ func _staff_partial_probe(contract_id: String) -> void:
 	_assert(is_equal_approx(float(game.state.staff.get("mio", {}).get("minutes_used", 0.0)), carried_remaining), "next-day hired work accounts remaining minutes once")
 
 func _maintenance_queue_probe() -> void:
-	var fixture := ProjectSettings.globalize_path("res://../artifacts/simulator/v122/legacy-v121-care.json")
-	_assert(DirAccess.copy_absolute(fixture, ProjectSettings.globalize_path(str(game.save_path))) == OK, "copy real care fixture")
-	_assert(game.load_game(), "load real care fixture")
+	var fixture=preload("res://tests/care_fixture.gd")
+	var rebuilt: Dictionary=fixture.build(game)
+	_assert(bool(rebuilt.get("ok",false)),"build reconstructed care fixture: "+str(rebuilt.get("error","")))
+	if not bool(rebuilt.get("ok",false)):return
+	_assert(fixture.load_into(game,rebuilt.state),"load reconstructed legacy-scope fixture")
 	var agreements: Dictionary = game.state.get("care_agreements", {})
 	_assert(not agreements.is_empty(), "care agreement available for maintenance queue")
 	if agreements.is_empty(): return

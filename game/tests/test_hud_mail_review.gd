@@ -16,9 +16,11 @@ func frames(count := 5) -> void:
 	for _i in count: await process_frame
 
 func capture(id: String) -> void:
+	if DisplayServer.get_name() == "headless" or not "--capture" in OS.get_cmdline_user_args(): return
 	await frames()
 	await RenderingServer.frame_post_draw
-	var folder := ProjectSettings.globalize_path("res://../artifacts/simulator/hud-mail-review")
+	var folder := OS.get_environment("WHL_CAPTURE_DIR")
+	if folder.is_empty(): folder = ProjectSettings.globalize_path("res://../artifacts/simulator/hud-mail-review")
 	DirAccess.make_dir_recursive_absolute(folder)
 	check(root.get_texture().get_image().save_png(folder.path_join(id + ("-narrow" if narrow else "-wide") + ".png")) == OK, "capture " + id)
 
@@ -80,7 +82,7 @@ func run() -> void:
 	check(selected, "select actual inbox message")
 	await frames()
 	var disclosure: BaseButton
-	for node in pc.widgets.mail.body.get_children():
+	for node in pc.widgets.mail.body.find_children("*", "Button", true, false):
 		if node is BaseButton and node.text.contains("添付"):
 			disclosure = node; node.pressed.emit(); break
 	check(disclosure != null, "expand attachment details")
@@ -98,7 +100,6 @@ func run() -> void:
 		var scroll: ScrollContainer = pc.widgets.mail.body.get_parent()
 		scroll.ensure_control_visible(disclosure)
 		await frames()
-		scroll.scroll_vertical = maxi(0, int(disclosure.position.y) - 20)
 	await capture("mail-details")
 	print("HUD_MAIL failures=", failures.size())
 	office.queue_free()

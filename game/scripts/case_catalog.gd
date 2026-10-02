@@ -133,6 +133,7 @@ static func _add_endpoint_recovery() -> void:
 	_catalog.append({"id":"endpoint-recovery","title":DISPLAY_COPY.copy("rmd_case_title"),"client":CLIENTS[1],"chapter":4,"category":"response","tier":2,"required_level":5,"brief":DISPLAY_COPY.copy("rmd_case_brief"),"service":SERVICES[4],"evidence":[DISPLAY_COPY.copy("rmd_guide_review")],"hints":[],"debrief":DISPLAY_COPY.copy("rmd_debrief"),"checks":[DISPLAY_COPY.copy("rmd_check_business"),DISPLAY_COPY.copy("rmd_check_clean"),DISPLAY_COPY.copy("rmd_check_evidence")],"probes":probes,"desired":config.duplicate(true),"initial":config.duplicate(true),"required_files":[],"reward":7800,"suspect":"pc_a","edr_recovery_required":true})
 
 static func _add_advanced_cases() -> void:
+	_add_portal_pentest()
 	_add_advanced_case("advanced-hunt", "response", 4, 7, {"response":5,"advisory":2}, 26000, 260)
 	_add_advanced_case("advanced-pentest", "advisory", 2, 7, {"advisory":5,"operations":2}, 28000, 300)
 	_add_advanced_case("advanced-recovery", "operations", 1, 8, {"operations":5,"response":3}, 32000, 320)
@@ -142,6 +143,9 @@ static func _add_advanced_cases() -> void:
 	_add_advanced_case("advanced-cloud", "operations", 3, 7, {"response":5,"operations":2}, 30000, 240)
 	_add_advanced_case("advanced-malware", "response", 4, 10, {"response":7}, 36000, 300)
 	_add_advanced_case("advanced-detection", "operations", 4, 8, {"operations":6,"advisory":3}, 42000, 360)
+
+static func _add_portal_pentest() -> void:
+	_catalog.append({"id":"advanced-portal","title":DISPLAY_COPY.copy("adv_portal_title"),"client":DISPLAY_COPY.copy("adv_portal_client"),"chapter":5,"category":"advisory","tier":1,"required_level":1,"required_skills":{"advisory":0},"brief":DISPLAY_COPY.copy("adv_portal_brief"),"service":DISPLAY_COPY.copy("adv_portal_service"),"evidence":[],"hints":[],"debrief":DISPLAY_COPY.copy("adv_portal_debrief"),"checks":[DISPLAY_COPY.copy("portal_check_report"),DISPLAY_COPY.copy("portal_check_security_retest"),DISPLAY_COPY.copy("portal_check_business_retest")],"probes":[],"desired":{},"initial":{},"targets":[{"chapter":5,"case_id":"advanced-portal","name":"portal.mihama.test"}],"reward":6500,"advanced_work_minutes":90,"work_family":"web-pentest"})
 
 static func _add_advanced_case(id: String, category: String, chapter: int, required_level: int, required_skills: Dictionary, reward: int, work_minutes: int) -> void:
 	var slug := id.trim_prefix("advanced-")

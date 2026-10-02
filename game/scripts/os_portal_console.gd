@@ -160,6 +160,10 @@ static func run(d,command: String) -> void:
 	var sound = d.get_node_or_null("/root/Soundscape")
 	if is_instance_valid(sound) and result is Dictionary:
 		sound.play_ui("work_success" if bool(result.get("ok",false)) else "work_failure")
+	if command.begins_with("portal share ") and result is Dictionary and bool(result.get("ok", false)):
+		var drafts: Dictionary = d.portal_ui.get("share_drafts", {})
+		drafts.erase(str(d.portal_ui.get("selected_path", "")) + "|" + command.get_slice(" ", 2))
+		d.portal_ui["share_drafts"] = drafts
 	rerender(d)
 
 static func render(d,parent: VBoxContainer) -> void:
@@ -407,27 +411,44 @@ static func share_row(d,parent: VBoxContainer,state: Dictionary,snap: Dictionary
 	for item in snap.get("shares",[]):
 		if str(item.get("path",""))==path and str(item.get("role",""))==role:share=item;break
 	var permission:=int(share.get("permissions",0));var expiry:=str(share.get("expires","unlimited"))
+	var drafts: Dictionary = state.get("share_drafts", {})
+	var draft_key := path + "|" + role
+	var draft: Dictionary = drafts.get(draft_key, {"permissions":permission, "expires":expiry})
 	var row:=HBoxContainer.new();row.add_theme_constant_override("separation",8);parent.add_child(row)
 	fixed_label(d,row,"●",17,BLUE if permission>0 else MUTED)
 	var identity:=VBoxContainer.new();identity.size_flags_horizontal=Control.SIZE_EXPAND_FILL;row.add_child(identity)
-	label(d,identity,copy(role),14);label(d,identity,copy("can_edit" if permission==3 else "read_only" if permission==1 else "no_access"),12,MUTED)
+	label(d,identity,copy(role),14);label(d,identity,copy("can_edit" if permission==3 else "read_only" if permission==1 else "no_access") + " · " + copy(str({"7d":"seven_days","30d":"thirty_days"}.get(expiry,"unlimited"))),12,MUTED)
 	button(d,row,"⋯","PortalShare_"+role,func():state["editing_role"]="" if str(state.get("editing_role",""))==role else role;rerender(d))
 	if str(state.get("editing_role",""))!=role:return
 	var options:=panel(parent,Color("f7f9fa"),10)
 	var choice:=OptionButton.new();choice.name="PortalPermission_"+role;choice.add_item(copy("no_access"),0);choice.add_item(copy("read_only"),1)
 	if role!="public":choice.add_item(copy("can_edit"),3)
-	choice.select(2 if permission==3 and role!="public" else 1 if permission==1 else 0);options.add_child(choice)
+	var draft_permission := int(draft.get("permissions", permission))
+	choice.select(2 if draft_permission==3 and role!="public" else 1 if draft_permission==1 else 0);options.add_child(choice)
 	label(d,options,copy("expiration"),12,MUTED)
 	var dates:=OptionButton.new();dates.name="PortalExpiry_"+role
 	for item in [["unlimited","unlimited"],["seven_days","7d"],["thirty_days","30d"]]:dates.add_item(copy(item[0]));dates.set_item_metadata(dates.item_count-1,item[1])
-	dates.select({"unlimited":0,"7d":1,"30d":2}.get(expiry,0));options.add_child(dates)
+	dates.select({"unlimited":0,"7d":1,"30d":2}.get(str(draft.get("expires", expiry)),0));options.add_child(dates)
+	var note := label(d, options, "未保存の共有設定" if drafts.has(draft_key) else "適用中の共有設定", 12, MUTED)
+	note.name = "PortalShareDraft_" + role
+	var remember := func():
+		drafts[draft_key] = {"permissions":choice.get_selected_id(), "expires":str(dates.get_item_metadata(dates.selected))}
+		state["share_drafts"] = drafts; note.text = "未保存の共有設定"; persist(d)
+	choice.item_selected.connect(func(_index): remember.call())
+	dates.item_selected.connect(func(_index): remember.call())
 	var buttons:=HFlowContainer.new();buttons.add_theme_constant_override("h_separation",6);options.add_child(buttons)
 	button(d,buttons,copy("save"),"PortalApply_"+role,func():run(d,"portal share %s %s %s" % [role,{0:"none",1:"read",3:"write"}.get(choice.get_selected_id(),"none"),str(dates.get_item_metadata(dates.selected))]))
 	button(d,buttons,copy("remove_share"),"PortalUnshare_"+role,func():run(d,"portal share %s none %s" % [role,expiry]))
+	button(d,buttons,copy("cancel"),"PortalShareCancel_"+role,func():drafts.erase(draft_key);state["share_drafts"]=drafts;rerender(d))
 	button(d,options,copy("copy_link"),"PortalLink_"+role,func():DisplayServer.clipboard_set("https://portal.client.test/%s?link=current" % role);d._notify(copy("link_copied")))
+	var feedback: Dictionary = state.get("command_result", {})
+	if feedback.has("error") and not bool(feedback.get("ok", false)):
+		label(d, options, copy("error_" + str(feedback.get("error", "operation_failed"))) + " · 共有設定は保持しています。確認して再保存できます。", 12, UI.RED)
 
 static func preview(d,parent: VBoxContainer,state: Dictionary) -> void:
 	label(d,parent,copy("preview"),21)
+	var selected := str(state.get("selected_path", ""))
+	if not selected.is_empty(): label(d, parent, selected.get_file() + " · 受取側の実操作", 13, MUTED)
 	var roles:=HFlowContainer.new();roles.add_theme_constant_override("h_separation",8);parent.add_child(roles)
 	for role in ["staff","partner","public"]:
 		var b:=button(d,roles,copy(role),"PortalRole_"+role,func():d._portal_stash_draft();state["role"]=role;reset_response(d);rerender(d));b.add_theme_color_override("font_color",BLUE if str(state.get("role","partner"))==role else INK)
@@ -451,7 +472,7 @@ static func preview(d,parent: VBoxContainer,state: Dictionary) -> void:
 		if is_instance_valid(sound):sound.play_ui("work_success" if raw.begins_with("HTTP/1.1 200") else "work_failure")
 		rerender(d))
 	var response:=str(state.get("response",""));var ok:=response.begins_with("HTTP/1.1 200")
-	var write:=button(d,actions,copy("write"),"PortalWrite",func():
+	var write:=button(d,actions,"提出する","PortalWrite",func():
 		var raw:=str(d._portal_request(str(state.get("role","partner")),"PUT",str(state.get("age","current")),str(state.get("preview_content",""))))
 		var sound=d.get_node_or_null("/root/Soundscape")
 		if is_instance_valid(sound):sound.play_ui("work_success" if raw.begins_with("HTTP/1.1 200") else "work_failure")
@@ -460,9 +481,18 @@ static func preview(d,parent: VBoxContainer,state: Dictionary) -> void:
 	if not response.is_empty():
 		var status:=response.get_slice("\n",0)
 		var key:="access_allowed" if ok else "mfa_required" if "mfa_required" in response else "link_expired" if "410 Gone" in response else "tls_failed" if "TLS handshake" in response else "error_save_failed" if "save_failed" in response else "access_denied"
-		label(d,parent,copy(key)+"  ·  "+status,14,UI.GREEN if ok else UI.RED)
+		var message := copy(key)
+		if str(state.get("response_method", "")) == "PUT":
+			message = "提出しました" if ok else "提出できませんでした" + (" · 入力は保持" if bool(state.get("draft_dirty", false)) else "")
+		elif ok: message = "資料を読み込みました"
+		var feedback := label(d,parent,message+"  ·  "+status,14,UI.GREEN if ok else UI.RED)
+		feedback.name = "PortalResponseStatus"
+		parent.move_child(feedback, actions.get_index())
 	if ok or bool(state.get("draft_dirty",false)):
-		_label_grid(d,parent,str(state.get("preview_content","")),"PortalPreviewGrid")
+		var toggle := button(d, parent, "表を閉じる" if bool(state.get("edit_table", false)) else "提出内容を表で編集", "PortalEditRows", func(): d._portal_stash_draft(); state["edit_table"] = not bool(state.get("edit_table", false)); rerender(d))
+		toggle.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		if bool(state.get("edit_table", false)): _edit_rows(d, parent, state)
+		else: _label_grid(d,parent,str(state.get("preview_content","")),"PortalPreviewGrid")
 		var source: VBoxContainer=d._disclosure(parent,experience_copy("edit_source","Edit source"))
 		var content:=TextEdit.new();content.name="PortalContent";content.text=str(state.get("preview_content",""));content.custom_minimum_size.y=180;content.size_flags_horizontal=Control.SIZE_EXPAND_FILL;style_editor(d,content)
 		if source != null:
@@ -471,6 +501,53 @@ static func preview(d,parent: VBoxContainer,state: Dictionary) -> void:
 		content.text_changed.connect(func():state["preview_content"]=content.text;state["draft_dirty"]=true;d._portal_stash_draft();cancel.disabled=false;draft_label.text=copy("unsaved");persist(d))
 	if not response.is_empty():
 		var raw: VBoxContainer=d._disclosure(parent,copy("response"));var log:=TextEdit.new();log.editable=false;log.text=response;log.custom_minimum_size.y=140;style_editor(d,log);raw.add_child(log)
+
+static func _csv_text(rows: Array) -> String:
+	var lines: PackedStringArray = []
+	for row in rows:
+		var cells: PackedStringArray = []
+		for value in row:
+			var cell := str(value)
+			if cell.contains(",") or cell.contains('"') or cell.contains("\n") or cell.contains("\r"): cell = '"' + cell.replace('"', '""') + '"'
+			cells.append(cell)
+		lines.append(",".join(cells))
+	return "\n".join(lines) + "\n"
+
+static func _table_changed(d, state: Dictionary, rows: Array) -> void:
+	state["preview_content"] = _csv_text(rows); state["draft_dirty"] = true
+	d._portal_stash_draft()
+	var page: Node = d.widgets.browser.page
+	var source: Node = page.find_child("PortalContent", true, false)
+	if source is TextEdit:
+		source.set_block_signals(true); source.text = str(state.preview_content); source.set_block_signals(false)
+	for id in ["PortalWrite", "PortalCancel"]:
+		var action: Node = page.find_child(id, true, false)
+		if action is BaseButton: action.disabled = false
+	var note: Node = page.find_child("PortalTableDraft", true, false)
+	if note is Label: note.text = "未送信の提出内容 · 保存すると受取先の実ファイルが更新されます。"
+	persist(d)
+
+static func _edit_rows(d, parent: VBoxContainer, state: Dictionary) -> void:
+	var rows := _csv_rows(str(state.get("preview_content", "")))
+	if rows.is_empty():
+		label(d, parent, "列見出しがないファイルはCSV入力から編集してください。", 13, MUTED)
+		return
+	var note := label(d, parent, "未送信の提出内容" if bool(state.get("draft_dirty", false)) else "取得した内容を編集します。権限と期限は送信時にも確認されます。", 12, MUTED)
+	note.name = "PortalTableDraft"
+	var scroll := ScrollContainer.new(); scroll.name = "PortalEntryViewport"; scroll.custom_minimum_size.y = clampf(rows.size() * 38.0, 110.0, 320.0); scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL; parent.add_child(scroll)
+	var table := GridContainer.new(); table.name = "PortalEntryTable"; table.columns = mini(rows[0].size(), 12) + 1; scroll.add_child(table)
+	for column in table.columns - 1: _sheet_cell(d, table, str(rows[0][column]), true, false, 150)
+	_sheet_cell(d, table, "行", true, true, 45)
+	for row_index in range(1, mini(rows.size(), 41)):
+		var row: Array = rows[row_index]
+		for column in table.columns - 1:
+			while row.size() <= column: row.append("")
+			var input := LineEdit.new(); input.name = "PortalCell_%d_%d" % [row_index, column]; input.text = str(row[column]); input.custom_minimum_size = Vector2(150, 34); table.add_child(input)
+			input.text_changed.connect(func(value): row[column] = value; _table_changed(d, state, rows))
+		button(d, table, "削除", "PortalRemoveRow_%d" % row_index, func(): rows.remove_at(row_index); _table_changed(d, state, rows); rerender(d))
+	if rows.size() > 41: label(d, parent, "先頭40行を表示しています。残りの行はCSV入力で編集できます。", 12, MUTED)
+	var add := button(d, parent, "明細を追加", "PortalAddRow", func(): var row: Array = []; row.resize(rows[0].size()); row.fill(""); rows.append(row); _table_changed(d, state, rows); rerender(d))
+	add.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 
 static func _label_grid(d,parent: VBoxContainer,csv: String,id: String,cell_width: int = 200) -> void:
 	var rows:=_csv_rows(csv)

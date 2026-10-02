@@ -18,7 +18,7 @@ func _init() -> void:
 	game.settings_path = "user://business-growth-settings.json"
 	game._reset_state()
 	var catalog_count := CaseCatalog.all().size()
-	_assert(catalog_count == 60, "現行案件カタログ（単一36・設備2・複合3・endpoint-recovery・専門案件）")
+	_assert(catalog_count == 61 and not CaseCatalog.by_id("advanced-portal").is_empty(), "現行案件カタログ（通常案件・専門案件・請求ポータル）")
 	_assert(game.choose_strategy("advisory"), "advisory戦略を選択")
 	_assert(not game.work_guidance().is_empty(), "初期ガイダンス")
 	_assert(game.start_free_career(), "無料キャリア開始")

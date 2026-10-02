@@ -53,12 +53,15 @@ func _check_chapter(chapter: int) -> void:
 	game.vm_write(game.vm_info().config_path,game._vm().configuration_text(APPLIED[chapter]))
 	game.vm_run("systemctl restart "+str(game.vm_info().service))
 	if chapter == 2:
-		var legacy_network: Dictionary=JSON.parse_string(FileAccess.get_file_as_string(ProjectSettings.globalize_path("res://../artifacts/simulator/v124/legacy-v123-firewall.json")))
+		var legacy_network: Dictionary=preload("res://tests/legacy_service_fixture.gd").measured(2)
+		_assert(not legacy_network.has("firewall_model_version"), "representative legacy network fixture has no v2 marker")
 		game._vm().setup(2,legacy_network)
 		game.state.vm_states[game._vm_key()]=game._vm().export_state()
 	if chapter == 5:
-		# Retain the released HTTP page coverage; test_portal_ui covers the new Files console.
-		var legacy: Dictionary=JSON.parse_string(FileAccess.get_file_as_string(ProjectSettings.globalize_path("res://../artifacts/simulator/v123/legacy-v122-portal.json")))
+		# Exercise legacy HTTP pages through a reconstructed schema fixture;
+		# this does not claim to reproduce an unavailable released save file.
+		var legacy: Dictionary=preload("res://tests/legacy_service_fixture.gd").measured(5)
+		_assert(not legacy.has("portal_model_version"), "representative legacy portal fixture has no v2 marker")
 		game._vm().setup(5,legacy)
 		game.state.vm_states[game._vm_key()]=game._vm().export_state()
 	ui.open_panel("terminal")

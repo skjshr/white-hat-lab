@@ -21,6 +21,8 @@ func capture(label: String) -> void:
 	await frames()
 	await RenderingServer.frame_post_draw
 	var folder := ProjectSettings.globalize_path("res://../artifacts/simulator/workstations/ui")
+	if not OS.get_environment("WHL_CAPTURE_DIR").is_empty():
+		folder = OS.get_environment("WHL_CAPTURE_DIR")
 	DirAccess.make_dir_recursive_absolute(folder)
 	var suffix := "-narrow" if narrow else "-wide"
 	check(root.get_texture().get_image().save_png(folder.path_join(label + suffix + ".png")) == OK, "capture " + label)
@@ -71,10 +73,14 @@ func run() -> void:
 	office.ui.open_panel("terminal")
 	office.ui.desktop._show_app("files")
 	await frames(8)
+	var requested_pointer := root.position + Vector2i(173,241)
+	DisplayServer.warp_mouse(Vector2i(173,241))
+	await frames(2)
+	check(Vector2(DisplayServer.mouse_get_position()).distance_to(Vector2(requested_pointer)) <= 1.5, "native pointer moved to requested screen coordinate")
 	var pointer := DisplayServer.mouse_get_position()
 	office.ui.open_panel("company")
 	await frames(3)
-	print("POINTER before=", pointer, " after=", DisplayServer.mouse_get_position(), " mode=", Input.mouse_mode)
+	print("POINTER requested_screen=", requested_pointer, " before=", pointer, " after=", DisplayServer.mouse_get_position(), " mode=", Input.mouse_mode)
 	check(Input.mouse_mode == Input.MOUSE_MODE_VISIBLE, "UI transition retains visible pointer mode")
 	check(DisplayServer.mouse_get_position() == pointer, "UI transition preserves pointer position")
 	check(previews.size() == 2, "UI transition retains last actual desktop")

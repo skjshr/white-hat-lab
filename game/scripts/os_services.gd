@@ -161,16 +161,32 @@ static func refresh(d) -> void:
 	box.add_child(actions)
 	var restart = d._button("再起動", func():
 		d._trace("restart", str(info.service))
-		d.game.vm_run("systemctl restart "+str(info.service))
-		d._notify("再起動完了" if d.game._vm().state.active else "再起動失敗 · 設定エラー")
+		var response: String = d.game.vm_run("systemctl restart "+str(info.service))
+		var succeeded := response.begins_with(str(info.service) + ".service: active (running)")
+		var parsed = JSON.parse_string(response) if response.begins_with("{") else null
+		var reason := "保存できませんでした" if parsed is Dictionary and str(parsed.get("error", "")) == "save_failed" else response.get_slice("\n", 0)
+		w["operation_feedback"] = "再起動完了" if succeeded else "再起動できませんでした · " + reason
+		w["operation_ok"] = succeeded
+		d._notify(str(w.operation_feedback))
 		refresh(d)
 		if d.widgets.has("verify"): d._refresh_checks())
-	UI.os_primary(restart, SERVICE_ACCENT)
 	restart.name = "ServiceRestart"
 	actions.add_child(restart)
 	var edit_action = d._button("設定を編集", d._open_config)
 	edit_action.custom_minimum_size.y = restart.custom_minimum_size.y
 	actions.add_child(edit_action)
+	var workspace := _workspace(d)
+	if not workspace.is_empty():
+		var open: Button = d._button(str(workspace.title) + "を開く", func(): d._show_app("browser"); d._browse_url(str(workspace.url), true))
+		open.name = "ServiceOpenWorkspace"
+		UI.os_primary(open, SERVICE_ACCENT)
+		actions.add_child(open)
+		actions.move_child(open, 0)
+	else: UI.os_primary(restart, SERVICE_ACCENT)
+	if w.has("operation_feedback"):
+		var feedback: Label = d._label(str(w.operation_feedback), 13, UI.GREEN if bool(w.get("operation_ok", false)) else UI.RED)
+		feedback.name = "ServiceOperationResult"; feedback.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; box.add_child(feedback)
+	box.add_child(d._label("稼働状態・設定の反映・ログを確認します。", 12, UI.MUTED))
 	box.add_child(HSeparator.new())
 	_property(d, box, UI.copy("os_config_file"), str(info.config_path), SERVICE_ACCENT)
 	_property(d, box, UI.copy("os_configuration"), UI.copy("os_config_pending") if live.get("dirty",false) else UI.copy("os_config_applied"), UI.WARNING if live.get("dirty",false) else UI.INK)
@@ -191,6 +207,15 @@ static func refresh(d) -> void:
 		refresh(d))
 	rollback.disabled = not d.game.case_review().get("current_recorded",false)
 	recovery.add_child(rollback)
+
+static func _workspace(d) -> Dictionary:
+	if d._samba_v2(): return {"url":d.SAMBA_URL, "title":"Samba"}
+	if d._backup_v2(): return {"url":d.BACKUP_URL, "title":"Backrest"}
+	if d._identity_v2(): return {"url":d.IDENTITY_URL, "title":"ID管理"}
+	if d._edr_v2(): return {"url":d.EDR_URL, "title":"端末管理"}
+	if d._portal_v2(): return {"url":d.PORTAL_URL, "title":"社外共有"}
+	if d._firewall_v2(): return {"url":d.FIREWALL_URL, "title":"通信ルール"}
+	return {}
 
 static func _console_configuration(d, box: VBoxContainer) -> bool:
 	var url := ""

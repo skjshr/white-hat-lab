@@ -117,6 +117,9 @@ static func _ddos_action(s: Dictionary, action: String, target: String, option: 
 		var actual := _traffic(s)
 		if bool(actual.unauthorized): m.exports = int(m.exports) + 1
 		s.measurements = actual.duplicate(true); s.measurements.revision = s.world_revision
+		if not s.has("traffic_history"): s.traffic_history=[]
+		s.traffic_history.append({"clock":s.clock,"rule":m.rule.duplicate(true),"result":actual.duplicate(true)})
+		if s.traffic_history.size()>32: s.traffic_history.pop_front()
 		return _result(s,true,"adv_result_measured",JSON.stringify(actual),4)
 	return _invalid()
 
@@ -124,6 +127,11 @@ static func _api_request(s: Dictionary, actor: String, operation: String, resour
 	var m: Dictionary = s.model
 	if not m.users.has(actor): return {"status":401,"body":"unauthenticated"}
 	var user: Dictionary = m.users[actor]
+	if operation == "list":
+		var rows: Array=[]
+		for id in m.invoices:
+			if str(m.invoices[id].tenant)==str(user.tenant): rows.append({"id":id,"state":m.invoices[id].state,"amount":m.invoices[id].amount})
+		return {"status":200,"body":JSON.stringify(rows)}
 	if operation == "download":
 		if not m.jobs.has(resource): return {"status":404,"body":"job not found"}
 		var job: Dictionary = m.jobs[resource]
@@ -145,7 +153,7 @@ static func _api_request(s: Dictionary, actor: String, operation: String, resour
 
 static func _api_issue(m: Dictionary, actor: String, operation: String, resource: String) -> String:
 	if operation == "download" and m.jobs.has(resource) and str(m.jobs[resource].owner) != actor: return "job_owner"
-	if m.invoices.has(resource) and m.users.has(actor):
+	if operation in ["read","approve","export"] and m.invoices.has(resource) and m.users.has(actor):
 		if str(m.invoices[resource].tenant) != str(m.users[actor].tenant): return "tenant"
 		if operation == "approve" and str(m.users[actor].role) != "reviewer": return "approval"
 	return ""
@@ -326,4 +334,29 @@ static func view(s: Dictionary, selected: String = "") -> Dictionary:
 	if not selected.is_empty() and v.nodes.any(func(n: Dictionary): return str(n.id) == selected): v.actions.push_front(_action("inspect",selected))
 	v.actions.append(_action("measure","environment"))
 	if not s.measurements.is_empty(): v.records.append(_record("measurement","Latest measurement",JSON.stringify(s.measurements)))
+	v.workspace = _workspace(s)
 	return v
+
+static func _workspace(s: Dictionary) -> Dictionary:
+	var m: Dictionary=s.model
+	var data: Dictionary={"revision":s.revision,"world_revision":s.world_revision,"measurements":s.measurements.duplicate(true),"events":s.events.duplicate(true),"evidence":s.evidence.duplicate(true)}
+	match str(s.case_id):
+		"advanced-ddos":
+			data.rule=m.rule.duplicate(true); data.capacity=m.capacity; data.requests=m.requests.duplicate(true); data.history=s.get("traffic_history",[]).duplicate(true)
+			data.inspected=s.inspected.duplicate()
+			data.session=m.session.duplicate(true) if "admin01" in s.inspected else {}
+			data.task=m.task.duplicate(true) if "store01" in s.inspected else {}
+		"advanced-api":
+			data.users=m.users.duplicate(true); data.requests=[]; data.jobs=[]
+			for event in s.events:
+				if str(event.source)!="HTTP": continue
+				var parsed: Variant=JSON.parse_string(str(event.detail))
+				if parsed is Dictionary: data.requests.append(parsed)
+			# Resource contents become visible only through observed requests.
+			data.retest=m.retest.duplicate(true)
+			data.policy=m.policy.duplicate(true) if not m.proofs.is_empty() else {}
+			data.observed_proofs=m.proofs.size()
+		"advanced-supplychain":
+			data.source=m.source; data.dependency=m.dependency; data.artifacts=m.artifacts.duplicate(true); data.deployments=m.deployments.duplicate(true); data.blocked=m.blocked.duplicate(); data.revoked_keys=m.revoked_keys.duplicate(); data.last_build=m.last_build
+			data.pipeline={"hook":m.hook,"session":m.pipeline_session,"signer":m.signer} if "build01" in s.inspected else {}
+	return data

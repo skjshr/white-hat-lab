@@ -42,11 +42,41 @@ func walk_staff() -> void:
 			routine.set_paused(false);routine.tick(0.1,float(game.clock_minutes()))
 		office._sync_hired_staff()
 
+func load_synthetic_fixed_slot_fixture() -> bool:
+	# This is a generated schema fixture, NOT the unavailable v1.20 release save.
+	# Build a valid company through public APIs, then omit absolute placement
+	# fields to exercise Game.load_game's monitor migration and Rules' fixed-slot
+	# fallback. All later physical placement/staff assertions run unchanged.
+	check(game.new_game() and game.choose_strategy("operations") and game.start_free_career(),"synthetic layout career")
+	game.state.cash=200000;game.state.credit=1000000;game.state.skills={"advisory":10,"operations":10,"response":10}
+	check(game.buy_office_expansion() and game.end_day() and game.office_expanded(),"synthetic annex opened by construction")
+	for id in ["monitor","plant","backup","diagnostic","workstation","teamdesk","annexdesk_a","annexdesk_b"]:
+		check(game.buy_equipment(id),"synthetic equipment order "+id)
+		game.advance_delivery(31.0)
+		check(game.take_delivery(id) and game.place_delivery(id,game.equipment_slot(id),PI if id in ["teamdesk","workstation"] else 0.0),"synthetic equipment installed "+id)
+	for id in ["mio","sora","haru"]:check(game.hire_staff(id),"synthetic occupied workplace "+id)
+	if not failures.is_empty():return false
+	game.state.clock_minutes=540
+	var fixture: Dictionary=game.state.duplicate(true)
+	for entry in fixture.delivery_orders:
+		entry.erase("install_position")
+		if str(entry.id)=="monitor":entry.erase("rotation_y")
+	var cash_before:=int(fixture.cash)
+	var file:=FileAccess.open(game.save_path,FileAccess.WRITE)
+	check(file!=null,"write synthetic fixed-slot fixture")
+	if file==null:return false
+	file.store_string(JSON.stringify(fixture));file.close()
+	check(game.load_game() and str(game.state.get("last_load_error","")).is_empty(),"load synthetic fixed-slot schema without backup fallback")
+	check(int(game.state.cash)==cash_before,"schema migration does not repurchase equipment")
+	for id in ["plant","backup","diagnostic","workstation","teamdesk","annexdesk_a","annexdesk_b"]:
+		check(Rules._stored_position(order(id)).distance_to(Rules.FIXED_SLOTS[id])<0.01,"legacy fixed slot remains stable "+id)
+	print("LAYOUT_FIXTURE generated fixed-slot schema; not an archived v1.20 save")
+	return failures.is_empty()
+
 func run() -> void:
 	game=root.get_node("Game");game.set_process(false)
 	check(game.save_path.begins_with("user://qa-"),"QA profile")
-	var source:=ProjectSettings.globalize_path("res://../artifacts/simulator/v121/legacy-v120-office.json")
-	check(DirAccess.copy_absolute(source,ProjectSettings.globalize_path(game.save_path))==OK and game.load_game(),"load actual v1.20 distributed save")
+	if not load_synthetic_fixed_slot_fixture():print("LAYOUT_CUSTOMIZATION failures=",failures.size());quit(1);return
 	check(game.state.equipment.size()==8 and game.staff_capacity()==3,"legacy equipment and staff capacity")
 	var monitor := order("monitor")
 	check(Rules.monitor_position_error(monitor.get("install_position",[]),float(monitor.get("rotation_y",0)),game.delivery_orders(),true).is_empty(),"legacy monitor fits its actual tabletop")

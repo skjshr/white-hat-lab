@@ -176,9 +176,9 @@ static func _shares(d, parent: VBoxContainer, parsed: Dictionary) -> void:
 		editor_pane.get_parent().size_flags_stretch_ratio = 1.15
 		_share_editor(d, editor_pane, selected, _draft(d, selected, shares[selected]))
 
-static func _field(d, parent: Node, label_text: String, name: String, value: String) -> LineEdit:
-	var row: HBoxContainer = HBoxContainer.new(); row.add_theme_constant_override("separation", 10); parent.add_child(row)
-	var title: Label = _label(d, row, label_text, 13, MUTED); title.custom_minimum_size.x = 150; title.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+static func _field(d, parent: Node, label_text: String, name: String, value: String, stack_on_compact := true) -> LineEdit:
+	var row := BoxContainer.new(); row.vertical = compact(d) and stack_on_compact; row.add_theme_constant_override("separation", 5 if row.vertical else 10); parent.add_child(row)
+	var title: Label = _label(d, row, label_text, 13, MUTED); title.custom_minimum_size.x = 0 if row.vertical else 150; title.size_flags_horizontal = Control.SIZE_EXPAND_FILL if row.vertical else Control.SIZE_SHRINK_BEGIN; title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	var edit: LineEdit = LineEdit.new(); edit.name = name; edit.text = value; edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL; edit.custom_minimum_size.y = 32; row.add_child(edit)
 	return edit
 
@@ -199,6 +199,13 @@ static func _share_editor(d, parent: VBoxContainer, name: String, original: Dict
 	back.visible = compact(d)
 	editor.resized.connect(func(): back.visible = compact(d))
 	_label(d, heading, name, 18, INK)
+	var workspace := HFlowContainer.new(); workspace.add_theme_constant_override("h_separation", 6); editor.add_child(workspace)
+	for entry in [["config", "共有の設定", "SambaWorkspaceConfig"], ["access", "利用者としてアクセス", "SambaWorkspaceAccess"]]:
+		var destination := str(entry[0])
+		_button(d, workspace, str(entry[1]), str(entry[2]), func(): _state(d)["workspace"] = destination; d._save_session(false); d._render_samba(), str(_state(d).get("workspace", "config")) == destination)
+	if str(_state(d).get("workspace", "config")) == "access":
+		_access_workspace(d, editor, name)
+		return
 	var actions: HBoxContainer = HBoxContainer.new(); actions.add_theme_constant_override("separation", 8); heading.add_child(actions)
 	var draft_status := _label(d, editor, UI.copy("realism_unsaved_changes"), 12, Color("805b00"))
 	draft_status.name = "SambaDraftStatus"
@@ -227,6 +234,139 @@ static func _share_editor(d, parent: VBoxContainer, name: String, original: Dict
 	, true)
 	_button(d, actions, copy("cancel", "Cancel"), "SambaCancel", func():
 		var drafts: Dictionary = _state(d).get("share_drafts", {}); drafts.erase(name); _state(d)["share_drafts"] = drafts; _state(d)["selected_share"]=""; d._render_samba())
+
+static func _access_workspace(d, parent: VBoxContainer, share: String) -> void:
+	var s := _state(d)
+	var live: Dictionary = d.game._vm().state
+	var applied: Dictionary = live.get("applied", {}).get("shares", {}).get(share, {})
+	var path := str(applied.get("path", "/srv/share"))
+	var context := _label(d, parent, "適用中の共有  //" + str(live.host) + "/" + share + " → " + path, 13, MUTED)
+	context.name = "SambaAccessContext"; context.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	if bool(live.get("dirty", false)) or _has_draft(d, share):
+		_label(d, parent, "アクセス結果は適用中の設定で判定されます。編集中の設定は保存・再起動後に有効です。", 12, Color("805b00")).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_access_result(d, parent, share)
+	var actor := _field(d, parent, "利用者\n空欄 = ゲスト", "SambaProbeUser", str(s.get("probe_user", "staff")), false)
+	actor.text_changed.connect(func(value): s["probe_user"] = value; d._save_session(false))
+	var row := HFlowContainer.new(); row.add_theme_constant_override("h_separation", 8); parent.add_child(row)
+	var operation := OptionButton.new(); operation.name = "SambaProbeOperation"; row.add_child(operation)
+	for item in [["ls", "一覧を取得"], ["get", "ファイルを読む"], ["put", "ファイルを書き込む"]]:
+		operation.add_item(str(item[1])); operation.set_item_metadata(operation.item_count - 1, str(item[0]))
+		if str(s.get("probe_operation", "ls")) == str(item[0]): operation.select(operation.item_count - 1)
+	operation.item_selected.connect(func(index): s["probe_operation"] = str(operation.get_item_metadata(index)); d._save_session(false); d._render_samba())
+	var picker := OptionButton.new(); picker.name = "SambaProbeFilePicker"; picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL; parent.add_child(picker)
+	picker.add_item("共有内のファイルを選択")
+	var names: Array[String] = []
+	for raw in live.get("fs", {}):
+		if str(raw).begins_with(path.trim_suffix("/") + "/"): names.append(str(raw).trim_prefix(path.trim_suffix("/") + "/"))
+	names.sort()
+	for name in names:
+		picker.add_item(name); picker.set_item_metadata(picker.item_count - 1, name)
+		if name == str(s.get("probe_file", "")): picker.select(picker.item_count - 1)
+	var remote := _field(d, parent, "共有内のファイル", "SambaProbeFile", str(s.get("probe_file", "")), false)
+	remote.text_changed.connect(func(value): s["probe_file"] = value; d._save_session(false))
+	picker.item_selected.connect(func(index):
+		if index > 0: remote.text = str(picker.get_item_metadata(index)); s["probe_file"] = remote.text; d._save_session(false))
+	var local := _field(d, parent, "取得先 / 書込元", "SambaProbeLocal", str(s.get("probe_local", "/home/operator/share-check.txt")), false)
+	local.text_changed.connect(func(value): s["probe_local"] = value; d._save_session(false))
+	var actions := HFlowContainer.new(); actions.add_theme_constant_override("h_separation", 8); parent.add_child(actions)
+	_button(d, actions, "アクセスを実行", "SambaProbeRun", func():
+		var mode := str(operation.get_selected_metadata())
+		var observation := {"share":share, "user":actor.text.strip_edges(), "operation":mode, "file":remote.text, "local":local.text}
+		var values: Array = [share, actor.text, remote.text, local.text]
+		for value in values:
+			if '"' in str(value) or "'" in str(value) or "\n" in str(value) or "\r" in str(value):
+				observation.merge({"ok":false, "output":"引用符と改行を含まない利用者・パスを指定してください。", "input_error":true})
+				s["probe_result"] = observation; s["_reveal_probe_result"] = true; d._render_samba(); return
+		observation["applied_context"] = _probe_applied_context(d, share)
+		var command := mode
+		if mode != "ls": command += ' "' + (local.text if mode == "put" else remote.text) + '" "' + (remote.text if mode == "put" else local.text) + '"'
+		var identity := "-N" if actor.text.strip_edges().is_empty() else '-U "' + actor.text.strip_edges() + '"'
+		var output := str(d._samba_command('smbclient "//files01.client.test/' + share + '" ' + identity + " -c '" + command + "'"))
+		var ok := not (output.begins_with("NT_STATUS_") or output.begins_with("{") or output.begins_with("smbclient:") or output.begins_with("put:"))
+		if mode in ["get", "put"]: ok = output.ends_with(": OK")
+		observation.merge({"ok":ok, "output":output, "content":str(d.game.vm_read(local.text)) if ok and mode == "get" else ""})
+		s["probe_result"] = observation
+		d._save_session(false); s["_reveal_probe_result"] = true; d._render_samba()
+	, true)
+	_button(d, actions, "共有をファイルで開く", "SambaProbeOpenFiles", func(): d._open_samba_share(share))
+
+static func _probe_applied_context(d, share: String) -> Dictionary:
+	var live: Dictionary = d.game._vm().state
+	return {"host":str(live.get("host", "")), "active":bool(live.get("active", false)), "share":live.get("applied", {}).get("shares", {}).get(share, {}).duplicate(true), "map_to_guest":str(live.get("applied", {}).get("map_to_guest", "Never"))}
+
+static func _reveal_probe_result(d, target: Control) -> void:
+	# Containers and desktop focus restoration finish after a rebuilt page enters
+	# the tree. Only the surviving result card consumes the pending reveal.
+	for _frame in 3:
+		await d.get_tree().process_frame
+		if not is_instance_valid(target): return
+	if not bool(_state(d).get("_reveal_probe_result", false)) or not target.is_visible_in_tree(): return
+	_state(d).erase("_reveal_probe_result")
+	target.grab_focus()
+	# Focus-follow scrolling can run deferred. Reveal again after that pass so a
+	# wrapped ACL or response's final height, including its retry action, fits.
+	await d.get_tree().process_frame
+	if not is_instance_valid(target): return
+	var ancestor: Node = target.get_parent()
+	while ancestor != null:
+		if ancestor is ScrollContainer: ancestor.ensure_control_visible(target)
+		ancestor = ancestor.get_parent()
+
+static func _access_result(d, parent: VBoxContainer, share: String) -> void:
+	var s := _state(d)
+	var result: Dictionary = s.get("probe_result", {})
+	if result.is_empty(): return
+	var feedback := _box(parent, Color("f0f8f2") if bool(result.get("ok", false)) else Color("fff1ef"))
+	feedback.name = "SambaProbeResultCard"; feedback.focus_mode = Control.FOCUS_ALL
+	var mode := str(result.get("operation", ""))
+	var action := str({"ls":"一覧を取得", "get":"ファイルを読む", "put":"ファイルを書き込む"}.get(mode, mode))
+	var description := "%s / %s / %s %s" % [str(result.get("share", share)), str(result.get("user", "")) if not str(result.get("user", "")).is_empty() else "ゲスト", action, str(result.get("file", "")) if mode != "ls" else ""]
+	var heading := _label(d, feedback, ("入力の確認  " if bool(result.get("input_error", false)) else "前回の実測  ") + description, 12, MUTED)
+	heading.name = "SambaProbeResultContext"; heading.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var applied_context: Dictionary = result.get("applied_context", {})
+	var settings: Dictionary = applied_context.get("share", {})
+	if not applied_context.is_empty():
+		var location := _label(d, feedback, "実行時の共有  //" + str(applied_context.get("host", "")) + "/" + str(result.get("share", share)) + " → " + str(settings.get("path", "")), 12, MUTED)
+		location.name = "SambaProbeResultPath"; location.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		if applied_context != _probe_applied_context(d, str(result.get("share", share))):
+			_label(d, feedback, "この実測後に適用設定が変わっています。再実行で現在の状態を確認できます。", 12, Color("805b00")).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var output_label := _label(d, feedback, str(result.get("output", "")), 13, INK if bool(result.get("ok", false)) else RED)
+	output_label.name = "SambaProbeResult"; output_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	if not bool(result.get("ok", false)) and not applied_context.is_empty():
+		var acl_text := "実行時の適用設定: サービス %s / 利用可 %s / 読取専用 %s / ゲスト可 %s" % ["active" if bool(applied_context.get("active", false)) else "failed", "yes" if bool(settings.get("available", true)) else "no", "yes" if bool(settings.get("read only", true)) else "no", "yes" if bool(settings.get("guest ok", false)) else "no"]
+		for pair in [["valid users", "許可利用者"], ["invalid users", "拒否利用者"], ["write list", "書込リスト"], ["read list", "読取リスト"]]:
+			var value := str(settings.get(pair[0], ""))
+			acl_text += ("\n" if str(pair[0]) in ["valid users", "write list"] else " / ") + str(pair[1]) + ": " + (value if not value.is_empty() else "未指定")
+		acl_text += " / ゲストへの変換: " + str(applied_context.get("map_to_guest", "Never"))
+		var acl := _label(d, feedback, acl_text, 12, INK)
+		acl.name = "SambaProbeAppliedAcl"; acl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	if bool(result.get("ok", false)) and str(result.get("operation", "")) == "get":
+		var bytes := TextEdit.new(); bytes.name = "SambaProbeContent"; bytes.editable = false; bytes.text = str(result.get("content", "")); bytes.custom_minimum_size.y = 100 if compact(d) else 130; bytes.add_theme_font_override("font", d.mono); feedback.add_child(bytes)
+		for kind in ["normal", "read_only"]: bytes.add_theme_stylebox_override(kind, UI.style(Color("fafcfd"), LINE, 10, 8, 2))
+		for kind in ["font_color", "font_readonly_color", "font_uneditable_color"]: bytes.add_theme_color_override(kind, INK)
+	_button(d, feedback, "入力を変更して再試行", "SambaProbeEditInputs", func():
+		var input := parent.find_child("SambaProbeUser", true, false) as Control
+		if input != null:
+			input.grab_focus()
+			_reveal_probe_inputs(d, parent)
+	)
+	if bool(s.get("_reveal_probe_result", false)): _reveal_probe_result(d, feedback)
+
+static func _reveal_probe_inputs(d, parent: Control) -> void:
+	for _frame in 3:
+		await d.get_tree().process_frame
+		if not is_instance_valid(parent): return
+	var input := parent.find_child("SambaProbeUser", true, false) as Control
+	var run := parent.find_child("SambaProbeRun", true, false) as Control
+	if input == null or run == null or not input.has_focus(): return
+	var form := input.get_global_rect().merge(run.get_global_rect())
+	var ancestor: Node = run.get_parent()
+	while ancestor != null:
+		if ancestor is ScrollContainer and ancestor.size.y >= form.size.y:
+			# Focus-follow has revealed the first field. When the form fits, align
+			# its final action too, keeping all inputs and Run in one viewport.
+			ancestor.ensure_control_visible(run)
+		ancestor = ancestor.get_parent()
 
 static func _global(d, parent: VBoxContainer, parsed: Dictionary) -> void:
 	var body: VBoxContainer = _box(parent)

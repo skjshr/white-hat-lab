@@ -22,10 +22,36 @@ static func _cloud_state() -> Dictionary:
 	return {"case_id":"advanced-cloud","revision":0,"measurement_revision":-1,"world_revision":0,"user_password_revision":0,"apps":{"app-19":{"consent":true,"session":true},"app-72":{"consent":true,"session":true}},"audit":[{"id":"audit-1","time":"09:10","actor":"user-7","owner":"finance","grant":"app-19","permission":"ledger.read","resource":"ledger","created":"2026-09-01","publisher":"ledger-sync","approved_change":"FIN-114","approved_by":"finance-owner","actualdataread":true},{"id":"audit-2","time":"09:11","actor":"user-7","owner":"finance","grant":"app-72","permission":"ledger.read","resource":"ledger","created":"2026-09-18","publisher":"expense-viewer","approved_change":"none","approved_by":"none","actualdataread":false}],"requests":[],"events":[],"pinned":[],"attempts":[],"last_result":{}}
 
 static func view(s: Dictionary, selected: String = "") -> Dictionary:
-	if str(s.get("case_id","")) == "advanced-cloud": return _cloud_view(s,selected)
-	if str(s.get("case_id","")) == "advanced-malware": return _malware_view(s,selected)
-	if str(s.get("case_id","")) == "advanced-detection": return _detection_view(s,selected)
+	var result: Dictionary = {}
+	if str(s.get("case_id","")) == "advanced-cloud": result = _cloud_view(s,selected)
+	if str(s.get("case_id","")) == "advanced-malware": result = _malware_view(s,selected)
+	if str(s.get("case_id","")) == "advanced-detection": result = _detection_view(s,selected)
+	if not result.is_empty():
+		result.workspace = _workspace(s)
+		return result
 	return {"kind":"adv_no_case","nodes":[],"edges":[],"events":[],"records":[],"actions":[],"checks":checks(s),"last_result":s.get("last_result",{})}
+
+static func _workspace(s: Dictionary) -> Dictionary:
+	var data: Dictionary = {"revision":s.get("revision",0),"fresh":int(s.get("measurement_revision",-1))==int(s.get("revision",0))}
+	match str(s.get("case_id","")):
+		"advanced-cloud":
+			data.apps=s.apps.duplicate(true); data.audit=s.audit.duplicate(true); data.requests=s.requests.duplicate(true); data.pinned=s.get("pinned",[]).duplicate(true)
+		"advanced-malware":
+			data.artifact={"path":s.artifact.path,"sha256":s.artifact.sha256}
+			data.sandbox=s.sandbox.duplicate(true); data.observations=s.observations.duplicate(true); data.indicators=s.indicators.duplicate(true); data.hunt_matches=s.hunt_matches.duplicate(true)
+			data.endpoints=[]
+			for original in s.endpoints:
+				var endpoint: Dictionary=original.duplicate(true)
+				for group in ["files","processes","startup"]:
+					for row in endpoint[group]: row.erase("kind")
+				data.endpoints.append(endpoint)
+			data.quarantine=s.get("quarantine_store",{}).duplicate(true)
+			for row in data.quarantine.values(): row.item.erase("kind")
+		"advanced-detection":
+			data.sources=s.sources.duplicate(true); data.rule=s.rule.duplicate(true); data.notification=s.notification; data.events=s.raw_events.duplicate(true)
+			for row in data.events: row.erase("truth")
+			data.replayed=s.replay_done; data.matched=s.matched_ids.duplicate(); data.false_positive=s.false_positive; data.false_negative=s.false_negative; data.notified=s.attack_notified
+	return data
 
 static func act(s: Dictionary, action: String, args: Dictionary = {}) -> Dictionary:
 	var r: Dictionary
@@ -35,7 +61,7 @@ static func act(s: Dictionary, action: String, args: Dictionary = {}) -> Diction
 	var ok := bool(r.get("ok",false)); var changed := bool(r.get("changed",ok)); s.attempts = s.get("attempts",[]); s.attempts.append({"action":action,"ok":ok,"result_key":r.get("result_key","")})
 	if changed and str(s.case_id) == "advanced-cloud" and action in ["password_reset", "disable_grant", "revoke_grant", "restore_grant", "restore_consent", "revoke_app_session", "disable_session", "restore_app_session"]:
 		s.world_revision = int(s.get("world_revision", 0)) + 1
-	if changed and str(s.case_id) == "advanced-detection" and (action.begins_with("set_") or action == "toggle_source"):
+	if changed and str(s.case_id) == "advanced-detection" and (action.begins_with("set_") or action == "toggle_source" or action == "configure_rule"):
 		s.replay_done = false; s.attack_notified = false
 	if changed:
 		s.revision = int(s.get("revision",0))+1; s.measurement_revision = -1; s.last_result = {"action":action,"result_key":r.get("result_key",""),"result_args":r.get("result_args", []),"revision":s.revision}
@@ -63,7 +89,10 @@ static func _cloud_act(s: Dictionary, action: String, a: Dictionary) -> Dictiona
 	if action in ["revoke_app_session","disable_session"] and s.apps.has(t): s.apps[t].session=false; _event(s,"session",t); return _result(true,true,3,"adv_cloud_session_revoked")
 	if action == "restore_app_session" and s.apps.has(t): s.apps[t].session=true; _event(s,"session_restored",t); return _result(true,true,2,"adv_cloud_session_restored")
 	if action in ["probe_request","request_data","one_probe"] and s.apps.has(t):
-		var allowed := bool(s.apps[t].consent) and bool(s.apps[t].session); s.requests.append({"id":"request-%d"%s.requests.size(),"time":"now","app":t,"resource":"ledger","world_revision":int(s.get("world_revision", 0)),"allowed":allowed,"actualdataread":allowed}); _event(s,"request",t); return _result(true,true,2,"adv_cloud_request_allowed" if allowed else "adv_cloud_request_denied")
+		var allowed := bool(s.apps[t].consent) and bool(s.apps[t].session)
+		var contents: String = str(s.get("ledger_bytes","entry,department,amount\nL-001,finance,18000\nL-002,sales,27000\n"))
+		s.requests.append({"id":"request-%d"%s.requests.size(),"time":"now","app":t,"resource":"ledger","world_revision":int(s.get("world_revision", 0)),"allowed":allowed,"actualdataread":allowed,"status":200 if allowed else 403,"body":contents if allowed else "permission denied","sha256":contents.sha256_text() if allowed else ""})
+		_event(s,"request",t); return _result(true,true,2,"adv_cloud_request_allowed" if allowed else "adv_cloud_request_denied")
 	if action == "pin":
 		for row in s.audit:
 			if str(row.id)==t: s.pinned.append(row.duplicate(true)); _event(s,"evidence",t); return _result(true,true,1,"adv_cloud_evidence_pinned")
@@ -82,6 +111,26 @@ static func _request(s: Dictionary, app: String, allowed: bool) -> bool:
 
 static func _malware_act(s: Dictionary, action: String, a: Dictionary) -> Dictionary:
 	var o := _target(a)
+	if action == "configure_sandbox":
+		var date: String=str(a.get("date","")); var profile: String=str(a.get("profile",""))
+		if not _valid_date(date) or profile not in ["standard","restricted"] or not a.get("network") is bool: return _result(false,false,0,"adv_action_rejected")
+		var next_sandbox: Dictionary={"network":a.network,"date":date,"profile":profile}
+		if s.sandbox==next_sandbox: return _result(true,false,0,"adv_malware_sandbox_changed")
+		s.sandbox=next_sandbox
+		_event(s,"sandbox",JSON.stringify(s.sandbox)); return _result(true,true,2,"adv_malware_sandbox_changed")
+	if action == "restore_quarantined_item":
+		var store: Dictionary=s.get("quarantine_store",{})
+		if not store.has(o): return _result(false,false,0,"adv_action_rejected")
+		var held: Dictionary=store[o]
+		for ep in s.endpoints:
+			if str(ep.id)!=str(held.endpoint): continue
+			var field: String=str(held.field); var item: Dictionary=held.item
+			for existing in ep[field]:
+				if str(existing.get("path",existing.get("name","")))==str(item.get("path",item.get("name",""))): return _result(false,false,0,"adv_action_rejected")
+			ep[field].append(item.duplicate(true)); store.erase(o)
+			if str(ep.id)=="endpoint-b": ep.business_ok=true
+			s.rescan_ok=false; _event(s,"restore",o); return _result(true,true,2,"adv_malware_quarantine_restored")
+		return _result(false,false,0,"adv_action_rejected")
 	if action in ["sandbox_network","set_network"]: s.sandbox.network=o in ["on","enabled","true"]; _event(s,"sandbox-network",o); return _result(true,true,2,"adv_malware_sandbox_changed")
 	if action in ["sandbox_profile","set_profile"]: s.sandbox.profile=o; _event(s,"sandbox-profile",o); return _result(true,true,1,"adv_malware_sandbox_changed")
 	if action in ["sandbox_date","set_date"]: s.sandbox.date=o; _event(s,"sandbox-date",o); return _result(true,true,1,"adv_malware_sandbox_changed")
@@ -115,25 +164,28 @@ static func _malware_act(s: Dictionary, action: String, a: Dictionary) -> Dictio
 			if not wanted.is_empty() and str(ep.id)!=wanted: continue
 			if action=="quarantine_file":
 				for f in ep.files:
-					if str(f.sha256)==str(s.artifact.sha256): ep.files.erase(f); s.quarantined.append(ep.id); found=true; break
+					if str(f.sha256)==str(s.artifact.sha256): _hold(s,ep,"files",f); ep.files.erase(f); s.quarantined.append(ep.id); found=true; break
 				if found: break
+				continue
 			for p in ep.processes:
 				if found: break
-				if (str(p.name)=="invoice_update.exe" or (str(ep.id)=="endpoint-b" and wanted=="endpoint-b")): ep.processes.erase(p); ep.business_ok = str(ep.id)!="endpoint-b"; s.quarantined.append(ep.id); found=true; break
+				if (str(p.name)=="invoice_update.exe" or (str(ep.id)=="endpoint-b" and wanted=="endpoint-b")): _hold(s,ep,"processes",p); ep.processes.erase(p); ep.business_ok = str(ep.id)!="endpoint-b"; s.quarantined.append(ep.id); found=true; break
 			if found: break
-		return _result(found,found,3,"adv_malware_quarantined")
+		return _result(found,found,3 if found else 0,"adv_malware_quarantined")
 	if action in ["restore_quarantine","restore_process"]:
 		var restored:=false; var wanted:=_target(a)
 		for ep in s.endpoints:
 			if not wanted.is_empty() and str(ep.id)!=wanted: continue
 			if str(ep.id)=="endpoint-b" and ep.processes.is_empty(): ep.processes.append({"name":"admin_tool.exe","kind":"normal-admin"}); ep.business_ok=true; restored=true
 			if str(ep.id)=="endpoint-a" and ep.processes.is_empty(): ep.business_ok=true; restored=true
-		return _result(restored,restored,2,"adv_malware_quarantine_restored")
+		return _result(restored,restored,2 if restored else 0,"adv_malware_quarantine_restored")
 	if action in ["quarantine_persistence","remove_persistence"]:
+		if not o.is_empty() and not s.endpoints.any(func(ep: Dictionary): return str(ep.id)==o): return _result(false,false,0,"adv_action_rejected")
 		var found:=false; for ep in s.endpoints:
+			if not o.is_empty() and o.begins_with("endpoint-") and str(ep.id)!=o: continue
 			for item in ep.startup:
-				if str(item.kind)=="specimen": ep.startup.erase(item); s.persistence_removed.append(ep.id); found=true
-		return _result(found,found,2,"adv_malware_persistence_removed")
+				if str(item.kind)=="specimen": _hold(s,ep,"startup",item); ep.startup.erase(item); s.persistence_removed.append(ep.id); found=true
+		return _result(found,found,2 if found else 0,"adv_malware_persistence_removed")
 	if action in ["rescan","verify"]:
 		var clean:=true; var business:=true; for ep in s.endpoints:
 			for p in ep.processes:
@@ -148,6 +200,22 @@ static func _malware_act(s: Dictionary, action: String, a: Dictionary) -> Dictio
 
 static func _detection_act(s: Dictionary, action: String, a: Dictionary) -> Dictionary:
 	var o:=_target(a)
+	if action == "configure_rule":
+		if not a.get("sources",{}) is Dictionary or not a.get("notification",false) is bool: return _result(false,false,0,"adv_action_rejected")
+		var threshold_value: Variant=a.get("threshold",0)
+		if typeof(threshold_value) not in [TYPE_INT,TYPE_FLOAT] or float(threshold_value)!=floorf(float(threshold_value)): return _result(false,false,0,"adv_action_rejected")
+		var process_name: String=str(a.get("process","")).strip_edges(); var threshold: int=int(threshold_value); var sources: Dictionary=a.get("sources",{})
+		if process_name.is_empty() or process_name.length()>100 or threshold<1 or threshold>1000: return _result(false,false,0,"adv_action_rejected")
+		for source in sources:
+			if not s.sources.has(source) or not sources[source] is bool: return _result(false,false,0,"adv_action_rejected")
+		var next_rule: Dictionary={"process":process_name,"network_threshold":threshold,"exclusion":str(a.get("exclusion",""))}
+		var next_sources: Dictionary=s.sources.duplicate(true)
+		for source in sources: next_sources[source]=sources[source]
+		var same_rule: bool=str(next_rule.process)==str(s.rule.get("process","")) and int(next_rule.network_threshold)==int(s.rule.get("network_threshold",0)) and str(next_rule.exclusion)==str(s.rule.get("exclusion",""))
+		if same_rule and next_sources==s.sources and bool(a.get("notification",false))==bool(s.notification): return _result(true,false,0,"adv_detection_rule_changed")
+		for source in sources: s.sources[source]=sources[source]
+		s.rule=next_rule; s.notification=bool(a.get("notification",false))
+		_event(s,"rule",JSON.stringify(s.rule)); return _result(true,true,2,"adv_detection_rule_changed")
 	if action in ["set_source","toggle_source"] and s.sources.has(o): s.sources[o]=bool(a.get("enabled",not s.sources[o])); _event(s,"source",o); return _result(true,true,1,"adv_detection_source_changed")
 	if action in ["set_process","set_rule_process"]: s.rule.process=o; _event(s,"rule-process",o); return _result(true,true,1,"adv_detection_rule_changed")
 	if action in ["set_threshold","set_network_threshold"]: s.rule.network_threshold=int(a.get("value",o)); _event(s,"rule-threshold",o); return _result(true,true,1,"adv_detection_rule_changed")
@@ -175,6 +243,21 @@ static func _detection_replay(s: Dictionary) -> Dictionary:
 static func _time_value(value: Variant) -> int:
 	var parts := str(value).split(":")
 	return int(parts[0])*60 + int(parts[1]) if parts.size() > 1 else int(value)
+
+static func _hold(s: Dictionary, endpoint: Dictionary, field: String, item: Dictionary) -> void:
+	if not s.has("quarantine_store"): s.quarantine_store={}
+	var id: String=str(endpoint.id)+"/"+field+"/"+str(item.get("path",item.get("name","")))
+	s.quarantine_store[id]={"endpoint":endpoint.id,"field":field,"item":item.duplicate(true)}
+
+static func _valid_date(value: String) -> bool:
+	if value.length()!=10 or value.substr(4,1)!="-" or value.substr(7,1)!="-": return false
+	for part in [value.substr(0,4),value.substr(5,2),value.substr(8,2)]:
+		for character in part:
+			if character not in "0123456789": return false
+	var year: int=int(value.substr(0,4)); var month: int=int(value.substr(5,2)); var day: int=int(value.substr(8,2))
+	if year<1 or month<1 or month>12 or day<1: return false
+	var days: Array=[31,29 if year%400==0 or (year%4==0 and year%100!=0) else 28,31,30,31,30,31,31,30,31,30,31]
+	return day<=int(days[month-1])
 
 static func _cloud_view(s: Dictionary, selected: String) -> Dictionary:
 	var app_target := selected if s.apps.has(selected) else "app-19"

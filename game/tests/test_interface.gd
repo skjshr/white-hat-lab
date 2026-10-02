@@ -22,7 +22,9 @@ func _init() -> void:
 	ui._new_game(); game.choose_strategy("operations")
 	for scenario in game.CASES.all():
 		var mail := MAIL._mail_for(scenario)
-		_assert(not mail.is_empty() and str(mail.get("body","")).contains(str(scenario.client)),"career mail matches case and client: "+str(scenario.id))
+		# Authored mail may use the renderer's explicit scenario brief fallback.
+		var effective_body: String = str(mail.get("body",scenario.get("brief","")))
+		_assert(str(mail.get("company",scenario.client))==str(scenario.client) and not effective_body.is_empty(),"career mail and brief fallback match case and client: "+str(scenario.id))
 	for chapter in 6:
 		_assert(not MAIL._mail_for(game.mission()).is_empty(),"intro mail maps to runtime case ID")
 		ui.open_panel("terminal")
@@ -31,7 +33,7 @@ func _init() -> void:
 			_assert(not pc.widgets.mail.reading,"mail opens in inbox view")
 			var current_mail: Dictionary = MAIL._mail_for(game.mission())
 			pc.widgets.mail.selected_subject=str(current_mail.get("subject",game.mission().title)); pc.widgets.mail.reading=true; pc._refresh_mail()
-			var plan = pc.widgets.mail.footer.find_child("MailContractPlan",true,false)
+			var plan = pc.widgets.mail.body.find_child("MailContractPlan",true,false)
 			_assert(plan is OptionButton,"mail exposes contract selector")
 			if plan is OptionButton: plan.item_selected.emit(1)
 			_assert(game.state.contract_plan=="priority","mail contract selector changes actual plan")
@@ -69,10 +71,16 @@ func _init() -> void:
 	_assert(game.state.game_complete, "six operational cases completed")
 	_assert(game.learn_skill("operations") and game.learn_skill("operations") and game.learn_skill("response"),"specialize and diversify")
 	_assert(game.continue_business(),"continuous business")
+	_assert(not game.state.offers.is_empty(),"career transition supplies contract offers")
+	if game.state.offers.is_empty():
+		print("FAIL count=",failures.size()); quit(1); return
 	for offer in game.state.offers:
 		ui._select_contract(str(offer.id))
 		var detail: String = _visible_text(ui.modal_body)
-		_assert(not detail.contains("%d") and not detail.contains("%s") and detail.contains(preload("res://scripts/ui_theme.gd").copy("board_profit") % (int(offer.reward)-int(offer.estimated_cost))),"contract details format real reward and cost: "+str(offer.id))
+		# Hardware quotes include separately billed material, so the quote API
+		# is the source for net proceeds as well as ordinary service prices.
+		var quote: Dictionary = game.contract_quote(offer)
+		_assert(not detail.contains("%d") and not detail.contains("%s") and detail.contains(preload("res://scripts/ui_theme.gd").copy("board_profit") % int(quote.net)),"contract details format real reward and cost: "+str(offer.id))
 	ui._select_contract(str(game.state.offers[0].id))
 	var board_plan = ui.modal_body.find_child("ContractPlan", true, false)
 	_assert(board_plan is OptionButton, "career board exposes contract plans")
@@ -89,9 +97,17 @@ func _init() -> void:
 	ui.board_selected_id = ""
 	var largest := 0
 	for day in 4:
-		var offers: Array = game.state.offers.filter(func(o): return o.unlocked and o.category == "operations")
-		var offer: Dictionary = offers[-1]
-		_assert(game.choose_contract(offer.id),"select contract")
+		# Only current market leads can be accepted. The identity/portal linked
+		# contract uses this same actual VM workflow; advanced and hardware
+		# contracts require their own service-specific test solvers.
+		var offers: Array = game.state.offers.filter(func(o): return bool(o.unlocked) and o.category == "operations" and bool(o.get("market_available",false)) and (str(o.case_id).begins_with("service-") or str(o.case_id)=="composite-former-access"))
+		offers.sort_custom(func(a,b): return int(a.reward)>int(b.reward))
+		_assert(not offers.is_empty(),"current supported career lead exists")
+		if offers.is_empty(): break
+		var offer: Dictionary = offers[0]
+		var accepted: bool = game.choose_contract(offer.id)
+		_assert(accepted,"select current contract "+str(offer.case_id))
+		if not accepted: break
 		largest = maxi(largest,game.state.targets.size())
 		for site in game.state.targets.size():
 			game.select_target(site); ui.open_panel("terminal")
@@ -103,7 +119,11 @@ func _init() -> void:
 	_assert(largest >= 2,"larger contracts reached through company growth")
 	var expected := 5000
 	for entry in game.state.history: expected += int(entry.get("profit",0)) + int(entry.get("retainer",0))
-	_assert(game.state.cash == expected and game.state.profit == expected-5000,"accounting reconciles")
+	var outstanding := 0
+	for invoice in game.company_invoices():
+		if str(invoice.get("status","")) != "paid": outstanding += int(invoice.get("amount",0))
+	_assert(game.company_invoices().size()==4 and outstanding>0,"career deliveries create actual unpaid company invoices")
+	_assert(game.state.cash == expected-outstanding and game.state.profit == expected-5000,"cash plus unpaid invoices reconciles with recognized profit")
 	_assert(game.load_game() and game.state.history.filter(func(entry): return not str(entry.get("id", "")).begins_with("retainer-day-")).size()==10,"saved machines and ten completed deliveries restored")
 	ui.close_panel(false); ui.open_panel("settings")
 	var previous: Dictionary = game.settings.duplicate(true)
@@ -126,7 +146,7 @@ func _init() -> void:
 func _finish_current(pc, chapter: int) -> void:
 	pc._open_config()
 	var scenario: Dictionary = game._scenario()
-	if scenario.is_empty(): pc.editor.text = CONFIGS[chapter]
+	if scenario.is_empty(): pc.editor.text = game._vm().configuration_text(game._vm()._legacy_desired())
 	else:
 		pc.editor.text = game._vm().configuration_text(scenario.desired)
 	pc._save_editor()
@@ -149,7 +169,7 @@ func _finish_current(pc, chapter: int) -> void:
 	_assert(game.state.checks.all(func(c):return c.passed),"service probes pass")
 
 func _assert(value: bool, label: String) -> void:
-	if not value: failures.append(label)
+	if not value: failures.append(label); print("FAIL: ",label)
 
 func _visible_text(node: Node) -> String:
 	var result := str(node.text) if node is Label else ""

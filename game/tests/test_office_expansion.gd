@@ -55,7 +55,12 @@ func run() -> void:
 	check(not game.buy_office_expansion() and game.state==before,"failed construction order rolls back funds and state")
 	game.save_path=path
 	office.ui.root.show();office.ui.open_panel("shop"); await frames()
-	var buy = office.ui.modal_body.find_child("BuyOfficeExpansion",true,false)
+	# The current catalog selects a product first and renders its sole order
+	# action in the modal footer. Follow that public UI path.
+	var expansion = office.ui.modal_body.find_child("EquipmentSelect_office_expansion",true,false)
+	check(expansion is Button and not expansion.disabled,"construction selectable in catalog")
+	if expansion is Button and not expansion.disabled: expansion.pressed.emit(); await frames()
+	var buy = office.ui.modal_footer.find_child("BuyOfficeExpansion",true,false)
 	check(buy!=null and not buy.disabled,"construction order button available")
 	if buy!=null and not buy.disabled: buy.pressed.emit()
 	check(int(game.state.cash)==int(before.cash)-28000,"one construction fee charged")

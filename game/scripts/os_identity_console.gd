@@ -96,6 +96,15 @@ static func _run(d, command: String) -> void:
 	s["output"] = parsed if parsed != null else {"ok": false, "error": raw}
 	d.get_node("/root/Soundscape").play_ui("work_success" if parsed is Dictionary and bool(parsed.get("ok",false)) else "work_failure")
 	if parsed is Dictionary:
+		s["last_action"] = command.get_slice(" ", 0)
+		s["last_target"] = command.get_slice(" ", 1) if str(s.last_action) in ["enable", "access", "logout", "logout-all"] else ""
+		if command.begins_with("enable ") and bool(parsed.get("ok", false)):
+			var drafts: Dictionary = s.get("account_drafts", {})
+			drafts.erase(command.get_slice(" ", 1)); s["account_drafts"] = drafts
+		if command.begins_with("access "):
+			var observations: Dictionary = s.get("session_observations", {})
+			observations[command.get_slice(" ", 1)] = {"response":parsed.duplicate(true), "state":_access_state(d)}
+			s["session_observations"] = observations
 		if command.begins_with("login "):
 			s.erase("challenge"); s.erase("enrollment"); s.erase("required_action")
 		if parsed.has("required_action"):
@@ -111,10 +120,15 @@ static func _run(d, command: String) -> void:
 			s.erase("required_action")
 	s.erase("_parent")
 	d.identity_ui = s
+	d._save_session(false)
 	if d.has_method("_render_identity"):
 		d._render_identity()
 	else:
 		_rerender(d)
+
+static func _access_state(d) -> String:
+	var snapshot: Dictionary = d.game._vm().identity_snapshot()
+	return JSON.stringify({"users":snapshot.get("users", []), "sessions":snapshot.get("sessions", []), "policy":snapshot.get("policy", {}), "active":d.game._vm().state.get("active", false)}, "", true)
 
 static func _label(d, parent: Node, text: String, size := 14, color := INK) -> Label:
 	var l: Label = d._label(text, size, color)
@@ -236,16 +250,19 @@ static func render(d, parent: VBoxContainer) -> void:
 	var content_padding := 12 if compact_nav else 28
 	for edge in ["left","right","top","bottom"]: margin.add_theme_constant_override("margin_"+edge, content_padding)
 	main_scroll.add_child(margin)
-	var body := VBoxContainer.new(); body.size_flags_horizontal = Control.SIZE_EXPAND_FILL; body.add_theme_constant_override("separation", 12); margin.add_child(body)
+	var body := VBoxContainer.new(); body.size_flags_horizontal = Control.SIZE_EXPAND_FILL; body.add_theme_constant_override("separation", 8); margin.add_child(body)
 	var page_title := _copy("identity_users", "Users") if view == "users" else (_copy("identity_authentication", "Authentication") if view == "authentication" else (_copy("identity_events", "Events") if view == "events" else _copy("identity_test_login", "Test login")))
 	if view == "login" and str(s.get("required_action", "")) == "UPDATE_PASSWORD": page_title = _copy("identity_admin_update_password", "Update password")
 	if view != "users" or str(s.get("user", "")).is_empty():
 		_label(d, body, page_title, 26, INK)
+	if view != "login" and not _response(d).is_empty(): _result(d, body, false)
 	if view == "authentication": _auth(d, body, snapshot)
 	elif view == "events": _events(d, body, snapshot)
 	elif view == "login": _login(d, body)
 	else: _users(d, body, s, snapshot)
-	if view != "login" and not _response(d).is_empty(): _result(d,body)
+	if view != "login" and not _response(d).is_empty():
+		var detail: VBoxContainer = d._disclosure(body, _copy("identity_response", "Response"))
+		_label(d, detail, JSON.stringify(_response(d), "  "), 12, MUTED)
 	shell.resized.connect(func():
 		if is_instance_valid(shell): _reflow(d, shell)
 	)
@@ -284,17 +301,26 @@ static func _users(d, body: VBoxContainer, s: Dictionary, data: Dictionary) -> v
 	var crumbs := HBoxContainer.new(); crumbs.add_theme_constant_override("separation", 8); body.add_child(crumbs)
 	var users_link := _button(d, crumbs, _copy("identity_users", "Users"), func(): s.erase("user"); d.identity_ui = s; _rerender(d)); users_link.name = "IdentityUsersBreadcrumb"; users_link.flat = true; users_link.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN; users_link.add_theme_color_override("font_color", BLUE)
 	var chevron := _label(d, crumbs, "›", 13, MUTED); chevron.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN; chevron.autowrap_mode = TextServer.AUTOWRAP_OFF
-	_label(d, crumbs, _copy("identity_admin_user_details", "User details"), 13, MUTED)
+	_label(d, crumbs, selected, 18, INK)
 	if str(s.get("user_tab", "")) == "credentials" and str(s.get("credential_form", "")) == "password":
 		_password_form(d, body, selected, s)
 		return
-	_label(d, body, selected, 26, INK)
+	var active_sessions: Array = data.get("sessions", []).filter(func(item): return item is Dictionary and str(item.get("user", "")) == selected and not bool(item.get("revoked", false)))
+	var lifecycle := HFlowContainer.new(); lifecycle.add_theme_constant_override("h_separation", 10); body.add_child(lifecycle)
+	lifecycle.name = "IdentityAccountLifecycle"
+	var lifecycle_status := _label(d, lifecycle, "新規ログイン: " + ("有効" if bool(user.get("enabled", false)) else "停止") + "  ·  既存セッション: %d 件" % active_sessions.size(), 13, INK)
+	lifecycle_status.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	lifecycle_status.autowrap_mode = TextServer.AUTOWRAP_OFF
+	lifecycle_status.tooltip_text = "アカウントの停止と、発行済みセッションの失効は別の操作です。"
+	var login := _button(d, lifecycle, "ログインを試す", func(): d._open_identity_login(selected))
+	login.name = "IdentityLoginAs_" + selected
+	login.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	var tabs := HFlowContainer.new(); tabs.add_theme_constant_override("h_separation", 0); tabs.add_theme_constant_override("v_separation",0); body.add_child(tabs)
 	for tab in ["details", "credentials", "sessions"]:
 		var active: bool = str(s.get("user_tab", "details")) == tab
 		var tab_button := _button(d, tabs, _copy("identity_"+tab, tab.capitalize()), func(): s["user_tab"] = tab; d.identity_ui = s; _rerender(d), active); tab_button.name = "IdentityTab_"+tab
 		tab_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-		var tab_style := COPY.style(PAPER if active else SUBTLE, BLUE if active else BORDER, 18, 10, 0)
+		var tab_style := COPY.style(PAPER if active else SUBTLE, BLUE if active else BORDER, 12, 6, 0)
 		tab_style.border_width_left = 0; tab_style.border_width_right = 0
 		tab_style.border_width_top = 2 if active else 0
 		tab_style.border_width_bottom = 1 if not active else 0
@@ -308,10 +334,15 @@ static func _users(d, body: VBoxContainer, s: Dictionary, data: Dictionary) -> v
 
 static func _details(d, body: VBoxContainer, user: Dictionary, id: String) -> void:
 	var enabled := bool(user.get("enabled", false))
+	var state := _st(d)
+	var drafts: Dictionary = state.get("account_drafts", {})
 	var heading := HBoxContainer.new(); heading.custom_minimum_size.y = 42; body.add_child(heading)
 	_label(d, heading, _copy("identity_admin_user_details", "User details"), 18, INK)
-	var check := CheckBox.new(); check.name = "IdentityEnable"; check.text = _copy("identity_enabled", "Enabled"); check.button_pressed = enabled; check.size_flags_horizontal = Control.SIZE_SHRINK_END; heading.add_child(check)
-	var save: Button = d._button(_copy("identity_save", "Save"), func(): _run_user(d, "enable "+id+" "+("on" if check.button_pressed else "off"))); save.name = "IdentitySave"; save.size_flags_horizontal=Control.SIZE_SHRINK_BEGIN; body.add_child(save)
+	var check := CheckBox.new(); check.name = "IdentityEnable"; check.text = _copy("identity_enabled", "Enabled"); check.button_pressed = bool(drafts.get(id, enabled)); check.size_flags_horizontal = Control.SIZE_SHRINK_END; heading.add_child(check)
+	var draft_note := _label(d, body, "未保存の変更" if drafts.has(id) else "現在のアカウント状態", 12, MUTED)
+	draft_note.name = "IdentityAccountDraft"
+	check.toggled.connect(func(value): drafts[id] = value; state["account_drafts"] = drafts; d.identity_ui = state; draft_note.text = "未保存の変更"; d._save_session(false))
+	var save: Button = d._button(_copy("identity_save", "Save"), func(): _run_user(d, "enable "+id+" "+("on" if check.button_pressed else "off"))); save.name = "IdentitySave"; save.size_flags_horizontal=Control.SIZE_SHRINK_BEGIN; heading.add_child(save)
 	var table := VBoxContainer.new(); table.name = "IdentityUserDetails"; table.add_theme_constant_override("separation", 0); body.add_child(table)
 	for pair in [[_copy("identity_username", "Username"), id], [_copy("identity_status", "Status"), _copy("identity_enabled", "Enabled") if enabled else _copy("identity_disabled", "Disabled")], [_copy("identity_mfa_required", "MFA"), _copy("identity_mfa_required", "Required") if bool(user.get("mfa_required", false)) else _copy("identity_mfa_off", "Optional")]]:
 		var row := HBoxContainer.new(); row.custom_minimum_size.y = 42; table.add_child(row); _label(d, row, str(pair[0]), 13, MUTED); _label(d, row, str(pair[1]), 13, INK)
@@ -395,28 +426,31 @@ static func _password_form(d, body: VBoxContainer, id: String, state: Dictionary
 	var cancel := _button(d, actions, _copy("identity_admin_cancel", "Cancel"), func(): state.erase("credential_form"); d.identity_ui = state; _rerender(d)); cancel.name = "IdentityPasswordCancel"; cancel.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 
 static func _sessions(d, body: VBoxContainer, data: Dictionary, id: String) -> void:
-	var active: Array = data.get("sessions",[]).filter(func(session):return session is Dictionary and str(session.get("user",""))==id and not bool(session.get("revoked",false)))
-	var all: Button = d._button(_copy("identity_logout_all", "Logout all"), func(): _run_user(d, "logout-all "+id)); all.name = "IdentityLogoutAll_"+id; all.disabled=active.is_empty(); all.size_flags_horizontal=Control.SIZE_SHRINK_BEGIN; body.add_child(all)
-	if active.is_empty():
+	var sessions: Array = data.get("sessions",[]).filter(func(session):return session is Dictionary and str(session.get("user",""))==id)
+	sessions.reverse()
+	var active: Array = sessions.filter(func(session): return not bool(session.get("revoked",false)))
+	if sessions.is_empty():
 		_label(d,body,_copy("identity_no_sessions","No active sessions"),14,MUTED)
 		return
-	var table := GridContainer.new(); table.columns = 5; table.name = "IdentitySessionsTable"; table.size_flags_horizontal = Control.SIZE_EXPAND_FILL; table.add_theme_constant_override("h_separation", 12); table.add_theme_constant_override("v_separation", 12); body.add_child(table)
-	var header := table
-	_label(d, header, _copy("identity_client", "Client"), 12, MUTED)
-	_label(d, header, _copy("identity_ip", "IP"), 12, MUTED)
-	_label(d, header, _copy("identity_issued", "Issued"), 12, MUTED)
-	_label(d, header, _copy("identity_session_id", "Session ID"), 12, MUTED)
-	_label(d, header, _copy("identity_admin_actions", "Actions"), 12, MUTED)
-	for column in 5: table.add_child(HSeparator.new())
-	for session in active:
-		var row := table
+	var table := VBoxContainer.new(); table.name = "IdentitySessionsTable"; table.add_theme_constant_override("separation", 12); body.add_child(table)
+	var observations: Dictionary = _st(d).get("session_observations", {})
+	for session in sessions:
+		var row := _surface(table, SUBTLE)
 		var session_id := str(session.get("id", ""))
-		_label(d,row,str(session.get("client","")),13,INK)
-		_label(d,row,str(session.get("ip","")),13,MUTED)
-		_label(d,row,str(session.get("issued", "")),13,MUTED)
-		_label(d,row,session_id,13,INK)
-		var logout := _button(d,row,_copy("identity_logout","Logout"),func(): _run_user(d,"logout "+session_id)); logout.name="IdentityLogout_"+session_id; logout.size_flags_horizontal=Control.SIZE_SHRINK_END
-		for column in 5: table.add_child(HSeparator.new())
+		var revoked := bool(session.get("revoked", false))
+		_label(d,row,session_id + "  ·  " + ("失効済み" if revoked else "発行済み"),14,INK)
+		_label(d,row,str(session.get("client","")) + "  ·  " + str(session.get("ip","")) + "  ·  発行 " + str(session.get("issued", "")),12,MUTED)
+		var actions := HFlowContainer.new(); actions.add_theme_constant_override("h_separation", 8); row.add_child(actions)
+		var access := _button(d,actions,"このセッションでアクセスを確認",func(): _run_user(d,"access "+session_id)); access.name="IdentitySessionAccess_"+session_id
+		var logout := _button(d,actions,_copy("identity_logout","Logout"),func(): _run_user(d,"logout "+session_id)); logout.name="IdentityLogout_"+session_id; logout.disabled = revoked
+		access.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN; logout.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		var observation: Dictionary = observations.get(session_id, {})
+		if not observation.is_empty():
+			var response: Dictionary = observation.get("response", {})
+			var fresh := str(observation.get("state", "")) == _access_state(d)
+			var result := _label(d,row,("今回の状態で確認: " if fresh else "変更前の確認: ") + ("アクセス成功" if bool(response.get("ok", false)) else "アクセス拒否 · " + str(response.get("error", ""))),13,INK if fresh else MUTED)
+			result.name = "IdentitySessionResult_" + session_id
+	var all: Button = d._button(_copy("identity_logout_all", "Logout all"), func(): _run_user(d, "logout-all "+id)); all.name = "IdentityLogoutAll_"+id; all.disabled=active.is_empty(); all.size_flags_horizontal=Control.SIZE_SHRINK_BEGIN; body.add_child(all)
 
 static func _auth(d, body: VBoxContainer, snapshot: Dictionary) -> void:
 	var crumbs := HBoxContainer.new(); crumbs.add_theme_constant_override("separation", 8); body.add_child(crumbs)
@@ -581,7 +615,7 @@ static func _password_update_form(d, body: VBoxContainer) -> void:
 	); update.name = "IdentityPasswordUpdateSubmit"; update.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN; form.add_child(update)
 
 
-static func _result(d, body: VBoxContainer) -> void:
+static func _result(d, body: VBoxContainer, show_details := true) -> void:
 	var response := _response(d)
 	if response.is_empty(): return
 	var error := str(response.get("error",""))
@@ -591,6 +625,20 @@ static func _result(d, body: VBoxContainer) -> void:
 	elif error == "password_update_required":
 		key = "identity_admin_password_update_required"
 	elif response.has("challenge"): key="identity_enrollment_required" if bool(response.get("enrollment",false)) else "identity_challenge_required"
-	_label(d,body,_copy(key,key),14,COPY.GREEN if bool(response.get("ok",false)) else COPY.RED)
+	var message := _copy(key, key)
+	var action := str(_st(d).get("last_action", ""))
+	var target := str(_st(d).get("last_target", ""))
+	if action == "access": message = "アクセス成功" if bool(response.get("ok", false)) else message
+	elif action == "logout" and bool(response.get("ok", false)): message = "セッションを失効しました"
+	elif action == "logout-all" and bool(response.get("ok", false)): message = "全セッションを失効しました"
+	if not target.is_empty(): message = target + " · " + message
+	var stale := false
+	if action == "access":
+		var observed: Dictionary = _st(d).get("session_observations", {}).get(target, {})
+		stale = not observed.is_empty() and str(observed.get("state", "")) != _access_state(d)
+		if stale: message = "変更前の確認 · " + message
+	var feedback := _label(d,body,message,14,MUTED if stale else (COPY.GREEN if bool(response.get("ok",false)) else COPY.RED))
+	feedback.name = "IdentityActionFeedback"
+	if not show_details: return
 	var detail: VBoxContainer=d._disclosure(body,_copy("identity_response","Response"))
 	_label(d,detail,JSON.stringify(response,"  "),12,MUTED)

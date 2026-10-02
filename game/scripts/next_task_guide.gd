@@ -7,8 +7,11 @@ const UI_COPY = preload("res://scripts/ui_theme.gd")
 static func resolve(game) -> Dictionary:
 	if game == null or game.state.is_empty(): return _item("none", "", "", "", "", "")
 	var s: Dictionary = game.state
+	if bool(_call(game, "incident_active", [], false)):
+		var concluded := str(s.get("advanced", {}).get("exercise", {}).get("phase", "")) == "concluded"
+		return _item("incident", "請求サービスの対応演習", "対応結果を振り返り、条件を変えて再挑戦できます。" if concluded else "顧客の作業予定と記録を照合し、対処後に業務を確認してください。", "", "advanced", "PentestTab_operations")
 	if bool(_call(game, "current_done", [], false)):
-		return _copy_item("done", "next_done_title", "next_done_body", "receipt", "GuideDeliver")
+		return after_delivery(game)
 	if str(s.get("strategy", "")).is_empty() and not bool(s.get("career_mode", false)):
 		return _copy_item("strategy", "guide_strategy_title", "guide_strategy_body", "board", "GuideStrategy_operations")
 	if bool(s.get("career_mode", false)) and (bool(s.get("awaiting_contract", false)) or not bool(s.get("accepted", false))):
@@ -18,6 +21,23 @@ static func resolve(game) -> Dictionary:
 	if bool(_call(game, "advanced_active", [], false)):
 		return _advanced(game)
 	return _legacy(game)
+
+static func after_delivery(game) -> Dictionary:
+	var s: Dictionary = game.state
+	var receipt: Dictionary = s.get("last_receipt", {})
+	if receipt.has("maintenance_incident_id"):
+		var client := str(receipt.get("client", ""))
+		if str(s.get("care_incidents", {}).get(client, {}).get("status", "")) == "recheck":
+			return _copy_item("recheck", "next_recheck_title", "next_recheck_body", "receipt", "CareReinspect")
+	if not bool(s.get("career_mode", false)):
+		return _copy_item("day", "next_day_title", "next_day_body", "door", "DaySettle")
+	for id in s.get("contract_contexts", {}):
+		var context: Dictionary = s.contract_contexts[id]
+		if not bool(context.get("accepted", false)) or bool(context.get("completed", false)) or str(id) in s.get("completed_ids", []): continue
+		var next := _copy_item("resume", "next_resume_title", "next_resume_body", "board", "DispatchOpen", {"contract_id":str(id)})
+		next.body += "  " + str(context.get("contract", {}).get("title", ""))
+		return next
+	return _copy_item("sales", "next_sales_title", "next_sales_body", "sales", "SalesBoard")
 
 static func _legacy(game) -> Dictionary:
 	var s: Dictionary = game.state
@@ -137,6 +157,8 @@ static func _completion_step(game) -> Dictionary:
 	return _copy_item("validate", "guide_validate_title", "next_validation_body", "verify", "DiagnosticValidate")
 
 static func _advanced(game) -> Dictionary:
+	if str(game.state.get("contract", {}).get("case_id", "")) == "advanced-portal":
+		return _portal(game)
 	var checks: Array = _array_call(game, "diagnostic_probes")
 	var failed: Dictionary = {}
 	for check in checks:
@@ -150,6 +172,18 @@ static func _advanced(game) -> Dictionary:
 	var label_key := str(failed.get("label_key", ""))
 	var objective := UI_COPY.copy(label_key, UI_COPY.copy("next_workbench_body", ""))
 	return _item("workbench", UI_COPY.copy("next_investigate_title"), UI_COPY.copy("next_workbench_body") + "  " + objective, objective, "advanced", "AdvancedTab_results", {"objective_id":str(failed.get("id", ""))})
+
+static func _portal(game) -> Dictionary:
+	if _validated(game): return _completion_step(game)
+	var checks: Array = _array_call(game, "diagnostic_probes")
+	if not checks.is_empty() and checks.all(func(row): return bool(row.get("passed", false))):
+		return _copy_item("validate", "guide_validate_title", "portal_next_verify", "advanced", "PentestVerify")
+	# Navigation explains the engagement, never which resource to tamper with.
+	var phase := str(game.state.get("advanced", {}).get("phase", "investigation"))
+	var body_key := "portal_next_explore"
+	if phase == "reported": body_key = "portal_next_customer"
+	elif phase == "patched": body_key = "portal_next_retest"
+	return _copy_item("workbench", "adv_portal_service", body_key, "advanced", "PentestWorkspace")
 
 static func _copy_item(id: String, title_key: String, body_key: String, route: String, target: String, extra: Dictionary = {}) -> Dictionary:
 	var hint_key: String = {"fix":"next_failed_hint","test":"next_failed_hint","validate":"next_diagnostic_hint"}.get(id, "")

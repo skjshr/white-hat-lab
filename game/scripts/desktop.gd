@@ -4,6 +4,8 @@ signal return_requested
 signal company_requested
 signal staffing_requested
 signal contracts_requested
+signal sales_requested
+signal next_task_requested
 signal equipment_requested
 const WINDOW = preload("res://scripts/os_window.gd")
 const UI = preload("res://scripts/ui_theme.gd")
@@ -79,6 +81,8 @@ var samba_ui: Dictionary = {}
 var business_ui: Dictionary = {}
 var billing_ui: Dictionary = {}
 var advanced_ui: Dictionary = {}
+var diagnostic_ui: Dictionary = {}
+var pentest_ui: Dictionary = {}
 var billing_render_signature := ""
 var samba_render_signature := ""
 const BROWSER_IDENTITIES := [
@@ -120,6 +124,7 @@ var selected_shortcut := ""
 var desktop_hidden_windows: Array[String] = []
 var desktop_hidden_active := ""
 var configured_return_label := ""
+var _app_keyboard_focus: Dictionary = {}
 
 func browser_identities() -> Array:
 	var identities: Array = BROWSER_IDENTITIES.duplicate(true)
@@ -166,6 +171,7 @@ func setup(value: Node) -> void:
 	APPS["advanced"] = [UI.copy("adv_app"), "A", "0078d4"]
 	ui_sound = AudioStreamPlayer.new(); ui_sound.stream = load("res://assets/audio/click_001.ogg"); ui_sound.volume_db = -14; add_child(ui_sound)
 	_build()
+	get_viewport().gui_focus_changed.connect(_keyboard_focus_changed)
 	_load_session()
 	var session: Dictionary = game.state.get("desktop_sessions",{}).get(session_key,{})
 	_restore_session_windows(session)
@@ -477,7 +483,7 @@ func _pad(parent: Node, amount := 16) -> VBoxContainer:
 	for side in ["left","right","top","bottom"]: m.add_theme_constant_override("margin_"+side,amount)
 	return _box(m)
 func _scroll(parent: Node) -> VBoxContainer:
-	var s := ScrollContainer.new(); s.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED; s.size_flags_vertical = Control.SIZE_EXPAND_FILL; s.size_flags_horizontal = Control.SIZE_EXPAND_FILL; parent.add_child(s); return _box(s)
+	var s := ScrollContainer.new(); s.follow_focus = true; s.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED; s.size_flags_vertical = Control.SIZE_EXPAND_FILL; s.size_flags_horizontal = Control.SIZE_EXPAND_FILL; parent.add_child(s); return _box(s)
 func _clear(node: Node) -> void:
 	for child in node.get_children(): node.remove_child(child); child.queue_free()
 
@@ -492,6 +498,7 @@ func _show_app(app: String) -> void:
 	_remember_editor()
 	if not windows.has(app):
 		var w := WINDOW.new(); workspace.add_child(w); w.configure(app,APPS[app][0],Color(APPS[app][2])); windows[app] = w
+		w.set_meta("aoba_focus_app", app)
 		var usable: Vector2 = workspace.size if workspace.size.x > 1.0 and workspace.size.y > 1.0 else get_viewport_rect().size
 		var window_index: int = windows.size() - 1
 		var wide_layout: bool = _is_wide_layout()
@@ -506,7 +513,7 @@ func _show_app(app: String) -> void:
 		if w.maximized:
 			w.position = Vector2.ZERO
 			w.size = usable
-		w.focused.connect(_focus); w.minimized.connect(_minimized); w.dismissed.connect(_dismissed); widgets[app] = {}; _build_app(app); _wire_focus(w.content,app)
+		w.focused.connect(_focus.bind(false)); w.minimized.connect(_minimized); w.dismissed.connect(_dismissed); widgets[app] = {}; _build_app(app); _wire_focus(w.content,app)
 		var saved: Array = game.state.get("desktop_sessions",{}).get(session_key,{}).get("windows",{}).get(app,[])
 		if saved.size() == 4:
 			w.maximized = bool(game.state.get("desktop_sessions",{}).get(session_key,{}).get("maximized",{}).get(app,false))
@@ -515,7 +522,7 @@ func _show_app(app: String) -> void:
 			if w.maximized: w.position = Vector2.ZERO; w.size = usable
 		if not task_buttons.has(app):
 			_add_task_button(app)
-	windows[app].show(); _focus(app)
+	windows[app].show(); _focus(app, false)
 	if app == "mail": _refresh_mail()
 	if app == "monitor": _refresh_monitor()
 	if app == "verify": _refresh_checks()
@@ -523,6 +530,7 @@ func _show_app(app: String) -> void:
 	if app == "billing": _render_billing()
 	if app == "team": _refresh_team()
 	if app == "advanced": _refresh_advanced()
+	_restore_keyboard_focus(app)
 	# Workstation chrome stays native; the optional first-job coach is owned by interface.gd.
 
 func _add_task_button(app: String) -> void:
@@ -713,8 +721,9 @@ func open_invoice(id: String = "") -> void:
 func _refresh_billing_if_changed() -> void:
 	if widgets.has("billing") and _billing_signature() != billing_render_signature: _render_billing()
 
-func _focus(app: String) -> void:
+func _focus(app: String, restore_keyboard := true) -> void:
 	if switching_target or app not in running_apps or not windows.has(app) or not is_instance_valid(windows[app]): return
+	var changed_app := current_app != app
 	current_app = app
 	focus_order.erase(app)
 	focus_order.push_front(app)
@@ -731,6 +740,57 @@ func _focus(app: String) -> void:
 	if app == "files": file_list = widgets.files.list; path_edit = widgets.files.path
 	if app == "terminal": output = widgets.terminal.output; command = widgets.terminal.command; prompt = widgets.terminal.prompt
 	if app == "browser": url_edit = widgets.browser.url
+	if restore_keyboard: _restore_keyboard_focus(app)
+	elif changed_app:
+		# Mouse focus is assigned during GUI dispatch. Let the clicked control
+		# take it first; a titlebar/blank-area click restores only if needed.
+		call_deferred("_restore_keyboard_focus", app)
+
+func _focus_app_for(control: Control) -> String:
+	if not is_instance_valid(control) or not control.is_inside_tree(): return ""
+	var node: Node = control
+	while node != null and node != self:
+		if node.has_meta("aoba_focus_app"):
+			var app := str(node.get_meta("aoba_focus_app"))
+			if windows.has(app) and is_instance_valid(windows[app]) and windows[app].is_ancestor_of(control): return app
+		node = node.get_parent()
+	return ""
+
+func _keyboard_focus_changed(control: Control) -> void:
+	var app := _focus_app_for(control)
+	if app.is_empty() or app not in running_apps: return
+	# Window chrome must not replace the remembered editor/input when a user
+	# clicks Minimize or Close and later reopens the application.
+	if windows[app].content.is_ancestor_of(control): _app_keyboard_focus[app] = weakref(control)
+	if app != current_app: _focus(app, false)
+
+func _usable_keyboard_focus(control: Control) -> bool:
+	return is_instance_valid(control) and control.is_inside_tree() and not control.is_queued_for_deletion() and control.is_visible_in_tree() and control.focus_mode != Control.FOCUS_NONE and not (control is BaseButton and control.disabled)
+
+func _first_keyboard_focus(node: Node) -> Control:
+	for child in node.get_children():
+		if child is Control and _usable_keyboard_focus(child): return child
+		var nested := _first_keyboard_focus(child)
+		if nested != null: return nested
+	return null
+
+func _restore_keyboard_focus(app: String) -> void:
+	if switching_target or app != current_app or app not in running_apps or not windows.has(app) or not windows[app].is_visible_in_tree(): return
+	if (is_instance_valid(start_menu) and start_menu.visible) or (is_instance_valid(overview) and overview.visible): return
+	var owner := get_viewport().gui_get_focus_owner()
+	if _focus_app_for(owner) == app and _usable_keyboard_focus(owner): return
+	var target: Control = null
+	var remembered: WeakRef = _app_keyboard_focus.get(app)
+	if remembered != null:
+		var previous = remembered.get_ref()
+		if previous is Control and _usable_keyboard_focus(previous) and _focus_app_for(previous) == app: target = previous
+	if target == null:
+		var preferred: Dictionary = {"editor":"editor", "terminal":"command", "browser":"url", "files":"list"}
+		var candidate = widgets.get(app, {}).get(str(preferred.get(app, "")))
+		if candidate is Control and _usable_keyboard_focus(candidate): target = candidate
+	if target == null: target = _first_keyboard_focus(windows[app].content)
+	if target != null: target.grab_focus()
+	elif is_instance_valid(owner): owner.release_focus()
 func _minimized(_app: String) -> void:
 	_remember_editor()
 	focus_order.erase(_app)
@@ -762,7 +822,7 @@ func _wire_focus(node: Node, app: String) -> void:
 			if not child.has_meta("aoba_focus_app"):
 				child.set_meta("aoba_focus_app", app)
 				child.gui_input.connect(func(event):
-					if event is InputEventMouseButton and event.pressed: _focus(app))
+					if event is InputEventMouseButton and event.pressed: _focus(app, false))
 		_wire_focus(child,app)
 func _desktop_resized() -> void:
 	_layout_shell()
@@ -803,6 +863,9 @@ func _save_session(persist: bool = true) -> bool:
 	mail_ui = saved_mail_ui.duplicate(true)
 	game.state.desktop_sessions[session_key] = {"log":terminal_log,"drafts":drafts.duplicate(true),"history":history.duplicate(),"directory":file_directory,"file_remote":file_remote,"file_history":file_history.duplicate(true),"file_forward_history":file_forward_history.duplicate(true),"editor_path":editor_path,"editor_tabs":widgets.get("editor", {}).get("opened", []).duplicate(),"url":browser_url,"browser_response":browser_response,"browser_identity":browser_identity,"identity_ui":identity_ui.duplicate(true),"edr_ui":edr_ui.duplicate(true),"portal_ui":portal_ui.duplicate(true),"firewall_ui":firewall_ui.duplicate(true),"backup_ui":backup_ui.duplicate(true),"samba_ui":samba_ui.duplicate(true),"business_ui":business_ui.duplicate(true),"billing_ui":billing_ui.duplicate(true),"mail_ui":saved_mail_ui,"browser_history":browser_history.duplicate(),"browser_history_index":browser_history_index,"windows":placement,"maximized":maximize_states,"open_apps":opened,"running_apps":running_apps.duplicate(),"active_app":current_app}
 	game.state.desktop_sessions[session_key]["advanced_ui"] = advanced_ui.duplicate(true)
+	game.state.desktop_sessions[session_key]["pentest_ui"] = pentest_ui.duplicate(true)
+	game.state.desktop_sessions[session_key]["diagnostic_ui"] = diagnostic_ui.duplicate(true)
+	game.state.desktop_sessions[session_key]["file_selections"] = widgets.get("files",{}).get("selection_by_location",{}).duplicate(true)
 	if persist and not game.save_game():
 		if had_session: game.state.desktop_sessions[session_key] = previous_session
 		else: game.state.desktop_sessions.erase(session_key)
@@ -843,6 +906,8 @@ func _load_session() -> void:
 	business_ui = saved.get("business_ui", {}).duplicate(true) if saved.get("business_ui", {}) is Dictionary else {}
 	billing_ui = saved.get("billing_ui", {}).duplicate(true) if saved.get("billing_ui", {}) is Dictionary else {}
 	advanced_ui = saved.get("advanced_ui", {}).duplicate(true) if saved.get("advanced_ui", {}) is Dictionary else {}
+	pentest_ui = saved.get("pentest_ui", {}).duplicate(true) if saved.get("pentest_ui", {}) is Dictionary else {}
+	diagnostic_ui = saved.get("diagnostic_ui", {}).duplicate(true) if saved.get("diagnostic_ui", {}) is Dictionary else {}
 	mail_ui = saved.get("mail_ui", {}).duplicate(true) if saved.get("mail_ui", {}) is Dictionary else {}
 	if not browser_identities().any(func(identity): return str(identity.get("id", "")) == browser_identity): browser_identity = ""
 	if not game.state.has("os_files"):
@@ -875,6 +940,7 @@ func _state_changed() -> void:
 	if widgets.has("mail"): BUSINESS.refresh_mail_status(self)
 	if widgets.has("billing"): call_deferred("_refresh_billing_if_changed")
 	if widgets.has("advanced"): call_deferred("_refresh_advanced")
+	if _business_workspace_url(browser_url): call_deferred("_refresh_business_if_changed")
 	if is_instance_valid(brand_label): brand_label.text = _company_name()
 	if is_instance_valid(system_company): system_company.text=_company_name(); system_company.tooltip_text=_company_name()
 	if is_instance_valid(player_name_label): player_name_label.text = _player_display_name()
@@ -938,6 +1004,10 @@ func _staffing() -> void:
 	if _save_session(): staffing_requested.emit()
 func _contracts() -> void:
 	if _save_session(): contracts_requested.emit()
+func _sales() -> void:
+	if _save_session(): sales_requested.emit()
+func _next_task() -> void:
+	if _save_session(): next_task_requested.emit()
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index==MOUSE_BUTTON_LEFT:
 		var start: Button=find_child("StartButton",true,false)
@@ -952,6 +1022,8 @@ func _input(event: InputEvent) -> void:
 		if current_app == "editor" and widgets.has("editor") and widgets.editor.get("find_panel") != null and widgets.editor.find_panel.visible: EDITOR.hide_find(self)
 		elif is_instance_valid(overview) and overview.visible: overview.hide()
 		elif is_instance_valid(start_menu) and start_menu.visible: start_menu.hide()
+		elif current_app == "advanced" and bool(widgets.get("advanced", {}).get("pentest", false)) and str(pentest_ui.get("tab", "portal")) != "portal":
+			pentest_ui.tab = "portal"; widgets.advanced.signature = ""; _refresh_advanced(); _save_session(false)
 		else: _close()
 		return
 	var focus_owner := get_viewport().gui_get_focus_owner()
@@ -994,11 +1066,22 @@ func _refresh_advanced() -> void:
 	if widgets.has("advanced"): ADVANCED_WORKSPACE.refresh(self)
 func _accept() -> void:
 	if game.accept_mission():
-		session_key = game._vm_key(); _refresh_mail(); _show_app("terminal"); _notify("受注済み")
+		session_key = game._vm_key(); _refresh_mail(); _open_accepted_service(); _notify("受注済み")
+
+func _open_accepted_service() -> void:
+	# Acceptance locates the service; connecting and measuring remain player actions.
+	if game.advanced_active():
+		_show_app("advanced")
+		return
+	var url := SAMBA_URL if _samba_v2() else BACKUP_URL if _backup_v2() else FIREWALL_URL if _firewall_v2() else IDENTITY_URL if _identity_v2() else EDR_URL if _edr_v2() else PORTAL_URL if _portal_v2() else ""
+	if not url.is_empty(): show_guide_service(url)
+	else: _show_app("terminal")
 func _report() -> void:
 	if game.deliver():
 		_show_app("receipt"); _notify("納品完了")
 		if widgets.has("mail"): _refresh_mail()
+	else:
+		_notify("納品を完了できませんでした。保存先を確認して再試行してください。" if game.can_deliver() else "納品条件が未達成です。検証結果を確認してください。")
 func _refresh_target_selector() -> void:
 	if not is_instance_valid(target_selector): return
 	target_selector.clear()
@@ -1015,6 +1098,7 @@ func _reload_contract_session() -> void:
 		workspace.remove_child(w); w.queue_free()
 	windows.clear(); widgets.clear(); running_apps.clear(); desktop_hidden_windows.clear(); current_app = ""; editor = null; output = null; command = null
 	focus_order.clear(); alt_tab_order.clear(); clipboard_path = ""
+	_app_keyboard_focus.clear()
 	_load_session(); _refresh_target_selector(); switching_target = false
 	var saved: Dictionary = game.state.get("desktop_sessions", {}).get(session_key, {})
 	_restore_session_windows(saved)
@@ -1165,6 +1249,8 @@ func _resolved_editor_path(path: String) -> String:
 func _open_editor(path: String) -> void:
 	path = _resolved_editor_path(path)
 	_trace("open_file",path)
+	if path == editor_path and widgets.has("editor") and is_instance_valid(widgets.editor.get("editor")):
+		windows.editor.show(); _focus("editor"); EDITOR.refresh(self); return
 	_remember_editor()
 	if "editor" not in running_apps: _show_app("editor")
 	editor_path = path
@@ -1183,13 +1269,23 @@ func _save_editor() -> void:
 	_trace("save_file",editor_path)
 	var w: Dictionary = widgets.editor; var path: String = _resolved_editor_path(w.path.text.strip_edges()); var ok := false
 	w.path.text = path
+	var previous_files: Dictionary = game.state.get("os_files",{}).duplicate(true)
+	drafts[path] = w.editor.text
+	w.save_result_path = path; w.save_error = ""; w.save_result = ""; w.save_pending = false
 	if path.begins_with("workstation:") and not path.get_file().is_empty(): game.state.os_files[path.trim_prefix("workstation:")] = w.editor.text; ok = true
 	else: ok = game.vm_write(path,w.editor.text)
 	if ok:
 		editor_path = path; drafts[path] = w.editor.text; w.info.text = "✓ 保存済み   UTF-8   /   "+path; _save_session(false)
-		if game.save_game(): _notify("保存しました: "+path.get_file())
-		else: _notify("ゲームの保存に失敗しました。編集中の内容は保持されています。")
-	else: _notify("保存失敗 · 下書き保持")
+		if game.save_game():
+			w.save_result = "保存しました: "+path.get_file(); _notify(w.save_result)
+		else:
+			if path.begins_with("workstation:"): game.state.os_files = previous_files
+			w.save_pending = true
+			w.save_error = "作業状態を保存できませんでした。下書きを保持しています。再試行してください。"
+			_notify(w.save_error)
+	else:
+		w.save_pending = true; w.save_error = "ファイルを保存できませんでした。接続・権限・保存先を確認して再試行してください。下書きは保持されています。"
+		_notify(w.save_error)
 	EDITOR.refresh(self)
 	if widgets.has("monitor"): _refresh_monitor()
 	if widgets.has("verify"): _refresh_checks()
@@ -1318,7 +1414,11 @@ func _browse_url(value: String, record_history := true) -> void:
 	if authority == "portal.client.test" and not browser_identity.is_empty(): command += "-H \"Authorization: Bearer "+browser_identity+"\" "
 	var request_url := _business_request_url(browser_url) if _business_workspace_url(browser_url) else browser_url
 	command += '"'+request_url.replace('"','%22')+'"'
-	var result: String = "" if _samba_console_url(browser_url) else game.vm_run("restic snapshots") if _backup_console_url(browser_url) else JSON.stringify(game._vm().firewall_snapshot()) if _firewall_console_url(browser_url) else game.vm_run("identity users" if _identity_console_url(browser_url) else ("edr devices" if _edr_console_url(browser_url) else ("portal files" if _portal_console_url(browser_url) else command)))
+	var result: String
+	if _business_workspace_url(browser_url):
+		result = str(game.business_read(request_url.get_slice("/api/business/",1),browser_url).get("response",""))
+	else:
+		result = "" if _samba_console_url(browser_url) else game.vm_run("restic snapshots") if _backup_console_url(browser_url) else JSON.stringify(game._vm().firewall_snapshot()) if _firewall_console_url(browser_url) else game.vm_run("identity users" if _identity_console_url(browser_url) else ("edr devices" if _edr_console_url(browser_url) else ("portal files" if _portal_console_url(browser_url) else command)))
 	browser_response = result
 	if _portal_console_url(browser_url):portal_ui["view"]="files"
 	if _portal_page_url(browser_url) and not _portal_console_url(browser_url):
@@ -1351,14 +1451,24 @@ func _business_workspace_url(value: String) -> bool:
 	var address := value.get_slice("://",1).get_slice("?",0).get_slice("#",0)
 	var authority := address.get_slice("/",0).to_lower()
 	var path := address.substr(authority.length()).trim_suffix("/")
-	return authority in ["intranet.client.test","intranet.client.test:443","intranet.client.test:80"] and path in ["","/sales","/accounting"]
+	return authority in ["intranet.client.test","intranet.client.test:443","intranet.client.test:80"] and path in ["","/sales","/accounting","/customers"]
 
 func _business_request_url(value: String) -> String:
 	var address := value.get_slice("://",1).get_slice("?",0).get_slice("#",0)
 	var authority := address.get_slice("/",0)
 	var path := address.substr(authority.length()).trim_suffix("/")
 	var origin := value.get_slice("://",0)+"://"+authority
-	return origin+"/api/business/"+("ledger" if path == "/accounting" else "orders")
+	return origin+"/api/business/"+("ledger" if path == "/accounting" else ("customers" if path == "/customers" else "orders"))
+
+func _refresh_business_if_changed() -> void:
+	if not _business_workspace_url(browser_url) or not game.has_method("business_read"): return
+	if not widgets.has("browser") or not is_instance_valid(widgets.browser.get("page")): return
+	var resource: String = _business_request_url(browser_url).get_slice("/api/business/",1)
+	var result: Dictionary = game.business_read(resource,browser_url)
+	var response: String = str(result.get("response",browser_response))
+	if response != browser_response:
+		browser_response = response
+		_render_business_workspace()
 
 func _render_business_workspace() -> void:
 	if not widgets.has("browser") or not is_instance_valid(widgets.browser.get("page")): return
@@ -1414,8 +1524,15 @@ func _samba_save(section: String, values: Dictionary) -> bool:
 
 func _invalidate_smb() -> void:
 	if str(samba_ui.get("access_revision",""))==_samba_signature(): return
+	var live: Dictionary=game._vm().state
+	var access_signature: String=JSON.stringify([live.get("applied",{}),live.get("connected",false),live.get("active",false)])
+	if str(samba_ui.get("access_security_signature",""))==access_signature:
+		samba_ui.access_stale=true
+		samba_ui.access_revision=_samba_signature()
+		if widgets.has("files") and bool(samba_ui.get("network_open",false)): _render_smb()
+		return
 	samba_ui.access_files=[]; samba_ui.access_preview=""; samba_ui.access_output=""
-	samba_ui.access_selected=""; samba_ui.access_revision=_samba_signature()
+	samba_ui.access_selected=""; samba_ui.access_preview_path=""; samba_ui.access_revision=_samba_signature(); samba_ui.access_security_signature=access_signature
 	if widgets.has("files") and bool(samba_ui.get("network_open",false)): _render_smb()
 
 func _open_samba_share(share: String = "share") -> void:
@@ -1439,29 +1556,37 @@ func _smb_command(operation: String) -> String:
 	var result:=str(game.vm_run('smbclient "//files01.client.test/'+share+'" '+identity+" -c '"+operation+"'"))
 	refreshing=was_refreshing
 	samba_ui.access_revision=_samba_signature()
+	var live: Dictionary=game._vm().state
+	samba_ui.access_security_signature=JSON.stringify([live.get("applied",{}),live.get("connected",false),live.get("active",false)])
 	return result
 
-func _smb_finish(output_text: String, success: bool) -> bool:
+func _smb_finish(output_text: String, success: bool, clear_on_error := false) -> bool:
 	samba_ui.access_output=output_text
-	if not success:
-		samba_ui.access_files=[]; samba_ui.access_preview=""; samba_ui.access_selected=""
+	if not success and clear_on_error:
+		samba_ui.access_files=[]; samba_ui.access_preview=""; samba_ui.access_selected=""; samba_ui.access_preview_path=""
 	_save_session(false)
 	if widgets.has("verify"): _refresh_checks()
 	return success
 
 func _smb_list() -> bool:
-	samba_ui.access_preview=""; samba_ui.access_selected=""
+	var scope: String = str(samba_ui.get("access_share","share"))+"|"+str(samba_ui.get("access_user","staff"))
+	if scope != str(samba_ui.get("access_scope","")):
+		samba_ui.access_preview=""; samba_ui.access_selected=""; samba_ui.access_preview_path=""
+	samba_ui.access_scope=scope
 	var result:=_smb_command("ls")
+	samba_ui.access_stale=false
 	var ok:=not result.begins_with("NT_STATUS_") and not result.begins_with("{") and not result.begins_with("smbclient:")
 	samba_ui.access_files=Array(result.split("\n",false)) if ok and result!="0 files" else []
-	return _smb_finish(result,ok)
+	if str(samba_ui.get("access_selected","")) not in samba_ui.access_files:
+		samba_ui.access_preview=""; samba_ui.access_selected=""; samba_ui.access_preview_path=""
+	return _smb_finish(result,ok,true)
 
 func _smb_get(name: String, destination: String) -> bool:
 	if not _smb_argument(name) or not _smb_argument(destination): return _smb_finish("NT_STATUS_INVALID_PARAMETER",false)
 	var result:=_smb_command('get "'+name+'" "'+destination+'"')
 	var ok:=result.begins_with("getting file ") and result.ends_with(": OK")
 	if ok:
-		samba_ui.access_selected=name; samba_ui.access_preview=game.vm_read(destination)
+		samba_ui.access_selected=name; samba_ui.access_preview=game.vm_read(destination); samba_ui.access_preview_path=game._vm()._path(destination)
 	return _smb_finish(result,ok)
 
 func _smb_put(source: String, name: String) -> bool:

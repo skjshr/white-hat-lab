@@ -46,9 +46,12 @@ func run() -> void:
 	check(press(ui.modal_body,"Hire_mio"),"hire button active and executed")
 	await process_frame
 	check(game.team_members().size()==3 and int(game.staff_summary().count)==1,"additional member in roster")
+	game.state.market_day = int(game.state.day)
+	game.state.market_leads = ["service-0-case-0"]
+	game._make_offers()
 	var offer: Dictionary = {}
 	for item in game.state.offers:
-		if bool(item.get("unlocked",false)) and int(item.get("targets",0))==1 and int(item.get("chapter",-1))==0: offer=item; break
+		if str(item.get("case_id", "")) == "service-0-case-0" and bool(item.get("unlocked",false)) and bool(item.get("market_available", false)): offer=item; break
 	check(not offer.is_empty(),"single-site file service fixture")
 	if offer.is_empty(): finish(); return
 	check(game.set_offer_plan("care") and game.choose_contract(str(offer.id)),"real care contract accepted")

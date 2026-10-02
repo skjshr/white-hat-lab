@@ -300,6 +300,12 @@ func _locate_target() -> void:
 		if route=="browser" and desktop.browser_url!=desktop.SAMBA_URL: desktop._browse_url(desktop.SAMBA_URL,true)
 		if current_step in ["mail","accept"]:
 			desktop.widgets.mail.folder="inbox"; desktop.widgets.mail.search.text=""; desktop._refresh_mail()
+		if current_step == "baseline":
+			var section = desktop.widgets.receipt.body.find_child("ReceiptBaselineSection", true, false)
+			if section is Control and not section.visible:
+				var toggle = section.get_parent().get_child(section.get_index() - 1)
+				if toggle is Button: toggle.pressed.emit()
+			await get_tree().process_frame
 	var target:=_target_control()
 	if target!=null: _scroll_to(target)
 	refresh(0.2)

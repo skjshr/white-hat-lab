@@ -35,18 +35,15 @@ func run() -> void:
 	ui._new_game()
 	_assert(game.choose_strategy("advisory"), "advisory strategy selected")
 	_assert(game.start_free_career(), "free career started")
-	var unlocked: Array = game.state.offers.filter(func(item): return bool(item.get("unlocked",false)))
+	var offer_a := _ordinary_offer("service-0-case-0")
+	var offer_b := _ordinary_offer("service-2-case-0")
+	var unlocked: Array = game.state.offers.filter(func(item): return bool(item.get("unlocked",false)) and bool(item.get("market_available",false)))
 	_assert(unlocked.size() >= 2, "at least two real offers are available")
-	if unlocked.size() < 2:
+	_assert(not offer_a.is_empty(), "ordinary contract A is available")
+	if unlocked.size() < 2 or offer_a.is_empty():
 		_finish()
 		return
-	var offer_a: Dictionary = unlocked[0]
-	var offer_b: Dictionary = {}
-	for candidate in unlocked:
-		if str(candidate.get("id","")) != str(offer_a.get("id","")) and str(candidate.get("case_id","")) != str(offer_a.get("case_id","")):
-			offer_b = candidate
-			break
-	_assert(not offer_b.is_empty(), "two distinct contract cases selected")
+	_assert(not offer_b.is_empty() and str(offer_b.get("case_id","")) != str(offer_a.get("case_id","")), "two distinct contract cases selected")
 	if offer_b.is_empty():
 		_finish()
 		return
@@ -196,6 +193,19 @@ func run() -> void:
 	await _verify_multitarget_background()
 
 	_finish()
+
+func _ordinary_offer(case_id: String) -> Dictionary:
+	# This fixture tests VM isolation. Advanced engagements use another work model.
+	# Publish fixed ordinary leads without bypassing unlock or acceptance checks.
+	if case_id not in game.state.market_leads: game.state.market_leads.append(case_id)
+	game.state.market_day = int(game.state.day)
+	game._make_offers()
+	for offer in game.state.offers:
+		if str(offer.get("case_id", "")) != case_id: continue
+		_assert(bool(offer.get("unlocked", false)), "ordinary fixture unlocked: " + case_id)
+		_assert(bool(offer.get("market_available", false)), "ordinary fixture on market: " + case_id)
+		if bool(offer.get("unlocked", false)) and bool(offer.get("market_available", false)): return offer
+	return {}
 
 func _verify_multitarget_background() -> void:
 	# Unlock an existing multi-site catalog fixture; all work still uses live VMs.
