@@ -1476,6 +1476,38 @@ func _render_business_workspace() -> void:
 	_clear(page)
 	BUSINESS_WORKSPACE.render(self,page,browser_url,browser_response)
 
+func _network_request_test() -> Dictionary:
+	var was_refreshing := refreshing
+	refreshing = true
+	var result: Dictionary = game.network_request_test(browser_url)
+	refreshing = was_refreshing
+	business_ui.network_error = "" if bool(result.get("ok",false)) else ("検査結果を保存できませんでした。前の観測を保持しています。" if str(result.get("error",""))=="save_failed" else "検査できません。顧客への接続と案件の状態を確認してください。")
+	if bool(result.get("ok",false)):
+		var resource: String = _business_request_url(browser_url).get_slice("/api/business/",1)
+		browser_response = str(game.business_read(resource,browser_url).get("response",browser_response))
+		_save_session(false)
+	_render_business_workspace()
+	if widgets.has("verify"): _refresh_checks()
+	var focus: Control = widgets.browser.page.find_child("NetworkRequestTest",true,false)
+	if is_instance_valid(focus): focus.grab_focus.call_deferred()
+	return result
+
+func _network_request_settings() -> void:
+	business_ui.network_return_url = browser_url
+	business_ui.network_error = ""
+	firewall_ui.view = "services"
+	_save_session(false)
+	_browse_url(FIREWALL_URL,true)
+	var focus: Control = widgets.browser.page.find_child("FirewallDNS",true,false)
+	if is_instance_valid(focus): focus.grab_focus.call_deferred()
+
+func _network_request_return() -> void:
+	var url := str(business_ui.get("network_return_url",""))
+	if preload("res://scripts/network_request_evidence.gd").request(url).is_empty(): return
+	_browse_url(url,true)
+	var focus: Control = widgets.browser.page.find_child("NetworkRequestTest",true,false)
+	if is_instance_valid(focus): focus.grab_focus.call_deferred()
+
 func _backup_v2() -> bool:
 	return game != null and game.state.accepted and game._current_chapter() == 1 and game._vm() != null and int(game._vm().state.get("backup_model_version",1)) >= 2
 

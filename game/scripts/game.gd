@@ -1263,6 +1263,14 @@ func _prepare_linked_business_contract() -> void:
 			scenario.probes.append({"id":"branch-probe-shared","label":UI_COPY.copy("branch_probe_shared"),"description":"","command":"curl -H 'Authorization: Bearer staff-session' 'https://portal.client.test/staff?link=current'","expectation":"status:200"})
 		elif int(target.chapter) == 1:
 			scenario.brief = UI_COPY.copy("business_backup_brief")
+			# This contract approves production replacement after staging. The
+			# standalone recovery request instead requires its damaged original
+			# to remain untouched; do not inherit that different customer scope.
+			scenario.erase("backup_preservation_required")
+			scenario.backup_acceptance_mode = "production_replacement"
+			scenario.checks = scenario.get("checks", []).slice(0, 3)
+			if scenario.checks.size() >= 3:
+				scenario.checks[2] = "指定データを復元先へ展開し、正常な保存内容と照合"
 		elif int(target.chapter) == 2:
 			scenario.linked_business = true
 			scenario.brief = UI_COPY.copy("business_gateway_brief")
@@ -1568,6 +1576,11 @@ func portal_request(role: String, method: String, age: String, token: String, co
 
 func _business_response(result: Dictionary) -> Dictionary:
 	var out := result.duplicate(true)
+	# A DNS/TLS/policy failure received no HTTP response from the application.
+	# Keep structured metadata for the UI, without manufacturing a server status.
+	if bool(out.get("transport_error", false)):
+		out.response = JSON.stringify(result)
+		return out
 	var code := int(out.get("code",500))
 	var phrase := str({200:"OK",201:"Created",400:"Bad Request",403:"Forbidden",404:"Not Found",409:"Conflict",422:"Unprocessable Entity",429:"Too Many Requests",503:"Service Unavailable",507:"Insufficient Storage"}.get(code,"Error"))
 	out.response = "HTTP/1.1 %d %s\nContent-Type: application/json\n\n%s" % [code,phrase,JSON.stringify(result)]
@@ -1596,6 +1609,67 @@ func business_read(resource: String = "orders", request_url: String = "") -> Dic
 		result.data.history = owner.machine.state.get("business_journal",[]).duplicate(true) if not owner.is_empty() else []
 	if current_done(): result.capabilities.write = false
 	return _business_response(result)
+
+func network_request_view(url: String) -> Dictionary:
+	if not bool(state.get("accepted",false)) or _current_chapter()!=2 or advanced_active(): return {"available":false}
+	if _machine == null or _machine_key != _vm_key() or int(_machine.state.get("firewall_model_version",1))<2: return {"available":false}
+	if str(_machine.state.get("scenario",{}).get("id",""))!="service-2-case-0": return {"available":false}
+	var helper = preload("res://scripts/network_request_evidence.gd")
+	var request: Dictionary = helper.request(url)
+	if request.is_empty(): return {"available":false}
+	var saved: Variant = _machine.state.get("network_request_evidence",{})
+	var record: Dictionary = saved.get(url,{}) if saved is Dictionary and saved.get(url,{}) is Dictionary else {}
+	var result: Dictionary = helper.project(record,_vm_key(),url,_machine._fingerprint())
+	result.available = true
+	result.can_test = not current_done() and bool(_machine.state.get("connected",false)) and _customer_hardware_connected()
+	var repeated := false
+	for probe in _machine.probes():
+		if str(probe.get("id",""))=="business-check": repeated = _machine._normalize_command(str(probe.command)) == _machine._normalize_command('curl "'+str(request.request_url)+'"')
+	result.minutes = action_minutes("measurement",3.0)*(3.0 if repeated else 4.0)
+	return result
+
+func network_request_test(url: String) -> Dictionary:
+	var helper = preload("res://scripts/network_request_evidence.gd")
+	var request: Dictionary = helper.request(url)
+	if request.is_empty(): return {"ok":false,"error":"invalid_request"}
+	if not bool(state.get("accepted",false)) or current_done() or _current_chapter()!=2 or advanced_active(): return {"ok":false,"error":"contract_unavailable"}
+	if not _customer_hardware_connected(): return {"ok":false,"error":"hardware_unavailable"}
+	var machine = _vm()
+	if int(machine.state.get("firewall_model_version",1))<2 or not bool(machine.state.get("connected",false)): return {"ok":false,"error":"not_connected"}
+	if str(machine.state.get("scenario",{}).get("id",""))!="service-2-case-0": return {"ok":false,"error":"unsupported_case"}
+	var previous: Dictionary = state.duplicate(true)
+	var previous_vm: Dictionary = machine.export_state()
+	var before: Array = machine.evaluate().duplicate()
+	var mutation := int(machine.state.get("mutation",0))
+	var outputs := {}
+	var commands := {}
+	var request_command := 'curl "'+str(request.request_url)+'"'
+	var reused := false
+	var executions := 0
+	# Existing acceptance probes remain authoritative; no new mandatory click.
+	for probe in machine.probes():
+		var id := str(probe.get("id",""))
+		if id in ["dns-check","business-check","admin-check"]:
+			commands[id] = str(probe.command)
+			outputs[id] = machine.run(str(probe.command))
+			executions += 1
+			if machine._normalize_command(str(probe.command)) == machine._normalize_command(request_command): outputs.request = outputs[id]; reused = true
+	commands.request = request_command
+	if not reused: outputs.request = machine.run(request_command); executions += 1
+	var rows: Array = helper.rows(outputs)
+	var passed: bool = rows.all(func(row): return bool(row.passed))
+	for probe in machine.probes():
+		if str(probe.get("id","")) in ["dns-check","business-check","admin-check"]: passed = passed and bool(probe.get("passed",false))
+	var record := {"context":_vm_key(),"url":url,"request_url":request.request_url,"fingerprint":machine._fingerprint(),"rows":rows,"outputs":outputs,"commands":commands,"passed":passed,"day":int(state.day),"clock":business_clock()}
+	if not machine.state.get("network_request_evidence",{}) is Dictionary: machine.state.network_request_evidence = {}
+	if not machine.state.has("network_request_evidence"): machine.state.network_request_evidence = {}
+	machine.state.network_request_evidence[url] = record
+	_work_add(action_minutes("measurement",3.0)*float(executions))
+	if not _store_vm(before,mutation):
+		state = previous; machine.state = previous_vm
+		changed.emit()
+		return {"ok":false,"error":"save_failed"}
+	return {"ok":true,"measurement":record}
 
 func _business_source_path(path: String, branch: bool) -> String:
 	if branch and path == BUSINESS_DATA.CUSTOMERS_FILE: return "/srv/share/customers.csv"

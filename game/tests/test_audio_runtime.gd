@@ -105,11 +105,24 @@ func run() -> void:
 	if DisplayServer.get_name()!="headless" and "--capture" in OS.get_cmdline_user_args():
 		await RenderingServer.frame_post_draw
 		root.get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../artifacts/simulator/experience/ui/audio-settings.png"))
+	# The test owns the office and capture effect. Stop the actual mixer through
+	# the normal volume API before releasing them; a few process frames alone
+	# can finish before the audio thread retires an Ogg playback instance.
+	office.set_process(false)
+	game.set_settings({"volume":0},false)
+	sound.set_workspace(false)
+	check(not sound._music.playing, "test teardown stops active music")
 	office.queue_free()
 	await process_frame
-	AudioServer.remove_bus_effect(0, AudioServer.get_bus_effect_count(0)-1)
+	var capture_index := -1
+	for index in AudioServer.get_bus_effect_count(0):
+		if AudioServer.get_bus_effect(0,index)==capture: capture_index=index; break
+	check(capture_index>=0,"test capture effect remains owned until teardown")
+	if capture_index>=0: AudioServer.remove_bus_effect(0,capture_index)
 	capture = null
 	await process_frame
 	await process_frame
+	await create_timer(0.2).timeout
+	check(not is_instance_valid(office), "test office is freed before process exit")
 	print("AUDIO_RUNTIME failures=", failures.size(), " music_peak=", peak, " driver=", AudioServer.get_driver_name())
 	quit(0 if failures.is_empty() else 1)

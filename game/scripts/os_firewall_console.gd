@@ -105,6 +105,8 @@ static func evidence_chain(d,parent: Node,trace: Dictionary) -> void:
 static func render(d,parent: VBoxContainer) -> void:
 	var state: Dictionary=d.firewall_ui;var snap: Dictionary=d.game._vm().firewall_snapshot()
 	var background:=panel(parent,Color("f4f4f4"));background.add_theme_constant_override("separation",7)
+	var return_url := str(d.business_ui.get("network_return_url",""))
+	if not return_url.is_empty(): preload("res://scripts/network_request_panel.gd").render(d,background,return_url,true)
 	var viewport := parent.get_parent() as Control
 	var reflow := func(): background.custom_minimum_size.y = maxf(0, viewport.size.y - 12)
 	viewport.resized.connect(reflow)

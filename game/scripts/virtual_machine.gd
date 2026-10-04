@@ -6,6 +6,7 @@ const EndpointRemediation = preload("res://scripts/endpoint_remediation.gd")
 const PortalStorage = preload("res://scripts/portal_storage.gd")
 const FirewallPolicy = preload("res://scripts/firewall_policy.gd")
 const BusinessWorkspace = preload("res://scripts/business_workspace.gd")
+const BackupAuthorization = preload("res://scripts/backup_authorization.gd")
 ## Deterministic guest operating system. Files and service state are local game data.
 const PATHS := ["/etc/samba/smb.conf","/etc/restic/backup.conf","/etc/firewall/rules.conf","/etc/identity/users.conf","/etc/edr/policy.conf","/etc/share/portal.conf"]
 const SERVICES := ["samba","restic","firewall","identity","edr","portal"]
@@ -129,13 +130,14 @@ func business_read(resource: String = "orders", request_url: String = "") -> Dic
 	var port := 443 if str(url.scheme) == "https" else 80
 	if str(url.host) != "intranet.client.test" or int(url.port) != port or str(url.scheme) not in ["http","https"]: result = {"ok":false,"code":404,"error":"unknown_service"}
 	elif _chapter != 2 or not _firewall_model_v2(): result = {"ok":false,"code":400,"error":"unsupported_model"}
-	elif not bool(state.get("connected",false)) or not bool(state.get("active",false)): result = {"ok":false,"code":503,"error":"service_unavailable"}
-	elif str(state.applied.get("dns","off")) != "on": result = {"ok":false,"code":503,"error":"dns_unavailable"}
+	elif not bool(state.get("connected",false)) or not bool(state.get("active",false)): result = {"ok":false,"code":0,"error":"service_unavailable","transport_error":true,"transport_kind":"network","raw":"curl: (7) Connection failed"}
+	elif str(state.applied.get("dns","off")) != "on": result = {"ok":false,"code":0,"error":"dns_unavailable","transport_error":true,"transport_kind":"dns","raw":"curl: (6) Could not resolve host"}
 	else:
 		var dns := FirewallPolicy.evaluate(state.applied,"lan",FirewallPolicy.STAFF_ADDRESS,FirewallPolicy.LAN_ADDRESS,"udp",40000,53)
 		var http := FirewallPolicy.evaluate(state.applied,"lan",FirewallPolicy.STAFF_ADDRESS,FirewallPolicy.BUSINESS_ADDRESS,"tcp",40000,port)
-		if str(dns.get("action","block")) != "pass" or str(http.get("action","block")) != "pass": result = {"ok":false,"code":403,"error":"network_denied"}
-		elif str(url.scheme) == "https" and str(state.applied.get("tls","off")) != "on": result = {"ok":false,"code":503,"error":"tls_unavailable"}
+		if str(dns.get("action","block")) != "pass": result = {"ok":false,"code":0,"error":"network_denied","transport_error":true,"transport_kind":"dns","raw":"curl: (6) Could not resolve host " + _firewall_denial(dns,"curl")}
+		elif str(http.get("action","block")) != "pass": result = {"ok":false,"code":0,"error":"network_denied","transport_error":true,"transport_kind":"denied","raw":_firewall_denial(http,"curl")}
+		elif str(url.scheme) == "https" and str(state.applied.get("tls","off")) != "on": result = {"ok":false,"code":0,"error":"tls_unavailable","transport_error":true,"transport_kind":"tls","raw":"curl: (35) TLS handshake failed"}
 		else: result = BusinessWorkspace.handle_get(_business_provider(),resource)
 	var provider := _business_provider()
 	result.revision = BusinessWorkspace.fingerprint(provider,true)
@@ -201,7 +203,7 @@ func setup(chapter: int, saved: Dictionary = {}, scenario: Dictionary = {}) -> v
 	for name in RECORDS: state.fs["/srv/data/" + name] = RECORDS[name]
 	if _chapter == 1:
 		var manifest := "# 顧客から預かった正常時のファイル照合票 / SHA-256\n"
-		for name in RECORDS: manifest += str(RECORDS[name]).sha256_text()+"  /restore/"+name+"\n"
+		for name in RECORDS: manifest += str(RECORDS[name]).sha256_text()+"  /restore/srv/data/"+name+"\n"
 		state.fs[OPERATOR_HOME+"/recovery-manifest.sha256"] = manifest
 	if _chapter == 4: _edr_ensure_state(true)
 	state.fs["/var/log/evidence.log"] = EVIDENCE
@@ -219,6 +221,10 @@ func setup(chapter: int, saved: Dictionary = {}, scenario: Dictionary = {}) -> v
 			for path in scenario.latest_snapshot_overrides:
 				latest_files[str(path).get_file()] = str(scenario.latest_snapshot_overrides[path])
 			state.snapshots.append({"id":"00000002","repository":str(scenario.get("desired",{}).get("repository","offsite")),"paths":["/srv/data"],"files":latest_files})
+	# The approved source is captured only for a freshly seeded recovery case,
+	# after its damaged/missing files have been installed. Loaded saves never
+	# manufacture a new baseline from the files they happen to contain.
+	if _chapter == 1: BackupAuthorization.initialize(state, scenario, RECORDS)
 	if _chapter == 4 and int(state.get("edr_model_version",1)) >= EDR_MODEL_VERSION:
 		if EndpointRemediation.enabled(state): EndpointRemediation.initialize(state)
 		state.evidence_original = _edr_serialize_timeline()
@@ -1716,6 +1722,15 @@ func _http(args: Array[String]) -> String:
 			return "HTTP/1.1 200 OK\nrole=%s\nexpires=%s\nMFA=%s\ntransport=%s\naudit=%s\nDocument: partner-order.csv" % [role, c.expires, c.mfa, "TLS" if c.tls == "on" else "HTTP", c.audit]
 	return "HTTP/1.1 404 Not Found\nhelp でこのホストのURLを確認してください。"
 
+func backup_acceptance_view() -> Dictionary:
+	if _chapter != 1: return {"available":false,"enforced":false,"legacy":false}
+	var paths := {}
+	var record: Variant = state.get("backup_authorization", {})
+	if record is Dictionary and record.get("required_files", []) is Array:
+		for source in record.get("required_files", []):
+			paths[str(source)] = _restored_data_path(str(source).get_file())
+	return BackupAuthorization.view(state, paths)
+
 func _restic_v2() -> bool:
 	return _chapter == 1 and int(state.get("backup_model_version", 1)) >= 2
 
@@ -1739,6 +1754,9 @@ func _snapshot_source_paths(snapshot: Dictionary) -> Array:
 
 func _restored_data_path(name: String) -> String:
 	if int(state.get("backup_model_version",1)) < 2: return "/restore/" + name
+	var origins: Dictionary = state.get("backup_restore_origins", {}) if state.get("backup_restore_origins", {}) is Dictionary else {}
+	var origin: Variant = origins.get("/srv/data/" + name, {})
+	if origin is Dictionary and not str(origin.get("path", "")).is_empty(): return str(origin.path)
 	var restore: Dictionary = state.get("last_restore", {}) if state.get("last_restore", {}) is Dictionary else {}
 	if str(restore.get("subfolder", "")) == "/srv/data": return str(restore.get("target", "/restore")).path_join(name)
 	return str(restore.get("target", "/restore")).path_join("srv/data").path_join(name)
@@ -1906,6 +1924,11 @@ func _restic(args: Array[String]) -> String:
 				if directory not in new_dirs: new_dirs.append(directory)
 		for directory in new_dirs: state.dirs.append(directory)
 		for entry in writes: state.fs[entry.path] = entry.value
+		if state.has("backup_authorization_version") or bool(state.get("scenario", {}).get("backup_preservation_required", false)):
+			if not state.get("backup_restore_origins", {}) is Dictionary: state.backup_restore_origins = {}
+			if not state.has("backup_restore_origins"): state.backup_restore_origins = {}
+			for entry in writes:
+				state.backup_restore_origins[str(entry.source)] = {"snapshot":str(plan.snapshot.id),"path":str(entry.path),"sha256":str(entry.value).sha256_text()}
 		state.last_restore = {"snapshot":str(plan.snapshot.id),"subfolder":str(plan.subfolder),"target":str(plan.target),"includes":includes.duplicate(),"overwrite":overwrite}
 		_sync_backup_probe_paths()
 		_touch("restored snapshot %s -> %s" % [str(plan.snapshot.id),dest])
@@ -1981,7 +2004,12 @@ func _evaluate_scenario() -> Array[bool]:
 		var valid_snapshot := false
 		for snapshot in state.snapshots:
 			if snapshot.get("repository", "") == desired.get("repository", "") and snapshot.get("files", {}) == RECORDS: valid_snapshot = true
+		var acceptance := backup_acceptance_view()
+		if bool(acceptance.get("enforced", false)): restored = bool(acceptance.get("restore_valid", false))
 		if result.size() >= 2: result.append(restored and valid_snapshot)
+		if bool(acceptance.get("enforced", false)):
+			result.append(bool(acceptance.get("original_preserved", false)))
+			result.append(bool(acceptance.get("unrelated_preserved", false)))
 	if _chapter == 4:
 		var evidence_ok: bool = state.fs.get("/evidence/original.log", "") == state.get("evidence_original", EVIDENCE) and state.fs.get("/var/log/evidence.log", "") == state.get("evidence_original", EVIDENCE)
 		if int(state.get("edr_model_version",1)) >= EDR_MODEL_VERSION: evidence_ok = evidence_ok and bool(_edr_evidence_status().get("valid",false))
@@ -2120,16 +2148,12 @@ func _normalize_portal_probes() -> void:
 
 func _sync_backup_probe_paths() -> void:
 	if _chapter != 1 or int(state.get("backup_model_version",1)) < 2: return
-	var restore: Dictionary = state.get("last_restore", {}) if state.get("last_restore", {}) is Dictionary else {}
-	var target := str(restore.get("target", "/restore"))
-	var subfolder := str(restore.get("subfolder", ""))
-	var base := target if subfolder == "/srv/data" else target.path_join("srv/data")
 	for probe in _active_probes():
 		var probe_id := str(probe.get("id", ""))
 		if not probe_id.begins_with("restore-"): continue
 		var filename := probe_id.trim_prefix("restore-")
 		if filename.is_empty(): continue
-		var next_command := "sha256sum " + base.path_join(filename)
+		var next_command := "sha256sum " + _restored_data_path(filename)
 		if str(probe.get("command", "")) != next_command:
 			_clear_probe_measurement(probe)
 			probe.command = next_command

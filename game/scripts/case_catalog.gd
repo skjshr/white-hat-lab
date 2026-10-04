@@ -60,12 +60,20 @@ static func all() -> Array:
 	_add(1,0,"会計台帳の日次バックアップ","台帳を同一拠点へ日次バックアップし、別フォルダーへ復元して内容を照合してください。",{"schedule":"off","repository":"local"},{"schedule":"daily","repository":"local"},{"required_files":["/srv/data/ledger.txt"]})
 	_add(1,1,"顧客台帳を別拠点へバックアップ","日次バックアップは稼働中ですが、保存先が同一拠点になっています。保存先を別拠点に変更し、顧客台帳の復元を確認してください。",{"schedule":"daily","repository":"local"},{"schedule":"daily","repository":"offsite"},{"required_files":["/srv/data/customers.csv"]})
 	_add(1,2,"誤削除された受注表の復元","受注表が削除されています。別拠点にバックアップが存在します。既存データを上書きせず、/restore に復元してください。",{"schedule":"daily","repository":"offsite"},{"schedule":"daily","repository":"offsite"},{"required_files":["/srv/data/orders.csv"],"seed_snapshot_repository":"offsite","missing_files":["/srv/data/orders.csv"]})
-	_add(1,3,"破損した会計台帳の復元","会計台帳が破損しています。正常なスナップショットから /restore へ復元してください。",{"schedule":"daily","repository":"offsite"},{"schedule":"daily","repository":"offsite"},{"required_files":["/srv/data/ledger.txt"],"seed_snapshot_repository":"offsite","fs_overrides":{"/srv/data/ledger.txt":"CORRUPTED DATA\n"},"latest_snapshot_overrides":{"/srv/data/ledger.txt":"CORRUPTED DATA\n"}})
+	_add(1,3,"締め台帳の内容を確認できない","現物を保全し、保存分を調べて台帳を別フォルダーへ取り出してください。",{"schedule":"daily","repository":"offsite"},{"schedule":"daily","repository":"offsite"},{"required_files":["/srv/data/ledger.txt"],"seed_snapshot_repository":"offsite","fs_overrides":{"/srv/data/ledger.txt":"CORRUPTED DATA\n"},"latest_snapshot_overrides":{"/srv/data/ledger.txt":"CORRUPTED DATA\n"},"backup_preservation_required":true,"checks":["毎日の退避設定を維持する","別拠点の保存先を維持する","台帳を /restore 配下へ取り出し、顧客の照合票と一致する","調査開始時の台帳原本を保持する","顧客台帳・受注表など対象外の稼働データを保持する"]})
 	_add(1,4,"停止したバックアップの再開","周期が無効になっています。別拠点への毎日退避を再開し、顧客・受注の2ファイルを復元確認してください。",{"schedule":"off","repository":"offsite"},{"schedule":"daily","repository":"offsite"},{"required_files":["/srv/data/customers.csv","/srv/data/orders.csv"]})
 	_add(1,5,"全データの災害復旧リハーサル","同一拠点の手動退避のみ設定されています。別拠点への日次退避に変更し、顧客・受注・台帳の3点を復元してください。",{"schedule":"off","repository":"local"},{"schedule":"daily","repository":"offsite"},{"required_files":["/srv/data/customers.csv","/srv/data/orders.csv","/srv/data/ledger.txt"],"seed_snapshot_repository":"local"})
 	_add_hardware_backup_install()
 	# Network: each request has a different fault or an intentional maintenance state.
-	_add(2,0,"社内サイトの名前解決を復旧","ホスト名で業務サイトに接続できません。DNS名前解決を復旧し、既存のアクセス制限とTLS設定を維持してください。",_with(network,{"dns":"off"}),network)
+	_add(2,0,"請求確認用の一覧を開けない","院内の事務担当が法人向けの請求確認に使う一覧を開けません。同じ業務を再現し、通常の利用と管理接続の制限を確認してください。",_with(network,{"dns":"off"}),network)
+	# Fresh contracts verify the real list, rather than a generic server banner.
+	# Accepted saves retain their own stored probes and are not rewritten.
+	for probe in _catalog.back().probes:
+		if str(probe.get("id",""))=="business-check":
+			probe.command = "curl https://intranet.client.test/api/business/orders"
+			probe.expectation = 'status:200|"orders":'
+			probe.label = "請求確認用の一覧を取得"
+			probe.description = "同じ業務データを取得し、一覧として読めることを確認する"
 	_add(2,1,"HTTPS接続の障害対応","業務サイトの暗号化接続が失敗します。TLSを有効に戻し、他の通信制御を維持してください。",_with(network,{"tls":"off"}),network)
 	_add(2,2,"管理画面への外部アクセスを遮断","管理接続だけが外部へ公開されています。業務利用を止めずに外部からの管理接続を拒否してください。",_with(network,{"admin_public":"allow"}),network)
 	_add(2,3,"誤遮断された業務通信の復旧","通信ルール変更後、業務サイトに接続できません。業務通信を復旧し、管理画面の外部遮断を維持してください。",_with(network,{"business":"deny"}),network)
@@ -199,10 +207,10 @@ static func _brief(chapter: int, variant: int) -> String:
 		["前日の会計台帳を戻せるか、経理から確認依頼です。毎日の自動退避と、別フォルダーへの復元を実演してください。今回は同一拠点の保管が契約条件です。",
 		"災害対策として顧客台帳を別拠点にも保管する契約になりました。現在の退避先を調べ、毎日の運用と復元した台帳の内容を確認してください。",
 		"受注表を誤って削除したため、出荷の照合ができません。別拠点に残る正常な退避データを探し、/restore へ取り出してください。",
-		"会計台帳を開くと内容が壊れています。正常時の退避データは別拠点に残っています。破損した現物で退避を更新せず、/restore で回収結果を確認してください。",
+		"台帳の締め残高を確認できず、経理の作業が止まっています。別拠点の保存分を調べ、正常時の照合票に合う台帳を /restore 配下へ取り出してください。現在の台帳と、業務で使っている顧客台帳・受注表は変更しないでください。保存ID・復元先・照合結果を経理へ引き渡します。本番ファイルへの置き換えは今回の範囲外です。",
 		"今朝のバックアップ完了通知が届いていません。顧客台帳と受注表を毎日別拠点へ退避する運用です。設定を修復し、両方の復元を確認してください。",
 		"本社が使えなくなった場合の復旧訓練です。顧客・受注・会計の3ファイルを毎日別拠点へ保管し、/restore の内容まで照合してください。"],
-		["営業部から『いつもの社内サイトを開けない』と連絡がありました。ホスト名・接続経路・暗号化の順に確認してください。外部向け管理画面は公開しない契約です。",
+		["港町クリニックの事務担当から『法人向けの請求確認に使う一覧を開けない』と連絡がありました。https://intranet.client.test/sales で同じ業務を再現し、原因を調べてください。復旧後は一覧を再確認し、暗号化通信と外部からの管理接続の遮断を維持してください。",
 		"業務サイトを開くと、安全な接続を確立できないというエラーが出ます。通常業務を戻し、管理画面の外部遮断は維持してください。",
 		"外部回線から管理画面が見えるという通報です。営業の業務サイトは止めず、公開範囲を調査してください。",
 		"通信ルール変更後、営業の業務サイトに接続できません。DNS・TLS・通信制御を確認し、管理画面の外部遮断を維持して復旧してください。",

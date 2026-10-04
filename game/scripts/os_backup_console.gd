@@ -35,7 +35,7 @@ static func box(parent: Node, color: Color = SURFACE, padding: int = 16) -> VBox
 	return node
 
 static func button(d, parent: Node, text: String, name: String, callback: Callable) -> Button:
-	var node: Button = d._button(text, callback)
+	var node: Button = d._button(text, func(): callback.call(); _focus_after(d, name))
 	node.name = name
 	node.custom_minimum_size.y = 34
 	parent.add_child(node)
@@ -44,6 +44,31 @@ static func button(d, parent: Node, text: String, name: String, callback: Callab
 	for kind in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
 		node.add_theme_color_override(kind, INK)
 	return node
+
+static func _focus_after(d, preferred: String) -> void:
+	# Actions rebuild the page. Keep keyboard users in this work area after the
+	# old button is freed, without executing another command or measurement.
+	var desktop_ref: WeakRef = weakref(d)
+	d.get_tree().process_frame.connect(func():
+		var desktop = desktop_ref.get_ref()
+		if not is_instance_valid(desktop) or desktop.current_app != "browser": return
+		var page: Node = desktop.widgets.get("browser", {}).get("page")
+		if not is_instance_valid(page): return
+		for id in [preferred, "BackupFileToggle", "BackupPreviewChanges", "BackupSnapshotChoice", "BackupRefresh"]:
+			var target := page.find_child(id, true, false) as Control
+			if not is_instance_valid(target) or not target.is_visible_in_tree() or (target is BaseButton and target.disabled): continue
+			target.grab_focus()
+			var ancestor: Node = target.get_parent()
+			while ancestor != null and not ancestor is ScrollContainer: ancestor = ancestor.get_parent()
+			if ancestor is ScrollContainer: ancestor.ensure_control_visible(target)
+			break
+	, CONNECT_ONE_SHOT)
+
+static func _wrapped(d, parent: Node, text: String, name: String, size: int = 12, color: Color = MUTED) -> Label:
+	var value := label(d, parent, text, size, color)
+	value.name = name; value.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	value.clip_text = false; value.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
+	return value
 
 static func persist(d) -> void:
 	d._save_session(false)
@@ -139,7 +164,7 @@ static func _reflow(d, shell: Control, nav_panel: Control, nav_toggle: Button, m
 	var text_scale := maxf(1.0, float(d.game.settings.get("text_scale", 1.0)))
 	var compact := float(d.windows.browser.size.x) / text_scale < 1100.0
 	var compact_nav := compact and not bool(d.backup_ui.get("nav_expanded", false))
-	var desired_height := maxf(450.0, float(d.windows.browser.size.y) - 155.0)
+	var desired_height := maxf(280.0, float(d.windows.browser.size.y) - 155.0)
 	if not is_equal_approx(shell.custom_minimum_size.y, desired_height): shell.custom_minimum_size.y = desired_height
 	var nav_width := 152.0 if compact_nav else (184.0 if compact else 248.0)
 	if not is_equal_approx(nav_panel.custom_minimum_size.x, nav_width): nav_panel.custom_minimum_size.x = nav_width
@@ -155,7 +180,7 @@ static func _reflow(d, shell: Control, nav_panel: Control, nav_toggle: Button, m
 	inventory_panel.size_flags_horizontal = Control.SIZE_FILL if not compact else Control.SIZE_EXPAND_FILL
 	inventory_panel.visible = not compact or chosen.is_empty()
 	if is_instance_valid(tree):
-		var tree_height := 310.0 if compact else 270.0
+		var tree_height := 156.0 if compact else 220.0
 		if not is_equal_approx(tree.custom_minimum_size.y, tree_height): tree.custom_minimum_size.y = tree_height
 
 static func render(d, parent: VBoxContainer) -> void:
@@ -168,11 +193,12 @@ static func render(d, parent: VBoxContainer) -> void:
 	var compact := float(d.windows.browser.size.x) / text_scale < 1100.0
 	var compact_nav := compact and not bool(s.get("nav_expanded", false))
 	var masthead := box(parent, Color("1c252d"), 12)
+	masthead.get_parent().visible = not compact
 	var top := HBoxContainer.new();top.custom_minimum_size.y = 34;top.add_theme_constant_override("separation", 12);masthead.add_child(top)
 	Glyph.add_to(top, "process", 30, INK)
 	var brand:=label(d, top, "Backrest", 24);brand.clip_text=false;brand.custom_minimum_size.x=160;brand.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	var host := label(d, top, str(live.host), 13, MUTED);host.tooltip_text=str(live.host);host.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	var shell := HBoxContainer.new();shell.name = "BackupResponsiveShell";shell.add_theme_constant_override("separation", 0);shell.custom_minimum_size.y = maxf(450.0, float(d.windows.browser.size.y) - 155.0);parent.add_child(shell)
+	var shell := HBoxContainer.new();shell.name = "BackupResponsiveShell";shell.add_theme_constant_override("separation", 0);shell.custom_minimum_size.y = maxf(280.0, float(d.windows.browser.size.y) - 155.0);parent.add_child(shell)
 	var nav := box(shell, NAV, 12 if compact_nav else (12 if compact else 16));nav.get_parent().custom_minimum_size.x = 152 if compact_nav else (184 if compact else 248);nav.get_parent().size_flags_horizontal = Control.SIZE_FILL
 	var nav_toggle := button(d, nav, "›" if compact_nav else "‹", "BackupNavigationToggle", func():s["nav_expanded"] = not bool(s.get("nav_expanded", false));rerender(d))
 	nav_toggle.tooltip_text = "Backrest navigation"
@@ -190,6 +216,7 @@ static func render(d, parent: VBoxContainer) -> void:
 	var nav_fill := Control.new();nav_fill.size_flags_vertical = Control.SIZE_EXPAND_FILL;nav.add_child(nav_fill)
 	var main := box(shell, Color("090909"), 12 if compact else 18);main.get_parent().size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var title := HBoxContainer.new();title.add_theme_constant_override("separation", 8);main.add_child(title)
+	title.visible = not compact or str(s.get("snapshot", "")).is_empty()
 	label(d, title, repo, 22)
 	button(d, title, copy("refresh", "Refresh"), "BackupRefresh", func():run(d, "restic -r " + repo + " snapshots");rerender(d))
 	button(d, title, copy("backup_now", "Backup now"), "BackupNow", func():run(d, "restic -r " + repo + " backup /srv/data");rerender(d))
@@ -206,7 +233,7 @@ static func render(d, parent: VBoxContainer) -> void:
 		var id := str(snapshot.get("id", ""));var bytes := 0
 		for content in snapshot.get("files", {}).values():bytes += str(content).to_utf8_buffer().size()
 		var snapshot_row := VBoxContainer.new();snapshot_row.add_theme_constant_override("separation", 5);snapshot_table.add_child(snapshot_row)
-		var select := button(d, snapshot_row, id, "BackupSnapshot_" + id, func():s["snapshot"] = id;s.erase("path");s.erase("preview");s.erase("restore_plan");s.erase("restore_open");run(d, "restic -r " + repo + " ls " + id);rerender(d))
+		var select := button(d, snapshot_row, id, "BackupSnapshot_" + id, func():_select_snapshot(d, s, snapshot, repo))
 		select.icon=_tree_icon(false);select.custom_minimum_size.y = 42;select.alignment = HORIZONTAL_ALIGNMENT_LEFT;select.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		label(d, snapshot_row, "; ".join(PackedStringArray(snapshot.get("paths", []))), 12, MUTED)
 		label(d,snapshot_row,UI.copy("fidelity_file_count")+" "+str(snapshot.get("files",{}).size())+"    "+str(bytes)+" B",12,MUTED)
@@ -234,7 +261,7 @@ static func render(d, parent: VBoxContainer) -> void:
 	var restore_result := str(s.get("restore_result", ""))
 	if not restore_result.is_empty() and not bool(s.get("restore_open", false)):
 		var result_key := "preview_stale" if restore_result == "preview_stale" else "restore_" + restore_result
-		var result_label := label(d, main, copy(result_key, restore_result), 12, GREEN if restore_result == "succeeded" else Color("ef6b6b"));result_label.name = "BackupRestoreResult"
+		var result_label := _wrapped(d, main, "復元処理が完了 · 顧客指定内容の照合は別途確認" if restore_result == "succeeded" else copy(result_key, restore_result), "BackupRestoreResult", 12, GREEN if restore_result == "succeeded" else Color("ef6b6b"))
 	var last: Dictionary = live.get("last_restore", {})
 	if not last.is_empty():
 		var footer := HFlowContainer.new();main.add_child(footer);label(d, footer, copy("restored", "Previous restore") + "  " + str(last.get("snapshot", "")) + "  →  " + str(last.get("target", "")), 12, MUTED)
@@ -293,9 +320,12 @@ static func _tree(d, parent: Node, s: Dictionary, snapshot: Dictionary, repo: St
 		var item: TreeItem = tree.get_selected();var path := str(item.get_metadata(0))
 		if path.is_empty():return
 		s["path"] = path;s["restore_scope"] = "selected";s["restore_open"] = false;s["restore_plan"] = {}
+		s["file_list_open"] = false
 		if str(item.get_metadata(1)) == "file":s["preview"] = run(d, "restic -r " + repo + " dump " + str(snapshot.get("id", "")) + " " + quote(path))
 		else:s.erase("preview")
-		persist(d);d._render_backup())
+		# Tree still processes the mouse event after item_selected. Rebuild only
+		# after that event finishes so its viewport remains valid during dispatch.
+		persist(d);d._render_backup.call_deferred();_focus_after(d,"BackupFileToggle"))
 
 static func _plan_rows(d, parent: Node, entries: Array) -> void:
 	for entry in entries:
@@ -319,32 +349,60 @@ static func _tree_icon(folder: bool) -> Texture2D:
 		_tree_icons[key]=ImageTexture.create_from_image(pixels)
 	return _tree_icons[key]
 
+static func _select_snapshot(d, s: Dictionary, snapshot: Dictionary, repo: String) -> void:
+	var id := str(snapshot.get("id", ""))
+	var source := str(snapshot.get("paths", ["/srv/data"])[0])
+	var relative := str(s.get("path", "")).trim_prefix(source.trim_suffix("/") + "/")
+	s["snapshot"] = id; s.erase("preview"); s.erase("restore_plan"); s.erase("restore_open")
+	s["plan_previewed"] = false; s.erase("restore_result"); s["compare_target"] = "live"
+	if not snapshot.get("files", {}).has(relative): s.erase("path")
+	run(d, "restic -r " + repo + " ls " + id)
+	if not str(s.get("path", "")).is_empty(): s["preview"] = run(d, "restic -r " + repo + " dump " + id + " " + quote(str(s.path)))
+	rerender(d)
+
 static func _snapshot(d, parent: Node, s: Dictionary, snapshot: Dictionary, repo: String) -> void:
 	var id := str(snapshot.get("id", ""))
-	var heading := HBoxContainer.new();parent.add_child(heading);Glyph.add_to(heading, "file", 24, GREEN);label(d, heading, copy("snapshot", "Snapshot") + "  " + id, 17)
+	var heading := HBoxContainer.new();heading.add_theme_constant_override("separation",8);parent.add_child(heading)
+	var chooser := OptionButton.new();chooser.name="BackupSnapshotChoice";chooser.size_flags_horizontal=Control.SIZE_EXPAND_FILL;heading.add_child(chooser);_dark_input(chooser)
+	var options: Array = [];var ordinal := 0;var selected_order := 0
+	for item in d.game._vm().state.get("snapshots", []):
+		if str(item.get("repository", "")) != repo: continue
+		ordinal += 1;options.append(item)
+		chooser.add_item("%s %s · 保存順 %d" % [copy("snapshot", "Snapshot"),str(item.get("id", "")),ordinal])
+		if str(item.get("id", "")) == id: chooser.select(chooser.item_count-1);selected_order=ordinal
+	chooser.item_selected.connect(func(index):_select_snapshot(d,s,options[index],repo);_focus_after(d,"BackupSnapshotChoice"))
 	button(d, heading, "×", "BackupBackSnapshots", func():s.erase("snapshot");s.erase("path");s.erase("preview");s.erase("restore_plan");s.erase("restore_open");rerender(d)).tooltip_text = copy("back", "Back")
 	button(d, heading, copy("restore", "Restore all"), "BackupRestore", func():s["restore_scope"] = "all";s["restore_open"] = true;s.erase("restore_plan");rerender(d))
 	var source := str(snapshot.get("paths", ["/srv/data"])[0])
+	_wrapped(d,parent,"%s · 保存順 %d · 取得時刻の記録なし" % [repo,selected_order],"BackupSnapshotContext")
 	if bool(s.get("restore_open", false)):
 		_restore_form(d, parent, s, snapshot, repo, source);return
-	label(d, parent, copy("browse", "Snapshot browser"), 14)
-	label(d, parent, source + "/", 14, MUTED)
-	var breadcrumb := HBoxContainer.new();breadcrumb.name = "BackupBreadcrumb";breadcrumb.add_theme_constant_override("separation", 4);parent.add_child(breadcrumb)
-	var breadcrumb_path := source
 	var selected_path := str(s.get("path", ""))
-	if selected_path.begins_with(source + "/"):
-		var relative: Array = Array(selected_path.trim_prefix(source + "/").split("/"))
-		if not relative.is_empty() and not bool(s.get("preview", "").is_empty()):relative.pop_back()
-		for segment in relative:
-			breadcrumb_path = breadcrumb_path.path_join(str(segment))
-			var crumb_path := breadcrumb_path
-			button(d, breadcrumb, str(segment), "BackupBreadcrumb_" + str(breadcrumb.get_child_count()), func():s["path"] = crumb_path;s["restore_scope"] = "selected";s["restore_open"] = false;s.erase("preview");s.erase("restore_plan");rerender(d)).custom_minimum_size.y = 28
-	_tree(d, parent, s, snapshot, repo, source)
-	if not str(s.get("path", "")).is_empty():
-		var path_row := HBoxContainer.new();path_row.add_theme_constant_override("separation", 8);parent.add_child(path_row);label(d, path_row, str(s.path), 12, MUTED)
+	var relative := selected_path.trim_prefix(source.trim_suffix("/") + "/")
+	var selected_file: bool = snapshot.get("files", {}).has(relative)
+	var file_row := HBoxContainer.new();file_row.add_theme_constant_override("separation",8);parent.add_child(file_row)
+	_wrapped(d,file_row,selected_path if not selected_path.is_empty() else "ファイルを選択","BackupSelectedPath",13,INK)
+	button(d,file_row,"一覧を閉じる" if bool(s.get("file_list_open",not selected_file)) else "ファイルを選び直す","BackupFileToggle",func():s["file_list_open"]=not bool(s.get("file_list_open",not selected_file));rerender(d))
+	var file_list := VBoxContainer.new();file_list.name="BackupFileList";file_list.visible=bool(s.get("file_list_open",not selected_file));parent.add_child(file_list)
+	_tree(d, file_list, s, snapshot, repo, source)
+	if not selected_path.is_empty():
+		var path_row := HBoxContainer.new();path_row.add_theme_constant_override("separation", 8);parent.add_child(path_row)
 		button(d, path_row, copy("restore_to_path", "Restore selected"), "BackupRestoreToPath", func():s["restore_scope"] = "selected";s["restore_open"] = true;s.erase("restore_plan");rerender(d))
-		var relative := str(s.path).trim_prefix(source.trim_suffix("/") + "/")
-		if snapshot.get("files", {}).has(relative): _compare_contents(d, parent, s, snapshot, source, relative)
+		if selected_file: _compare_contents(d, parent, s, snapshot, source, relative)
+	_acceptance(d,parent)
+
+static func _comparison_restore_path(live: Dictionary, source_path: String) -> String:
+	# A later restore of another file must not move this file's comparison.
+	var origins: Dictionary = live.get("backup_restore_origins", {}) if live.get("backup_restore_origins", {}) is Dictionary else {}
+	var origin: Dictionary = origins.get(source_path, {}) if origins.get(source_path, {}) is Dictionary else {}
+	if not str(origin.get("path", "")).is_empty(): return str(origin.path)
+	var last: Dictionary = live.get("last_restore", {}) if live.get("last_restore", {}) is Dictionary else {}
+	var target := str(last.get("target", ""))
+	if target.is_empty(): return ""
+	var scope := str(last.get("subfolder", "")).trim_suffix("/")
+	if scope.is_empty(): return target.path_join(source_path.trim_prefix("/")).simplify_path()
+	if not source_path.begins_with(scope + "/"): return ""
+	return target.path_join(source_path.trim_prefix(scope + "/")).simplify_path()
 
 static func _compare_contents(d, parent: Node, s: Dictionary, snapshot: Dictionary, source: String, relative: String) -> void:
 	var card := box(parent, Color("14191d"), 10); card.name = "BackupContentComparison"
@@ -353,34 +411,58 @@ static func _compare_contents(d, parent: Node, s: Dictionary, snapshot: Dictiona
 	label(d, controls, "内容を比較", 15)
 	button(d, controls, "稼働中のファイル", "BackupCompareLive", func(): s["compare_target"] = "live"; rerender(d))
 	var last: Dictionary = live.get("last_restore", {})
-	var restored := str(last.get("snapshot", "")) == str(snapshot.get("id", "")) and not last.is_empty()
-	if restored: button(d, controls, "復元先のファイル", "BackupCompareRestored", func(): s["compare_target"] = "restored"; rerender(d))
+	var restore_path := _comparison_restore_path(live, source.path_join(relative))
+	var restored: bool = not restore_path.is_empty() and live.get("fs", {}).has(restore_path)
+	if restored: button(d, controls, "復元先の現在内容", "BackupCompareRestored", func(): s["compare_target"] = "restored"; rerender(d))
 	var destination := source.path_join(relative)
-	if restored and str(s.get("compare_target", "live")) == "restored": destination = str(last.get("target", "/restore")).path_join(source.trim_prefix("/")).path_join(relative)
+	if restored and str(s.get("compare_target", "live")) == "restored": destination = restore_path
 	var saved := str(snapshot.files[relative])
 	var exists: bool = live.get("fs", {}).has(destination)
 	var current := str(live.get("fs", {}).get(destination, ""))
 	var status := "内容が一致" if exists and current == saved else "内容が異なります" if exists else "比較先にファイルがありません"
 	var outcome := label(d, card, status + "  /  " + destination, 12, GREEN if exists and current == saved else Color("efc45d")); outcome.name = "BackupComparisonStatus"; outcome.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; outcome.clip_text = false; outcome.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING; outcome.custom_minimum_size.y = 24
-	var panes := BoxContainer.new(); panes.vertical = float(d.windows.browser.size.x) / maxf(1.0, float(d.game.settings.get("text_scale", 1.0))) < 1100; panes.add_theme_constant_override("separation", 8); card.add_child(panes)
+	if destination == restore_path:
+		_wrapped(d,card,"比較する保存版: %s / %s · 直近の復元操作: %s" % [str(snapshot.get("repository","")),str(snapshot.get("id","")),str(last.get("snapshot",""))],"BackupRestoreProvenance",11)
+	var panes := BoxContainer.new();panes.name="BackupComparisonPanes";panes.add_theme_constant_override("separation",8);card.add_child(panes)
+	panes.resized.connect(func():panes.vertical=panes.size.x<480.0*maxf(1.0,float(d.game.settings.get("text_scale",1.0))))
 	for entry in [["保存 " + str(snapshot.get("id", "")), saved, "BackupPreview"], ["現在 " + destination, current if exists else "（ファイルなし）", "BackupCurrentPreview"]]:
 		var column := VBoxContainer.new(); column.size_flags_horizontal = Control.SIZE_EXPAND_FILL; panes.add_child(column)
 		var bytes := str(str(entry[1]).to_utf8_buffer().size()) + " B" if str(entry[2]) == "BackupPreview" or exists else "未作成"
 		var heading := label(d, column, str(entry[0]) + "  " + bytes, 12, MUTED); heading.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; heading.clip_text = false; heading.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING; heading.custom_minimum_size.y = 24
-		var preview := TextEdit.new(); preview.name = str(entry[2]); preview.editable = false; preview.text = str(entry[1]); preview.custom_minimum_size.y = 110; preview.add_theme_font_override("font", d.mono); _dark_input(preview); column.add_child(preview)
+		var preview := TextEdit.new();preview.name=str(entry[2]);preview.editable=false;preview.text=str(entry[1]);preview.wrap_mode=TextEdit.LINE_WRAPPING_BOUNDARY;preview.custom_minimum_size.y=76;preview.add_theme_font_override("font",d.mono);_dark_input(preview);column.add_child(preview)
+		preview.gui_input.connect(func(event: InputEvent):
+			if event is InputEventKey and event.pressed and event.keycode==KEY_TAB:
+				var next := preview.find_prev_valid_focus() if event.shift_pressed else preview.find_next_valid_focus()
+				if next!=null:next.grab_focus()
+				preview.accept_event())
+
+static func _acceptance(d, parent: Node) -> void:
+	var vm = d.game._vm()
+	if not vm.has_method("backup_acceptance_view"): return
+	var status: Dictionary = vm.backup_acceptance_view()
+	if not bool(status.get("available",false)): return
+	if not str(status.get("error","")).is_empty():
+		_wrapped(d,parent,"保全記録を確認できません（判定不可）。","BackupPreservationError",12,Color("efc45d"));return
+	if not bool(status.get("enforced",false)):
+		_wrapped(d,parent,"この記録には変更前の保全記録がありません。","BackupPreservationLegacy");return
+	var restored: Array = status.get("restored",[])
+	var observed := restored.any(func(item):return not str(item.get("current_sha256","")).is_empty())
+	var restore_text := "一致" if bool(status.get("restore_valid",false)) else "不一致" if observed else "未復元"
+	var text := "顧客指定の復元: %s · 原本: %s · 対象外: %s" % [restore_text,"保全" if bool(status.get("original_preserved",false)) else "変更あり","保全" if bool(status.get("unrelated_preserved",false)) else "変更あり"]
+	_wrapped(d,parent,text,"BackupAcceptanceStatus",12,GREEN if bool(status.get("accepted",false)) else Color("efc45d") if observed else MUTED)
 
 static func _restore_form(d, parent: Node, s: Dictionary, snapshot: Dictionary, repo: String, _source: String) -> void:
 	var restore := box(parent, Color("17191c"));restore.name="BackupRestorePane"
 	label(d, restore, copy("restore_review"), 16)
 	var outcome:=str(s.get("restore_result",""))
 	if not outcome.is_empty():
-		var outcome_label:=label(d,restore,copy("preview_stale" if outcome=="preview_stale" else "restore_"+outcome),13,GREEN if outcome=="succeeded" else Color("ef6b6b"));outcome_label.name="BackupRestoreResult"
+		_wrapped(d,restore,"復元処理が完了 · 顧客指定内容の照合は別途確認" if outcome=="succeeded" else copy("preview_stale" if outcome=="preview_stale" else "restore_"+outcome),"BackupRestoreResult",13,GREEN if outcome=="succeeded" else Color("ef6b6b"))
 	var close_row := HBoxContainer.new();close_row.add_theme_constant_override("separation", 8);restore.add_child(close_row)
 	button(d, close_row, copy("close", "Close"), "BackupCloseRestore", func():s["restore_open"] = false;rerender(d))
-	label(d, close_row, copy("selected_path") + "  " + (str(s.get("path", "")) if str(s.get("restore_scope", "all")) == "selected" else copy("all_files", "All files")), 12, MUTED)
+	_wrapped(d,close_row,copy("selected_path") + "  " + (str(s.get("path", "")) if str(s.get("restore_scope", "all")) == "selected" else copy("all_files", "All files")),"BackupRestoreScope")
 	label(d, restore, copy("restore_to", "Restore destination"), 13)
 	var destination := LineEdit.new();destination.name = "BackupDestination";destination.text = str(s.get("destination", "/restore"));_dark_input(destination);restore.add_child(destination);destination.text_changed.connect(func(value):s["destination"] = value;s["plan_previewed"] = false;var execute_node=restore.find_child("BackupExecuteRestore",true,false);if execute_node != null:execute_node.disabled=true;persist(d))
-	var overwrite := OptionButton.new();overwrite.name = "BackupOverwrite";overwrite.add_item(copy("overwrite_always", "Overwrite existing"));overwrite.add_item(copy("overwrite_never", "Skip existing"));overwrite.select(1 if str(s.get("overwrite", "always")) == "never" else 0);restore.add_child(overwrite);_dark_input(overwrite);overwrite.item_selected.connect(func(index):s["overwrite"] = "never" if index == 1 else "always";s.erase("restore_plan");s["plan_previewed"]=false;rerender(d))
+	var overwrite := OptionButton.new();overwrite.name = "BackupOverwrite";overwrite.add_item(copy("overwrite_always", "Overwrite existing"));overwrite.add_item(copy("overwrite_never", "Skip existing"));overwrite.select(1 if str(s.get("overwrite", "always")) == "never" else 0);restore.add_child(overwrite);_dark_input(overwrite);overwrite.item_selected.connect(func(index):s["overwrite"] = "never" if index == 1 else "always";s.erase("restore_plan");s["plan_previewed"]=false;rerender(d);_focus_after(d,"BackupOverwrite"))
 	var plan: Dictionary = s.get("restore_plan", {}) if s.get("restore_plan", {}) is Dictionary else {}
 	var entries: Array = plan.get("entries", []) if bool(plan.get("ok", false)) else []
 	var preview_row := HBoxContainer.new();preview_row.add_theme_constant_override("separation", 8);restore.add_child(preview_row)
@@ -394,6 +476,7 @@ static func _restore_form(d, parent: Node, s: Dictionary, snapshot: Dictionary, 
 	for entry in entries:
 		if entry is Dictionary:counts[str(entry.get("status", ""))] = int(counts.get(str(entry.get("status", "")), 0)) + 1
 	label(d, restore, "%s: %d  %s: %d  %s: %d  %s: %d" % [copy("status_new", "New"),counts.new,copy("status_unchanged", "Unchanged"),counts.unchanged,copy("status_overwrite", "Overwrite"),counts.overwrite,copy("status_skipped", "Skipped"),counts.skipped], 12, MUTED)
-	var plan_table := VBoxContainer.new();plan_table.name = "BackupPlanEntries";plan_table.add_theme_constant_override("separation", 6);restore.add_child(plan_table);_plan_rows(d, plan_table, entries)
 	var actions := HBoxContainer.new();actions.add_theme_constant_override("separation", 8);restore.add_child(actions)
 	var execute := button(d, actions, copy("execute_restore", "Restore"), "BackupExecuteRestore", func():_execute_restore(d, s, snapshot, repo, destination.text.strip_edges() if not destination.text.strip_edges().is_empty() else "/restore"));execute.disabled = entries.is_empty() or not bool(s.get("plan_previewed", false))
+	var plan_table := VBoxContainer.new();plan_table.name = "BackupPlanEntries";plan_table.add_theme_constant_override("separation", 6);restore.add_child(plan_table);_plan_rows(d, plan_table, entries)
+	_acceptance(d,restore)

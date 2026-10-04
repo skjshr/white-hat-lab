@@ -127,7 +127,16 @@ func run() -> void:
 	game.new_game();await physics_frame;await frames()
 	check(not game.office_expanded() and passage_blocked(),"new company closes annex")
 	check(not is_instance_valid(office.annex_root) or not office.annex_root.visible,"new company removes annex visuals")
-	root.get_node("Soundscape").unmount_world(office)
-	await create_timer(0.15).timeout
+	# Release the scene created by this test while the mixer is still running,
+	# rather than leaving its Ogg playback to race SceneTree shutdown.
+	game.set_settings({"volume":0},false)
+	var sound=root.get_node("Soundscape")
+	sound.set_workspace(false)
+	sound.unmount_world(office)
+	check(not sound._music.playing,"test teardown stops active music")
+	office.queue_free()
+	await frames(3)
+	await create_timer(0.2).timeout
+	check(not is_instance_valid(office),"test office is freed before process exit")
 	print("OFFICE_EXPANSION failures=",failures.size())
 	quit(0 if failures.is_empty() else 1)

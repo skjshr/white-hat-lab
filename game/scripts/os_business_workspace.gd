@@ -233,6 +233,7 @@ static func _toolbar(d, parent: Node, state: Dictionary, view: String) -> LineEd
 
 static func render(d, parent: VBoxContainer, url: String, response: String) -> void:
 	var state := _state(d)
+	preload("res://scripts/network_request_panel.gd").render(d,parent,url)
 	var lower_url := url.to_lower()
 	var view := "accounting" if "/accounting" in lower_url else ("customers" if "/customers" in lower_url else "sales")
 	state["view"] = view
@@ -288,9 +289,10 @@ static func _transport_error(d, parent: Node, payload: Dictionary, response: Str
 	var box := _panel(page, Color("fafafa"), 24)
 	_label(d, box, copy("unreachable", "This site cannot be reached"), 22, INK)
 	_label(d, box, url, 13, MUTED)
-	_label(d, box, copy("error_" + str(payload.get("error", "network")), "Connection failed"), 14, RED)
+	_label(d, box, copy("error_" + str(payload.get("transport_kind",payload.get("error", "network"))), "Connection failed"), 14, RED)
+	_label(d, box, "HTTP応答を受け取る前に接続が止まりました。",13,MUTED).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_button(d, box, copy("refresh", "Refresh"), "BusinessRefresh", func(): d._browse_url(url, false))
-	_response(d, box, response)
+	_response(d, box, str(payload.get("raw",response)))
 
 static func _error(d, parent: Node, payload: Dictionary, response: String) -> void:
 	var box := _panel(parent, PANEL, 18)
