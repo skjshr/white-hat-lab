@@ -148,6 +148,10 @@ func backup() -> void:
 	await setup_case("service-1-case-3", "http://backup01.client.test:9898")
 	pc._browse_url(pc.BACKUP_URL, false); await frames()
 	press("BackupSnapshot_00000001"); await select_file("/srv/data/ledger.txt")
+	# This existing workflow verifies the retained full console. Select its
+	# explicit File route; the separate workbench suite covers the new surface.
+	if control("BackupWorkbench") != null:
+		press("BackupFileToggle"); await frames()
 	check(control("BackupPreview") is TextEdit and control("BackupCurrentPreview") is TextEdit, "saved and live bytes shown together")
 	var saved: String = control("BackupPreview").text
 	check(saved != control("BackupCurrentPreview").text and str(control("BackupComparisonStatus").text).contains("異なり"), "earlier recovery point differs from damaged live file")

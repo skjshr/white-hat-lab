@@ -5,6 +5,7 @@ const UI = preload("res://scripts/ui_theme.gd")
 const Glyph = preload("res://scripts/service_glyph.gd")
 const Visual = preload("res://scripts/backup_visual.gd")
 const Document = preload("res://scripts/backup_document.gd")
+const Workbench = preload("res://scripts/backup_workbench.gd")
 const NAV := Color("111111")
 const SURFACE := Color("101010")
 const LINE := Color("292929")
@@ -56,7 +57,7 @@ static func _focus_after(d, preferred: String) -> void:
 		if not is_instance_valid(desktop) or desktop.current_app != "browser": return
 		var page: Node = desktop.widgets.get("browser", {}).get("page")
 		if not is_instance_valid(page): return
-		for id in [preferred, "BackupFileToggle", "BackupPreviewChanges", "BackupSnapshotChoice", "BackupRefresh"]:
+		for id in [preferred, "BackupExecuteRestore", "BackupRestoreToPath", "BackupFileToggle", "BackupPreviewChanges", "BackupSnapshotChoice", "BackupRefresh"]:
 			var target := page.find_child(id, true, false) as Control
 			if not is_instance_valid(target) or not target.is_visible_in_tree() or (target is BaseButton and target.disabled): continue
 			target.grab_focus()
@@ -151,6 +152,7 @@ static func _execute_restore(d, s: Dictionary, snapshot: Dictionary, repo: Strin
 	s["restore_result"] = "succeeded" if succeeded else "failed"
 	s["plan_previewed"] = false
 	s["last_restore_result"] = raw
+	if succeeded and _workbench_file(d.game._vm().state,str(s.get("path",""))) and not bool(s.get("file_list_open",false)) and str(s.get("restore_scope",""))=="selected":s["restore_open"]=false
 	persist(d)
 	d._render_backup()
 
@@ -191,6 +193,14 @@ static func render(d, parent: VBoxContainer) -> void:
 	if not s.has("repository"):s["repository"] = str(live.applied.get("repository", "local"))
 	if not s.has("plan_open"):s["plan_open"] = false
 	var repo := str(s.get("repository", "local"))
+	var full_restore:bool=bool(s.get("restore_open",false)) and str(s.get("restore_scope","all"))!="selected"
+	if _workbench_file(live,str(s.get("path",""))) and not bool(s.get("file_list_open",false)) and not full_restore:
+		for snapshot in live.get("snapshots",[]):
+			if str(snapshot.get("repository",""))!=repo or str(snapshot.get("id",""))!=str(s.get("snapshot","")):continue
+			var source:=str(snapshot.get("paths",["/srv/data"])[0]);var path:=str(s.get("path",""))
+			var relative:=path.trim_prefix(source.trim_suffix("/")+"/")
+			if not path.is_empty() and snapshot.get("files",{}).has(relative):
+				Workbench.render(d,parent,s,live,snapshot,repo,OSBackupConsole);return
 	var text_scale := maxf(1.0, float(d.game.settings.get("text_scale", 1.0)))
 	var compact := float(d.windows.browser.size.x) / text_scale < 1100.0
 	var compact_nav := compact and not bool(s.get("nav_expanded", false))
@@ -323,7 +333,9 @@ static func _tree(d, parent: Node, s: Dictionary, snapshot: Dictionary, repo: St
 		if path.is_empty():return
 		s["path"] = path;s["restore_scope"] = "selected";s["restore_open"] = false;s["restore_plan"] = {}
 		s["file_list_open"] = false
-		if str(item.get_metadata(1)) == "file":s["preview"] = run(d, "restic -r " + repo + " dump " + str(snapshot.get("id", "")) + " " + quote(path))
+		if str(item.get_metadata(1)) == "file":
+			s["preview"] = run(d, "restic -r " + repo + " dump " + str(snapshot.get("id", "")) + " " + quote(path))
+			_cache_preview(s,snapshot,repo,path,str(s.preview))
 		else:s.erase("preview")
 		# Tree still processes the mouse event after item_selected. Rebuild only
 		# after that event finishes so its viewport remains valid during dispatch.
@@ -360,6 +372,9 @@ static func _tree_icon(folder: bool) -> Texture2D:
 	return _tree_icons[key]
 
 static func _select_snapshot(d, s: Dictionary, snapshot: Dictionary, repo: String) -> void:
+	for previous in d.game._vm().state.get("snapshots",[]):
+		if s.has("preview") and str(previous.get("repository",""))==str(s.get("repository","")) and str(previous.get("id",""))==str(s.get("snapshot","")):
+			_cache_preview(s,previous,str(s.get("repository","")),str(s.get("path","")),str(s.get("preview","")));break
 	var id := str(snapshot.get("id", ""))
 	var source := str(snapshot.get("paths", ["/srv/data"])[0])
 	var relative := str(s.get("path", "")).trim_prefix(source.trim_suffix("/") + "/")
@@ -367,8 +382,27 @@ static func _select_snapshot(d, s: Dictionary, snapshot: Dictionary, repo: Strin
 	s["plan_previewed"] = false; s.erase("restore_result"); s["compare_target"] = "live"
 	if not snapshot.get("files", {}).has(relative): s.erase("path")
 	run(d, "restic -r " + repo + " ls " + id)
-	if not str(s.get("path", "")).is_empty(): s["preview"] = run(d, "restic -r " + repo + " dump " + id + " " + quote(str(s.path)))
+	if not str(s.get("path", "")).is_empty():
+		s["preview"] = run(d, "restic -r " + repo + " dump " + id + " " + quote(str(s.path)))
+		_cache_preview(s,snapshot,repo,str(s.path),str(s.preview))
 	rerender(d)
+
+static func _workbench_case(live: Dictionary) -> bool:
+	var scenario:Dictionary=live.get("scenario",{})
+	return str(scenario.get("id",""))=="service-1-case-3" and str(scenario.get("backup_acceptance_mode",""))!="production_replacement"
+
+static func _workbench_file(live:Dictionary,path:String) -> bool:
+	var required:Variant=live.get("scenario",{}).get("required_files",[])
+	return _workbench_case(live) and required is Array and required.size()==1 and path==str(required[0])
+
+static func _cache_preview(s: Dictionary,snapshot: Dictionary,repo: String,path: String,raw: String) -> void:
+	# Only explicit successful reads may fill a candidate sheet. Render never
+	# executes dump or creates observed content for an uninspected snapshot.
+	var source:=str(snapshot.get("paths",["/srv/data"])[0]);var relative:=path.trim_prefix(source.trim_suffix("/")+"/")
+	if not snapshot.get("files",{}).has(relative) or raw!=str(snapshot.files[relative]):return
+	if not s.get("inspected_files",{}) is Dictionary:s["inspected_files"]={}
+	if not s.has("inspected_files"):s["inspected_files"]={}
+	s.inspected_files[JSON.stringify([repo,str(snapshot.get("id","")),path])]=raw
 
 static func _snapshot(d, parent: Node, s: Dictionary, snapshot: Dictionary, repo: String) -> void:
 	parent.add_theme_constant_override("separation",6)

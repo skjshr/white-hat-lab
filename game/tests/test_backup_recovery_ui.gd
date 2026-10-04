@@ -4,6 +4,7 @@ extends "res://tests/test_service_workflows.gd"
 var click_count := 0
 var wheel_count := 0
 var key_count := 0
+var keyboard_actions := 0
 
 func setup_case(case_id: String, url: String) -> void:
 	ui._new_game();game.set_process(false);game.choose_strategy("operations");game.start_free_career()
@@ -37,12 +38,12 @@ func visible_rect(node: Control) -> Rect2:
 		ancestor=ancestor.get_parent()
 	return rect.intersection(root.get_visible_rect())
 
-func pointer(point: Vector2, button := MOUSE_BUTTON_LEFT) -> void:
+func pointer(point: Vector2, button := MOUSE_BUTTON_LEFT, wheel_factor := 1.0) -> void:
 	var pixel := point*Vector2(root.size)/root.get_visible_rect().size
 	var motion := InputEventMouseMotion.new();motion.position=pixel;motion.global_position=pixel;Input.parse_input_event(motion)
 	await frames(1)
 	for down in [true,false]:
-		var event := InputEventMouseButton.new();event.position=pixel;event.global_position=pixel;event.button_index=button;event.pressed=down;Input.parse_input_event(event)
+		var event := InputEventMouseButton.new();event.position=pixel;event.global_position=pixel;event.button_index=button;event.pressed=down;event.factor=wheel_factor;Input.parse_input_event(event)
 		await frames(2)
 
 func reach(node: Control) -> bool:
@@ -100,17 +101,20 @@ func focus_id() -> String:
 	var owner:=root.gui_get_focus_owner()
 	return str(owner.name) if owner!=null else "none"
 
-func key_activate(id: String) -> void:
+func key_activate(id: String, backwards := false) -> bool:
 	for _step in 35:
 		if focus_id()==id:break
-		await tap(KEY_TAB)
+		await tap(KEY_TAB,backwards)
 	check(focus_id()==id,"Tab reaches "+id)
-	if focus_id()!=id:return
+	if focus_id()!=id:return false
 	var button:=ctl(id) as Button
-	if button==null:return
+	if button==null:return false
+	check(visible_rect(button).has_point(button.get_global_rect().get_center()),"keyboard focus visible without helper scrolling "+id)
 	var pressed:=[0];button.pressed.connect(func():pressed[0]+=1)
 	await tap(KEY_SPACE);await frames(8)
 	check(pressed[0]==1,"Space activates once "+id)
+	keyboard_actions+=1
+	return pressed[0]==1
 
 func select_ledger() -> void:
 	var tree:=ctl("BackupSnapshotTree") as Tree
@@ -133,7 +137,7 @@ func select_ledger() -> void:
 	if not visible_rect(tree).encloses(row):return
 	await pointer(tree.global_position+rect.get_center());click_count+=1;await frames(10)
 	check(str(pc.backup_ui.get("path",""))=="/srv/data/ledger.txt","pointer selects actual ledger")
-	check(not ctl("BackupFileList").visible,"file selection exposes comparison without tree taking its height")
+	check(ctl("BackupFileList")==null or not ctl("BackupFileList").visible,"file selection exposes work area without tree taking its height")
 	check(focus_id()=="BackupFileToggle","file selection restores useful keyboard focus")
 
 func shot(name: String) -> void:
@@ -142,56 +146,67 @@ func shot(name: String) -> void:
 	check(not bool(pc.backup_ui.get("content_details",false)) and not bool(pc.backup_ui.get("plan_details",false)) and not bool(pc.backup_ui.get("output_open",false)),"recovery never opens raw details "+name)
 	var fair_comparison := name.begins_with("04-") or name.begins_with("06-")
 	var before: Dictionary={"vm":game._vm().export_state(),"clock":game.clock_minutes(),"cash":game.state.cash,"probes":game.diagnostic_probes()}
+	if fair_comparison: await capture_view(name+"-guide-off")
 	if fair_comparison:
 		# Display-only A/B fixture: baseline captures have the guide visible.
 		# No help/hint is opened; the actual toggle hides it again before work.
 		ui.next_task_guide.set_enabled(true);await frames(10)
 		print("BACKUP_DISPLAY_FIXTURE guide visible for comparison-only capture ",name)
-		# A fully scaled guide takes more room than the hidden operation route.
-		# Use real wheel input to frame the selected documents and all guards;
-		# the offscreen chooser is tested separately for keyboard reachability.
+		# Match the baseline's display-only framing. Keep the preceding guide-off
+		# first-viewport image; do not claim every object fits before scrolling.
 		for _attempt in 4:
-			var guard:=ctl("BackupRecoveryGuard")
+			var guard:=ctl("BackupUnrelatedGuard")
 			if visible_rect(guard).size.y>=guard.size.y-1:break
 			await pointer(visible_rect(ctl("BackupCurrentDocument")).get_center(),MOUSE_BUTTON_WHEEL_DOWN);wheel_count+=1;await frames(3)
+		# A full wheel step can overshoot the top stamp by a few pixels. Use
+		# real high-resolution wheel input for this screenshot-only framing;
+		# do not set scroll offsets or alter the guide-off gameplay viewport.
+		for _attempt in 8:
+			var guard:=ctl("BackupRecoveryGuard")
+			if visible_rect(guard).size.y>=guard.size.y-1:break
+			await pointer(visible_rect(ctl("BackupCurrentDocument")).get_center(),MOUSE_BUTTON_WHEEL_UP,0.1);wheel_count+=1;await frames(3)
 		assert_visible_documents()
-	if capture_enabled:
-		await frames(8);await RenderingServer.frame_post_draw
-		var folder:=OS.get_environment("WHL_CAPTURE_DIR")
-		if not folder.is_empty():
-			DirAccess.make_dir_recursive_absolute(folder)
-			check(root.get_texture().get_image().save_png(folder.path_join(name+("-narrow" if narrow else "-wide")+".png"))==OK,"capture "+name)
+	await capture_view(name)
 	if fair_comparison:
 		await native_click("NextTaskToggle")
 		check(not ui.next_task_guide.enabled(),"real guide toggle resumes operation without instructions")
 		var after: Dictionary={"vm":game._vm().export_state(),"clock":game.clock_minutes(),"cash":game.state.cash,"probes":game.diagnostic_probes()}
 		check(before==after,"comparison-only display setup preserves VM observations cash and clock")
 
+func capture_view(name: String) -> void:
+	if capture_enabled:
+		await frames(8);await RenderingServer.frame_post_draw
+		var folder:=OS.get_environment("WHL_CAPTURE_DIR")
+		if not folder.is_empty():
+			DirAccess.make_dir_recursive_absolute(folder)
+			check(root.get_texture().get_image().save_png(folder.path_join(name+("-narrow" if narrow else "-wide")+".png"))==OK,"capture "+name)
+
 func assert_render_scale(checkpoint: String) -> void:
 	var scale := 1.3 if narrow else 1.0
 	check(is_equal_approx(float(game.settings.text_scale),scale),"actual desktop settings scale "+checkpoint)
 	check(is_equal_approx(float(ui.text_scale),scale),"actual interface theme scale "+checkpoint)
-	for id in ["BackupSavedDocument","BackupCurrentDocument","BackupPlanBefore","BackupPlanAfter"]:
+	for id in ["BackupSnapshot_00000001","BackupSnapshot_00000002","BackupCurrentDocument","BackupPlanBefore","BackupPlanAfter"]:
 		var document:=ctl(id)
-		if document==null or not document.is_visible_in_tree():continue
+		if document==null or not document.is_visible_in_tree() or not document.has_meta("document"):continue
 		for field in document.get_meta("document").fields:
 			var value:=ctl(id+"Value_"+str(field.key)) as Label
-			var expected:=maxi(11,int((12 if str(field.key)=="date" else 18)*scale))
+			var expected:=maxi(11,int((12 if str(field.key)=="date" else 22 if narrow else 32)*scale))
 			check(value.get_theme_font_size("font_size")==expected,"actual document font at declared scale "+str(value.name))
 	print("BACKUP_SCALE ",checkpoint," desktop=",game.settings.text_scale," interface=",ui.text_scale)
 
 func assert_visible_documents() -> void:
-	for id in ["BackupSavedDocument","BackupCurrentDocument"]:
+	for id in ["BackupSnapshot_00000001","BackupSnapshot_00000002","BackupCurrentDocument"]:
 		var document:=ctl(id)
-		var paper:=ctl(id+"Paper")
-		var caption:=document.get_child(0) as Control
-		check(visible_rect(caption).size.y>=caption.size.y-1,"selected version or destination context visible beside actual document "+id)
+		check(document!=null and document.has_meta("document"),"actual paper object exists "+id)
+		if document==null or not document.has_meta("document"):continue
+		var caption:=ctl(id+"Caption")
+		check(visible_rect(caption).size.y>=caption.size.y-1,"version or destination identity visible on actual paper "+id)
 		for field in document.get_meta("document").fields:
 			var value:=ctl(id+"Value_"+str(field.key)) as Label
 			var measured:=value.get_theme_font("font").get_string_size(value.text,HORIZONTAL_ALIGNMENT_LEFT,-1,value.get_theme_font_size("font_size")).x
 			check(value.size.x>=measured-1 and value.size.x>0,"actual value label has width for its entire rendered string "+str(value.name))
 			check(visible_rect(value).size.x>=measured-1 and visible_rect(value).size.y>=value.size.y-1,"actual value fully visible in viewport "+str(value.name))
-			check(paper.get_global_rect().encloses(value.get_global_rect()),"actual value stays inside document outline "+str(value.name))
+			check(document.get_global_rect().encloses(value.get_global_rect()),"actual value stays inside document outline "+str(value.name))
 	for id in ["BackupRecoveryGuard","BackupOriginalGuard","BackupUnrelatedGuard"]:
 		var guard:=ctl(id)
 		print("BACKUP_GUARD_RECT ",id," rect=",guard.get_global_rect()," visible=",visible_rect(guard))
@@ -214,6 +229,23 @@ func comparison_paths() -> void:
 	check(console._planned_live_changes(acceptance,entries)=={"original":1,"unrelated":1},"only actual planned live writes warn, not skipped unchanged or staged files")
 	check(console._planned_live_changes({"available":true,"enforced":false,"legacy":true},entries)=={"original":0,"unrelated":0},"legacy unknown scope does not invent protection classification")
 
+func selected_sheet(id: String, kind: String) -> void:
+	var sheet:=ctl("BackupSnapshot_"+id) as Button
+	check(sheet!=null and sheet.has_meta("document"),"candidate is the actual selectable paper "+id)
+	if sheet==null or not sheet.has_meta("document"):return
+	check(str(sheet.get_meta("snapshot_id"))==id and str(sheet.get_meta("repository"))=="offsite" and str(sheet.get_meta("source_path"))=="/srv/data/ledger.txt","paper identifies actual repository version and selected file")
+	check(str(pc.backup_ui.get("snapshot",""))==id and str(pc.backup_ui.get("path",""))=="/srv/data/ledger.txt","actual selection tuple follows paper")
+	check(bool(sheet.get_meta("observed",false)) and str(sheet.get_meta("document").kind)==kind,"explicitly read bytes render selected paper "+kind)
+
+func disabled_confirm_is_safe() -> void:
+	var button:=ctl("BackupExecuteRestore") as Button
+	check(button!=null and button.disabled,"changed destination disables previous confirmation")
+	if button==null or not button.disabled:return
+	var before:Dictionary={"vm":game._vm().export_state(),"clock":game.clock_minutes(),"cash":game.state.cash}
+	check(await reach(button),"stale confirmation is visible for actual attempted click")
+	await pointer(visible_rect(button).get_center());click_count+=1;await frames(8)
+	check(before=={"vm":game._vm().export_state(),"clock":game.clock_minutes(),"cash":game.state.cash},"actual disabled confirmation cannot reuse old plan")
+
 func run() -> void:
 	comparison_paths()
 	ui=load("res://scripts/interface.gd").new();root.add_child(ui);await frames()
@@ -226,82 +258,78 @@ func run() -> void:
 	check(not ui.next_task_guide.enabled(),"actual guide toggle hides instructions before repair")
 	pc._browse_url(pc.BACKUP_URL,true);await frames(10)
 	await native_click("BackupSnapshot_00000002");await select_ledger()
-	if ctl("BackupPreview")==null:
-		print("BACKUP_RECOVERY_UI stopped before ledger comparison; failures=",failures);quit(1);return
-	check(str(ctl("BackupPreview").text).contains("CORRUPTED"),"latest snapshot really contains corrupt data")
-	check(str(ctl("BackupSavedDocument").get_meta("document").kind)=="damaged" and ctl("BackupSavedDocumentDamage").is_visible_in_tree(),"actual corrupt bytes produce damaged document and readable short warning")
+	if ctl("BackupWorkbench")==null:
+		print("BACKUP_RECOVERY_UI stopped before direct workbench; failures=",failures);quit(1);return
+	selected_sheet("00000002","damaged")
+	var unread:=ctl("BackupSnapshot_00000001")
+	check(str(unread.get_meta("document").kind)=="unread" and not bool(unread.get_meta("observed")),"unopened earlier version does not disclose its contents or a correct-answer label")
+	check(str(ctl("BackupCurrentDocument").get_meta("document").kind)=="missing","destination tray shows actual missing staged file")
 	await shot("01-latest-is-damaged")
-	await key_activate("BackupRestoreToPath")
-	check(ctl("BackupDestination")!=null,"keyboard opens actual restore form")
-	await native_click("BackupPreviewChanges")
-	check(focus_id()=="BackupPreviewChanges","preview rerender retains button focus")
-	check(str(ctl("BackupPlanBefore").get_meta("document").kind)=="missing" and str(ctl("BackupPlanAfter").get_meta("document").kind)=="damaged","real dry-run visual shows missing destination becoming damaged content")
-	check(str(ctl("BackupPlanRoute").text).contains("/restore/srv/data/ledger.txt"),"dry-run visual identifies actual planned write path")
+	var before_plan:Dictionary={"vm":game._vm().export_state(),"clock":game.clock_minutes()}
+	if not await key_activate("BackupRestoreToPath"):quit(1);return
+	check(ctl("BackupExecuteRestore")!=null and bool(pc.backup_ui.get("plan_previewed",false)),"explicit tray action creates real confirmation plan")
+	check(before_plan=={"vm":game._vm().export_state(),"clock":game.clock_minutes()},"preparing plan does not write bytes or charge time")
+	check(str(ctl("BackupPlanBefore").get_meta("document").kind)=="missing" and str(ctl("BackupPlanAfter").get_meta("document").kind)=="damaged","real inline plan shows missing target becoming damaged content")
+	check(str(ctl("BackupPlanRoute").text).contains("/restore/srv/data/ledger.txt"),"inline plan identifies actual proposed target")
 	await shot("02-selected-restore-plan")
-	await key_activate("BackupExecuteRestore")
-	check(game.vm_read("/restore/srv/data/ledger.txt").contains("CORRUPTED"),"restoring latest really leaves damaged destination")
-	await native_click("BackupCloseRestore");await native_click("BackupCompareRestored")
-	check(not bool(game._vm().backup_acceptance_view().accepted) and str(ctl("BackupAcceptanceStatus").text).contains("不一致"),"successful wrong-version command visibly fails customer acceptance")
-	check(str(ctl("BackupRecoveryGuard").get_meta("state"))=="mismatch" and str(ctl("BackupOriginalGuard").get_meta("state"))=="preserved","wrong restored bytes and preserved damaged original have distinct graphical states")
-	check(await reach(ctl("BackupAcceptanceGuards")),"wrong-version customer rejection reachable beside comparison")
+	if not await key_activate("BackupExecuteRestore"):quit(1);return
+	check(game.vm_read("/restore/srv/data/ledger.txt").contains("CORRUPTED"),"confirming latest really writes damaged bytes to staged destination")
+	check(not bool(pc.backup_ui.get("restore_open",false)) and ctl("BackupExecuteRestore")==null,"successful confirmation returns to actual destination tray")
+	check(not bool(game._vm().backup_acceptance_view().accepted),"successful wrong-version restore is not accepted")
+	check(str(ctl("BackupCurrentDocument").get_meta("document").kind)=="damaged" and str(ctl("BackupRecoveryGuard").get_meta("state"))=="mismatch","actual destination and independent rejection update on same tray")
+	check(str(ctl("BackupOriginalGuard").get_meta("state"))=="preserved","damaged original remains protected separately")
+	check(focus_id()=="BackupRestoreToPath","successful restore leaves repeatable keyboard focus on tray action")
 	await shot("03-command-succeeded-but-case-not-recovered")
-	# Keyboard changes the selected version through the real native chooser.
-	for _step in 35:
-		if focus_id()=="BackupSnapshotChoice":break
-		await tap(KEY_TAB,true)
-	check(focus_id()=="BackupSnapshotChoice","Tab reaches snapshot chooser")
-	await tap(KEY_SPACE);await tap(KEY_UP);await tap(KEY_ENTER);await frames(10)
-	check(str(pc.backup_ui.get("snapshot",""))=="00000001","native chooser selects earlier version")
-	check(str(pc.backup_ui.get("path",""))=="/srv/data/ledger.txt","same file remains selected across versions")
-	check(str(ctl("BackupPreview").text).contains("closing=62800"),"selected older bytes are normal")
-	check(str(ctl("BackupSavedDocument").get_meta("document").kind)=="ledger" and str(ctl("BackupSavedDocumentValue_closing").text)=="62,800","selected actual ledger bytes render real closing figure")
-	await native_click("BackupCompareRestored");await shot("04-older-version-vs-damaged-destination")
-	check(str(ctl("BackupComparisonStatus").text).contains("異なり"),"older selected bytes differ from actual damaged destination")
-	check(str(ctl("BackupCurrentDocument").get_meta("document").kind)=="damaged" and str(ctl("BackupSavedDocument_opening").get_child(0).text).contains("Δ"),"actual before/after difference changes document shape and marks differing values")
-	await native_click("BackupRestoreToPath");await native_click("BackupPreviewChanges")
-	var scope_before: Dictionary={"vm":game._vm().export_state(),"clock":game.clock_minutes()}
-	await native_destination("/");await native_click("BackupPreviewChanges")
-	check(ctl("BackupPlannedLiveChanges")!=null and str(ctl("BackupPlannedLiveChanges").text).contains("原本を変更する予定 1"),"actual root-target dry-run warns about original write")
-	check(str(ctl("BackupOriginalGuard").get_meta("state"))=="preserved" and str(ctl("BackupOriginalGuardLabel").text).contains("現在"),"current original preservation remains distinct from planned overwrite")
+	await native_click("BackupSnapshot_00000001")
+	selected_sheet("00000001","ledger")
+	check(str(ctl("BackupSnapshot_00000001Value_closing").text)=="62,800","actual earlier paper displays real ledger closing value")
+	check(str(ctl("BackupCurrentDocument").get_meta("document").kind)=="damaged","choosing earlier paper does not silently restore target")
+	await shot("04-older-version-vs-damaged-destination")
+	# Changing the selected source must invalidate an existing confirmation.
+	await native_click("BackupRestoreToPath")
+	check(ctl("BackupExecuteRestore")!=null,"earlier paper gets an explicit pending confirmation")
+	await native_click("BackupSnapshot_00000002")
+	check(not bool(pc.backup_ui.get("plan_previewed",false)) and ctl("BackupExecuteRestore")==null,"changing candidate removes old confirmation")
+	check(game.vm_read("/restore/srv/data/ledger.txt").contains("CORRUPTED"),"candidate change cannot apply stale planned good bytes")
+	await native_click("BackupSnapshot_00000001")
+	if not await key_activate("BackupRestoreToPath"):quit(1);return
+	await native_click("BackupRestoreSettings")
+	var scope_before:Dictionary={"vm":game._vm().export_state(),"clock":game.clock_minutes()}
+	await native_destination("/")
+	check(ctl("BackupPreviewStale").visible,"destination edit visibly invalidates plan")
+	await disabled_confirm_is_safe()
+	await native_click("BackupPreviewChanges")
+	check(ctl("BackupPlannedLiveChanges")!=null and str(ctl("BackupPlannedLiveChanges").text).contains("原本を変更する予定 1"),"actual root-target preview warns about original write")
+	check(str(ctl("BackupOriginalGuard").get_meta("state"))=="preserved","planned damage is not mistaken for actual original mutation")
 	await shot("04b-original-write-preview-not-executed")
 	await native_destination("/restore");await native_click("BackupPreviewChanges")
-	check(ctl("BackupPlannedLiveChanges")==null,"returning to staged target removes planned live-write warning")
-	check(scope_before=={"vm":game._vm().export_state(),"clock":game.clock_minutes()},"risky preview and destination correction do not write or charge time")
-	var original: String=game.vm_read("/srv/data/ledger.txt")
-	var saved_path: String=game.save_path;var previous: Dictionary=game._vm().export_state();var clock:=int(game.clock_minutes())
+	check(ctl("BackupPlannedLiveChanges")==null,"correcting target removes planned live-write warning")
+	check(scope_before=={"vm":game._vm().export_state(),"clock":game.clock_minutes()},"risky preview and correction do not write or charge time")
+	var original:String=game.vm_read("/srv/data/ledger.txt")
+	var saved_path:String=game.save_path;var previous:Dictionary=game._vm().export_state();var clock:=int(game.clock_minutes())
 	game.save_path="user://missing-backup-recovery/failed.json"
 	await native_click("BackupExecuteRestore");game.save_path=saved_path
-	check(str(pc.backup_ui.get("restore_result",""))=="failed","real save failure is visible")
-	check(game._vm().export_state()==previous and int(game.clock_minutes())==clock,"failed restore rolls back VM and time")
+	check(str(pc.backup_ui.get("restore_result",""))=="failed" and ctl("BackupRestoreResult")!=null,"real save failure remains visible in inline plan")
+	check(game._vm().export_state()==previous and int(game.clock_minutes())==clock,"failed restore rolls back actual bytes and time")
+	check(bool(pc.backup_ui.get("restore_open",false)),"failure keeps confirmation available for recovery")
 	await shot("05-save-failure-retains-plan")
-	await native_click("BackupPreviewChanges");await key_activate("BackupExecuteRestore")
-	await native_click("BackupCloseRestore");await native_click("BackupCompareRestored")
-	check(game.vm_read("/srv/data/ledger.txt")==original,"original preserved through real restoration")
-	check(game.vm_read("/restore/srv/data/ledger.txt").contains("closing=62800"),"correct selected version restored")
-	check(str(ctl("BackupComparisonStatus").text).contains("内容が一致"),"actual restored bytes compare equal")
-	check(bool(game._vm().backup_acceptance_view().accepted) and str(ctl("BackupAcceptanceStatus").text).contains("原本: 保全"),"correct bytes and preserved originals visibly satisfy customer acceptance")
-	check(str(ctl("BackupCurrentDocumentValue_closing").text)=="62,800" and str(ctl("BackupRecoveryGuard").get_meta("state"))=="matched","restored actual closing figure and customer acceptance update visually")
-	check(str(ctl("BackupOriginalGuard").get_meta("state"))=="preserved" and str(ctl("BackupUnrelatedGuard").get_meta("state"))=="preserved","original and unrelated preservation have separate actual guards")
-	check(await reach(ctl("BackupAcceptanceGuards")),"preservation and customer acceptance reachable beside restored contents")
-	# The comparison repeats the selected repository/snapshot, so the version
-	# chooser can scroll above it without losing which saved bytes are shown.
-	check(str(ctl("BackupRestoreProvenance").text).contains("offsite / 00000001"),"visible comparison identifies actual selected repository and snapshot")
-	for id in ["BackupSavedDocument","BackupRestoreProvenance","BackupCurrentDocument","BackupComparisonStatus","BackupAcceptanceGuards"]:
-		var node:=ctl(id);var rect:=node.get_global_rect()
-		check(rect.position.x>=0 and rect.end.x<=root.get_visible_rect().end.x+1,"horizontal viewport fit "+id)
-		check(visible_rect(node).size.y>=minf(rect.size.y,70),"comparison context visible "+id)
+	await native_click("BackupPreviewChanges")
+	if not await key_activate("BackupExecuteRestore",true):quit(1);return
+	check(game.vm_read("/srv/data/ledger.txt")==original,"original preserved through actual recovery")
+	check(game.vm_read("/restore/srv/data/ledger.txt").contains("closing=62800"),"actual chosen earlier version restored")
+	check(bool(game._vm().backup_acceptance_view().accepted),"actual restored bytes and preserved original satisfy customer conditions")
+	check(str(ctl("BackupCurrentDocumentValue_closing").text)=="62,800" and str(ctl("BackupRecoveryGuard").get_meta("state"))=="matched","destination paper and acceptance stamp update from real model")
+	check(str(ctl("BackupOriginalGuard").get_meta("state"))=="preserved" and str(ctl("BackupUnrelatedGuard").get_meta("state"))=="preserved","separate protected-file group retains actual original and unrelated checks")
+	selected_sheet("00000001","ledger")
 	await shot("06-correct-restoration-original-preserved")
-	check(await reach(ctl("BackupSnapshotChoice")),"version chooser remains reachable by real wheel after comparison")
-	check(str(pc.backup_ui.get("snapshot",""))=="00000001" and str(pc.backup_ui.get("path",""))=="/srv/data/ledger.txt","scrolling to version chooser preserves selected tuple")
-	await shot("06a-selected-snapshot-and-file-context")
 	await readonly_display()
-	check(game.save_game() and game.load_game(),"real save reload")
+	check(game.save_game() and game.load_game(),"real save and reload")
 	pc._load_session();pc._render_backup();await frames()
-	check(str(pc.backup_ui.get("snapshot",""))=="00000001" and str(pc.backup_ui.get("path",""))=="/srv/data/ledger.txt" and str(pc.backup_ui.get("compare_target",""))=="restored","selected version file and comparison target survive reload")
-	# Continue via the existing desktop/diagnostic/receipt controls. No success
-	# flags or probe observations are written by this test.
+	selected_sheet("00000001","ledger")
+	check(str(ctl("BackupCurrentDocumentValue_closing").text)=="62,800","reopen shows saved actual staged content")
+	await shot("06a-selected-snapshot-and-file-context")
 	await native_click("TaskbarApp_verify")
-	check(pc.current_app=="verify","native taskbar opens existing diagnostics")
+	check(pc.current_app=="verify","native taskbar opens actual diagnostics")
 	for probe in game.diagnostic_probes():
 		await native_click("DiagnosticProbe_"+str(probe.id));await native_click("DiagnosticRun")
 	check(game.diagnostic_probes().all(func(item):return bool(item.get("fresh",false)) and bool(item.get("passed",false))),"native real measurements satisfy every customer condition")
@@ -311,7 +339,7 @@ func run() -> void:
 	await native_click("GuideDeliver")
 	check(game.current_done() and not str(game.completion_receipt().get("invoice_id","")).is_empty(),"actual delivery creates customer receipt and invoice")
 	await native_click("ReceiptEvaluationTab")
-	check(ctl("ReceiptCustomerOutcome")!=null,"existing customer acceptance result shown")
+	check(ctl("ReceiptCustomerOutcome")!=null,"actual saved customer acceptance shown")
 	await shot("08-accepted-customer-receipt")
-	print("BACKUP_RECOVERY_UI assertions=",assertions," failures=",failures.size()," clicks=",click_count," wheels=",wheel_count," keys=",key_count)
+	print("BACKUP_RECOVERY_UI assertions=",assertions," failures=",failures.size()," clicks=",click_count," wheels=",wheel_count," keys=",key_count," keyboard_actions=",keyboard_actions)
 	quit(0 if failures.is_empty() else 1)

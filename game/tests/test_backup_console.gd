@@ -61,6 +61,13 @@ func select_path(path: String) -> void:
 	item.select(0)
 	tree.item_selected.emit()
 	await frames()
+	# This suite covers the retained full console. The selected required file
+	# now opens its object workbench; use its actual File route to return before
+	# continuing the existing full-console assertions. The workbench has its own
+	# integration and native input tests.
+	if control("BackupWorkbench") != null:
+		press("BackupFileToggle")
+		await frames()
 
 func review_restore(all_files: bool = true) -> void:
 	press("BackupRestore" if all_files else "BackupRestoreToPath")
