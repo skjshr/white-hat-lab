@@ -3,6 +3,8 @@ class_name OSBackupConsole
 
 const UI = preload("res://scripts/ui_theme.gd")
 const Glyph = preload("res://scripts/service_glyph.gd")
+const Visual = preload("res://scripts/backup_visual.gd")
+const Document = preload("res://scripts/backup_document.gd")
 const NAV := Color("111111")
 const SURFACE := Color("101010")
 const LINE := Color("292929")
@@ -204,10 +206,10 @@ static func render(d, parent: VBoxContainer) -> void:
 	nav_toggle.tooltip_text = "Backrest navigation"
 	nav_toggle.visible = compact
 	nav_toggle.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	label(d, nav, copy("plan", "Plans"), 14)
+	label(d, nav, "計画", 14)
 	var plan_link := button(d, nav, "/srv/data", "BackupPlan", func():s["plan_open"] = not bool(s.get("plan_open", false));rerender(d));plan_link.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	plan_link.tooltip_text = copy("plan", "Plans") + "  /srv/data"
-	label(d, nav, copy("repositories", "Repositories"), 14)
+	label(d, nav, "保存先", 14)
 	for repository in ["local", "offsite"]:
 		var item := button(d, nav, repository, "BackupRepo_" + repository, func():s["repository"] = repository;s.erase("snapshot");s.erase("path");s.erase("preview");s.erase("restore_plan");run(d, "restic -r " + repository + " snapshots");rerender(d))
 		item.alignment = HORIZONTAL_ALIGNMENT_LEFT
@@ -328,17 +330,25 @@ static func _tree(d, parent: Node, s: Dictionary, snapshot: Dictionary, repo: St
 		persist(d);d._render_backup.call_deferred();_focus_after(d,"BackupFileToggle"))
 
 static func _plan_rows(d, parent: Node, entries: Array) -> void:
+	var fs: Dictionary=d.game._vm().state.get("fs",{})
 	for entry in entries:
 		if not entry is Dictionary:continue
-		var card := box(parent,SURFACE,10)
-		var path_row := HBoxContainer.new();path_row.add_theme_constant_override("separation",8);card.add_child(path_row)
-		Glyph.add_to(path_row,"file",20,INK)
-		var destination:=label(d,path_row,str(entry.get("path","")),13,INK);destination.tooltip_text=destination.text
-		var status:=str(entry.get("status",""))
-		var badge:=label(d,path_row,copy("status_"+status),12,GREEN if status in ["new","unchanged"] else Color("efc45d"));badge.custom_minimum_size.x=80;badge.size_flags_horizontal=Control.SIZE_SHRINK_END
-		label(d,card,str(entry.get("bytes",0))+" B",12,MUTED)
+		var card := box(parent,SURFACE,8);card.set_meta("restore_entry",entry.duplicate(true));card.add_theme_constant_override("separation",5)
+		var target:=str(entry.get("path",""));var source:=str(entry.get("source",""));var status:=str(entry.get("status",""))
+		_wrapped(d,card,source.get_file()+"  →  "+target,"BackupPlanRoute",12,INK)
+		var current := str(fs.get(target,""));var exists: bool=fs.has(target)
+		var after := current if status=="skipped" else str(entry.get("value",""))
+		var comparison := Visual.comparison(after,current,exists)
+		var flow := HBoxContainer.new();flow.add_theme_constant_override("separation",8);card.add_child(flow)
+		_document_card(d,flow,comparison.current,"変更前",target.get_file(),"BackupPlanBefore",comparison.changed_keys)
+		var middle := VBoxContainer.new();middle.custom_minimum_size.x=48;middle.size_flags_vertical=Control.SIZE_SHRINK_CENTER;flow.add_child(middle)
+		var arrow := label(d,middle,"→" if status in ["new","overwrite"] else "＝",24,Color("efc45d") if status=="overwrite" else INK);arrow.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
+		_wrapped(d,middle,copy("status_"+status,status),"BackupPlanOperation",11,Color("efc45d") if status=="overwrite" else MUTED)
+		_document_card(d,flow,Visual.document(after,exists or status!="skipped"),"変更予定",target.get_file(),"BackupPlanAfter",comparison.changed_keys)
+		var detail := VBoxContainer.new();detail.visible=bool(d.backup_ui.get("plan_details",false));card.add_child(detail)
+		_wrapped(d,detail,"保存元: "+source+"\n復元先: "+target+"\n"+str(entry.get("bytes",0))+" B","BackupPlanFullPaths",11)
 		for pair in [["current_hash","current_sha256"],["snapshot_hash","snapshot_sha256"]]:
-			var value:=str(entry.get(pair[1],""));var digest:=label(d,card,copy(pair[0])+"  "+(value if not value.is_empty() else "—"),12,MUTED);digest.add_theme_font_override("font",d.mono);digest.tooltip_text=value
+			var value:=str(entry.get(pair[1],""));_wrapped(d,detail,copy(pair[0])+"  "+(value if not value.is_empty() else "—"),"BackupPlanHash",11)
 
 static var _tree_icons: Dictionary = {}
 static func _tree_icon(folder: bool) -> Texture2D:
@@ -361,6 +371,7 @@ static func _select_snapshot(d, s: Dictionary, snapshot: Dictionary, repo: Strin
 	rerender(d)
 
 static func _snapshot(d, parent: Node, s: Dictionary, snapshot: Dictionary, repo: String) -> void:
+	parent.add_theme_constant_override("separation",6)
 	var id := str(snapshot.get("id", ""))
 	var heading := HBoxContainer.new();heading.add_theme_constant_override("separation",8);parent.add_child(heading)
 	var chooser := OptionButton.new();chooser.name="BackupSnapshotChoice";chooser.size_flags_horizontal=Control.SIZE_EXPAND_FILL;heading.add_child(chooser);_dark_input(chooser)
@@ -374,7 +385,8 @@ static func _snapshot(d, parent: Node, s: Dictionary, snapshot: Dictionary, repo
 	button(d, heading, "×", "BackupBackSnapshots", func():s.erase("snapshot");s.erase("path");s.erase("preview");s.erase("restore_plan");s.erase("restore_open");rerender(d)).tooltip_text = copy("back", "Back")
 	button(d, heading, copy("restore", "Restore all"), "BackupRestore", func():s["restore_scope"] = "all";s["restore_open"] = true;s.erase("restore_plan");rerender(d))
 	var source := str(snapshot.get("paths", ["/srv/data"])[0])
-	_wrapped(d,parent,"%s · 保存順 %d · 取得時刻の記録なし" % [repo,selected_order],"BackupSnapshotContext")
+	var context := _wrapped(d,parent,"%s · 保存順 %d · 取得時刻の記録なし" % [repo,selected_order],"BackupSnapshotContext")
+	context.visible=bool(s.get("content_details",false))
 	if bool(s.get("restore_open", false)):
 		_restore_form(d, parent, s, snapshot, repo, source);return
 	var selected_path := str(s.get("path", ""))
@@ -382,13 +394,12 @@ static func _snapshot(d, parent: Node, s: Dictionary, snapshot: Dictionary, repo
 	var selected_file: bool = snapshot.get("files", {}).has(relative)
 	var file_row := HBoxContainer.new();file_row.add_theme_constant_override("separation",8);parent.add_child(file_row)
 	_wrapped(d,file_row,selected_path if not selected_path.is_empty() else "ファイルを選択","BackupSelectedPath",13,INK)
-	button(d,file_row,"一覧を閉じる" if bool(s.get("file_list_open",not selected_file)) else "ファイルを選び直す","BackupFileToggle",func():s["file_list_open"]=not bool(s.get("file_list_open",not selected_file));rerender(d))
+	button(d,file_row,"一覧を閉じる" if bool(s.get("file_list_open",not selected_file)) else "ファイル選択","BackupFileToggle",func():s["file_list_open"]=not bool(s.get("file_list_open",not selected_file));rerender(d))
 	var file_list := VBoxContainer.new();file_list.name="BackupFileList";file_list.visible=bool(s.get("file_list_open",not selected_file));parent.add_child(file_list)
 	_tree(d, file_list, s, snapshot, repo, source)
 	if not selected_path.is_empty():
-		var path_row := HBoxContainer.new();path_row.add_theme_constant_override("separation", 8);parent.add_child(path_row)
-		button(d, path_row, copy("restore_to_path", "Restore selected"), "BackupRestoreToPath", func():s["restore_scope"] = "selected";s["restore_open"] = true;s.erase("restore_plan");rerender(d))
-		if selected_file: _compare_contents(d, parent, s, snapshot, source, relative)
+		if selected_file:_compare_contents(d, parent, s, snapshot, source, relative)
+		else:button(d,parent,copy("restore_to_path", "Restore selected"),"BackupRestoreToPath",func():s["restore_scope"]="selected";s["restore_open"]=true;s.erase("restore_plan");rerender(d))
 	_acceptance(d,parent)
 
 static func _comparison_restore_path(live: Dictionary, source_path: String) -> String:
@@ -405,38 +416,88 @@ static func _comparison_restore_path(live: Dictionary, source_path: String) -> S
 	return target.path_join(source_path.trim_prefix(scope + "/")).simplify_path()
 
 static func _compare_contents(d, parent: Node, s: Dictionary, snapshot: Dictionary, source: String, relative: String) -> void:
-	var card := box(parent, Color("14191d"), 10); card.name = "BackupContentComparison"
+	var card := box(parent, Color("14191d"), 8);card.name="BackupContentComparison";card.add_theme_constant_override("separation",6)
 	var live: Dictionary = d.game._vm().state
 	var controls := HFlowContainer.new(); controls.add_theme_constant_override("h_separation", 8); card.add_child(controls)
-	label(d, controls, "内容を比較", 15)
-	button(d, controls, "稼働中のファイル", "BackupCompareLive", func(): s["compare_target"] = "live"; rerender(d))
+	button(d, controls, "原本", "BackupCompareLive", func(): s["compare_target"] = "live"; rerender(d))
 	var last: Dictionary = live.get("last_restore", {})
 	var restore_path := _comparison_restore_path(live, source.path_join(relative))
 	var restored: bool = not restore_path.is_empty() and live.get("fs", {}).has(restore_path)
-	if restored: button(d, controls, "復元先の現在内容", "BackupCompareRestored", func(): s["compare_target"] = "restored"; rerender(d))
+	if restored: button(d, controls, "復元先", "BackupCompareRestored", func(): s["compare_target"] = "restored"; rerender(d))
+	button(d,controls,"詳細を閉じる" if bool(s.get("content_details",false)) else "詳細","BackupContentDetails",func():s["content_details"]=not bool(s.get("content_details",false));rerender(d))
 	var destination := source.path_join(relative)
 	if restored and str(s.get("compare_target", "live")) == "restored": destination = restore_path
 	var saved := str(snapshot.files[relative])
 	var exists: bool = live.get("fs", {}).has(destination)
 	var current := str(live.get("fs", {}).get(destination, ""))
+	var projection := Visual.comparison(saved,current,exists)
 	var status := "内容が一致" if exists and current == saved else "内容が異なります" if exists else "比較先にファイルがありません"
-	var outcome := label(d, card, status + "  /  " + destination, 12, GREEN if exists and current == saved else Color("efc45d")); outcome.name = "BackupComparisonStatus"; outcome.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; outcome.clip_text = false; outcome.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING; outcome.custom_minimum_size.y = 24
-	if destination == restore_path:
-		_wrapped(d,card,"比較する保存版: %s / %s · 直近の復元操作: %s" % [str(snapshot.get("repository","")),str(snapshot.get("id","")),str(last.get("snapshot",""))],"BackupRestoreProvenance",11)
+	# Byte equality is neutral. Only the independent customer checks can be green.
+	_wrapped(d,controls,("＝ " if bool(projection.equal) else "Δ ")+status,"BackupComparisonStatus",12,MUTED if bool(projection.equal) else Color("efc45d"))
 	var panes := BoxContainer.new();panes.name="BackupComparisonPanes";panes.add_theme_constant_override("separation",8);card.add_child(panes)
-	panes.resized.connect(func():panes.vertical=panes.size.x<480.0*maxf(1.0,float(d.game.settings.get("text_scale",1.0))))
-	for entry in [["保存 " + str(snapshot.get("id", "")), saved, "BackupPreview"], ["現在 " + destination, current if exists else "（ファイルなし）", "BackupCurrentPreview"]]:
-		var column := VBoxContainer.new(); column.size_flags_horizontal = Control.SIZE_EXPAND_FILL; panes.add_child(column)
-		var bytes := str(str(entry[1]).to_utf8_buffer().size()) + " B" if str(entry[2]) == "BackupPreview" or exists else "未作成"
-		var heading := label(d, column, str(entry[0]) + "  " + bytes, 12, MUTED); heading.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; heading.clip_text = false; heading.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING; heading.custom_minimum_size.y = 24
-		var preview := TextEdit.new();preview.name=str(entry[2]);preview.editable=false;preview.text=str(entry[1]);preview.wrap_mode=TextEdit.LINE_WRAPPING_BOUNDARY;preview.custom_minimum_size.y=76;preview.add_theme_font_override("font",d.mono);_dark_input(preview);column.add_child(preview)
+	panes.resized.connect(func():panes.vertical=panes.size.x<430.0*maxf(1.0,float(d.game.settings.get("text_scale",1.0))))
+	_document_card(d,panes,projection.saved,"保存版",str(snapshot.get("repository",""))+" / "+str(snapshot.get("id","")),"BackupSavedDocument",projection.changed_keys,"BackupRestoreProvenance")
+	var bridge := VBoxContainer.new();bridge.name="BackupComparisonBridge";bridge.size_flags_vertical=Control.SIZE_SHRINK_CENTER;panes.add_child(bridge)
+	var direction := "→" if destination==restore_path else "↔"
+	var arrow := label(d,bridge,direction,26,INK);arrow.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
+	var action := button(d,bridge,"復元…","BackupRestoreToPath",func():s["restore_scope"]="selected";s["restore_open"]=true;s.erase("restore_plan");rerender(d))
+	action.tooltip_text="この保存版から復元先へ。変更内容を先に確認します。"
+	var relation := label(d,bridge,"復元先へ" if destination==restore_path else "比較のみ",10,MUTED);relation.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
+	_document_card(d,panes,projection.current,"復元先" if destination==restore_path else "原本",destination,"BackupCurrentDocument",projection.changed_keys)
+	var details := VBoxContainer.new();details.name="BackupContentDetailsBody";details.visible=bool(s.get("content_details",false));card.add_child(details)
+	_wrapped(d,details,"保存元: "+source.path_join(relative)+"\n比較先: "+destination+"\n直近の復元操作: "+str(last.get("snapshot","なし")),"BackupComparisonPaths",11)
+	for entry in [[saved,"BackupPreview"],[current if exists else "（ファイルなし）","BackupCurrentPreview"]]:
+		var preview := TextEdit.new();preview.name=str(entry[1]);preview.editable=false;preview.text=str(entry[0]);preview.wrap_mode=TextEdit.LINE_WRAPPING_BOUNDARY;preview.custom_minimum_size.y=76;preview.add_theme_font_override("font",d.mono);_dark_input(preview);details.add_child(preview)
 		preview.gui_input.connect(func(event: InputEvent):
 			if event is InputEventKey and event.pressed and event.keycode==KEY_TAB:
 				var next := preview.find_prev_valid_focus() if event.shift_pressed else preview.find_next_valid_focus()
 				if next!=null:next.grab_focus()
 				preview.accept_event())
 
-static func _acceptance(d, parent: Node) -> void:
+static func _document_card(d, parent: Node, projection: Dictionary, title: String, context: String, id: String, changed: Array, context_id := "") -> void:
+	var column := VBoxContainer.new();column.name=id;column.size_flags_horizontal=Control.SIZE_EXPAND_FILL;column.add_theme_constant_override("separation",3);column.set_meta("document",projection.duplicate(true));parent.add_child(column)
+	var caption := _wrapped(d,column,title+" · "+context,context_id if not context_id.is_empty() else id+"Path",11,MUTED)
+	caption.custom_minimum_size.y=25
+	var paper := Document.new();paper.name=id+"Paper";paper.kind=str(projection.kind);paper.custom_minimum_size=Vector2(0,96);paper.size_flags_horizontal=Control.SIZE_EXPAND_FILL;column.add_child(paper)
+	var margin := MarginContainer.new();margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT);margin.add_theme_constant_override("margin_left",15);margin.add_theme_constant_override("margin_right",12);margin.add_theme_constant_override("margin_top",8);margin.add_theme_constant_override("margin_bottom",8);paper.add_child(margin)
+	var rows := VBoxContainer.new();rows.add_theme_constant_override("separation",4);margin.add_child(rows)
+	if str(projection.kind)=="ledger":
+		for field in projection.fields:
+			var row := HBoxContainer.new();row.name=id+"_"+str(field.key);rows.add_child(row)
+			var differs: bool=str(field.key) in changed
+			var value_color := Color("efc45d") if differs else INK
+			var key := label(d,row,("Δ " if differs else "")+str(field.label),11,value_color);key.size_flags_horizontal=Control.SIZE_EXPAND_FILL
+			var value := label(d,row,str(field.value) if str(field.key)=="date" else Visual.number(str(field.value)),12 if str(field.key)=="date" else 18,value_color);value.name=id+"Value_"+str(field.key);value.size_flags_horizontal=Control.SIZE_SHRINK_END;value.clip_text=false;value.text_overrun_behavior=TextServer.OVERRUN_NO_TRIMMING
+	elif str(projection.kind)=="damaged":
+		_wrapped(d,rows,"! 読取不可",id+"Damage",18,Color("efc45d"))
+		_wrapped(d,rows,"CORRUPTED DATA",id+"Literal",11,MUTED)
+	elif str(projection.kind)=="missing":
+		_wrapped(d,rows,"○ ファイルなし",id+"Missing",16,MUTED)
+	else:
+		var lines: Array=projection.get("lines",[])
+		_wrapped(d,rows,"\n".join(PackedStringArray(lines.slice(0,3))) if not lines.is_empty() else "（空のファイル）",id+"Text",12,INK)
+	rows.minimum_size_changed.connect(func():paper.custom_minimum_size.y=maxf(96,rows.get_combined_minimum_size().y+16))
+
+static func _guard(d, parent: Node, title: String, state: String, id: String) -> void:
+	var color := GREEN if state in ["matched","preserved"] else Color("efc45d") if state in ["mismatch","changed"] else MUTED
+	var mark := "✓" if state in ["matched","preserved"] else "!" if state in ["mismatch","changed"] else "?" if state=="unknown" else "○"
+	var words := {"matched":"照合一致","mismatch":"不一致","missing":"未復元","unknown":"記録なし","preserved":"保持","changed":"変更あり"}
+	var chip := box(parent,Color("17211c") if state in ["matched","preserved"] else Color("242018") if state in ["mismatch","changed"] else Color("1d2327"),6);chip.name=id;chip.get_parent().size_flags_horizontal=Control.SIZE_EXPAND_FILL;chip.add_theme_constant_override("separation",2);chip.set_meta("state",state)
+	var row := HBoxContainer.new();row.add_theme_constant_override("separation",5);chip.add_child(row)
+	var glyph := Document.new();glyph.kind="guard-"+state;glyph.custom_minimum_size=Vector2(28,28);row.add_child(glyph)
+	_wrapped(d,row,mark+" "+title+"\n"+str(words.get(state,state)),id+"Label",11,color)
+
+static func _planned_live_changes(view: Dictionary, entries: Array) -> Dictionary:
+	var counts := {"original":0,"unrelated":0}
+	if not bool(view.get("available",false)) or not bool(view.get("enforced",false)) or bool(view.get("legacy",false)) or not str(view.get("error","")).is_empty():return counts
+	for entry in entries:
+		if str(entry.get("status","")) not in ["new","overwrite"]:continue
+		var path := str(entry.get("path",""))
+		if not path.begins_with("/srv/data/"):continue
+		counts["original" if path in view.get("required_files",[]) else "unrelated"]+=1
+	return counts
+
+static func _acceptance(d, parent: Node, current_only := false) -> void:
 	var vm = d.game._vm()
 	if not vm.has_method("backup_acceptance_view"): return
 	var status: Dictionary = vm.backup_acceptance_view()
@@ -449,20 +510,28 @@ static func _acceptance(d, parent: Node) -> void:
 	var observed := restored.any(func(item):return not str(item.get("current_sha256","")).is_empty())
 	var restore_text := "一致" if bool(status.get("restore_valid",false)) else "不一致" if observed else "未復元"
 	var text := "顧客指定の復元: %s · 原本: %s · 対象外: %s" % [restore_text,"保全" if bool(status.get("original_preserved",false)) else "変更あり","保全" if bool(status.get("unrelated_preserved",false)) else "変更あり"]
-	_wrapped(d,parent,text,"BackupAcceptanceStatus",12,GREEN if bool(status.get("accepted",false)) else Color("efc45d") if observed else MUTED)
+	var projection := Visual.acceptance(status)
+	var strip := HBoxContainer.new();strip.name="BackupAcceptanceGuards";strip.add_theme_constant_override("separation",6);parent.add_child(strip)
+	var prefix := "現在・" if current_only else ""
+	_guard(d,strip,prefix+"復元",str(projection.restored),"BackupRecoveryGuard")
+	_guard(d,strip,prefix+"原本",str(projection.original),"BackupOriginalGuard")
+	_guard(d,strip,prefix+"対象外",str(projection.unrelated),"BackupUnrelatedGuard")
+	# Preserve the full statement for accessibility and old saved-view consumers.
+	var description := _wrapped(d,parent,text,"BackupAcceptanceStatus",12,GREEN if bool(status.get("accepted",false)) else Color("efc45d") if observed else MUTED)
+	description.visible=bool(d.backup_ui.get("content_details",false))
+	strip.tooltip_text=text
 
 static func _restore_form(d, parent: Node, s: Dictionary, snapshot: Dictionary, repo: String, _source: String) -> void:
 	var restore := box(parent, Color("17191c"));restore.name="BackupRestorePane"
-	label(d, restore, copy("restore_review"), 16)
 	var outcome:=str(s.get("restore_result",""))
 	if not outcome.is_empty():
 		_wrapped(d,restore,"復元処理が完了 · 顧客指定内容の照合は別途確認" if outcome=="succeeded" else copy("preview_stale" if outcome=="preview_stale" else "restore_"+outcome),"BackupRestoreResult",13,GREEN if outcome=="succeeded" else Color("ef6b6b"))
 	var close_row := HBoxContainer.new();close_row.add_theme_constant_override("separation", 8);restore.add_child(close_row)
-	button(d, close_row, copy("close", "Close"), "BackupCloseRestore", func():s["restore_open"] = false;rerender(d))
-	_wrapped(d,close_row,copy("selected_path") + "  " + (str(s.get("path", "")) if str(s.get("restore_scope", "all")) == "selected" else copy("all_files", "All files")),"BackupRestoreScope")
-	label(d, restore, copy("restore_to", "Restore destination"), 13)
-	var destination := LineEdit.new();destination.name = "BackupDestination";destination.text = str(s.get("destination", "/restore"));_dark_input(destination);restore.add_child(destination);destination.text_changed.connect(func(value):s["destination"] = value;s["plan_previewed"] = false;var execute_node=restore.find_child("BackupExecuteRestore",true,false);if execute_node != null:execute_node.disabled=true;persist(d))
-	var overwrite := OptionButton.new();overwrite.name = "BackupOverwrite";overwrite.add_item(copy("overwrite_always", "Overwrite existing"));overwrite.add_item(copy("overwrite_never", "Skip existing"));overwrite.select(1 if str(s.get("overwrite", "always")) == "never" else 0);restore.add_child(overwrite);_dark_input(overwrite);overwrite.item_selected.connect(func(index):s["overwrite"] = "never" if index == 1 else "always";s.erase("restore_plan");s["plan_previewed"]=false;rerender(d);_focus_after(d,"BackupOverwrite"))
+	button(d, close_row, "戻る", "BackupCloseRestore", func():s["restore_open"] = false;rerender(d))
+	_wrapped(d,close_row,"復元前の確認 · "+(str(s.get("path", "")) if str(s.get("restore_scope", "all")) == "selected" else copy("all_files", "All files")),"BackupRestoreScope")
+	var inputs := HBoxContainer.new();inputs.add_theme_constant_override("separation",8);restore.add_child(inputs)
+	var destination := LineEdit.new();destination.name = "BackupDestination";destination.text = str(s.get("destination", "/restore"));destination.size_flags_horizontal=Control.SIZE_EXPAND_FILL;destination.tooltip_text="復元先";_dark_input(destination);inputs.add_child(destination);destination.text_changed.connect(func(value):s["destination"] = value;s["plan_previewed"] = false;var execute_node=restore.find_child("BackupExecuteRestore",true,false);if execute_node != null:execute_node.disabled=true;persist(d))
+	var overwrite := OptionButton.new();overwrite.name = "BackupOverwrite";overwrite.add_item(copy("overwrite_always", "Overwrite existing"));overwrite.add_item(copy("overwrite_never", "Skip existing"));overwrite.select(1 if str(s.get("overwrite", "always")) == "never" else 0);inputs.add_child(overwrite);_dark_input(overwrite);overwrite.item_selected.connect(func(index):s["overwrite"] = "never" if index == 1 else "always";s.erase("restore_plan");s["plan_previewed"]=false;rerender(d);_focus_after(d,"BackupOverwrite"))
 	var plan: Dictionary = s.get("restore_plan", {}) if s.get("restore_plan", {}) is Dictionary else {}
 	var entries: Array = plan.get("entries", []) if bool(plan.get("ok", false)) else []
 	var preview_row := HBoxContainer.new();preview_row.add_theme_constant_override("separation", 8);restore.add_child(preview_row)
@@ -475,8 +544,15 @@ static func _restore_form(d, parent: Node, s: Dictionary, snapshot: Dictionary, 
 	var counts := {"new":0,"unchanged":0,"overwrite":0,"skipped":0}
 	for entry in entries:
 		if entry is Dictionary:counts[str(entry.get("status", ""))] = int(counts.get(str(entry.get("status", "")), 0)) + 1
-	label(d, restore, "%s: %d  %s: %d  %s: %d  %s: %d" % [copy("status_new", "New"),counts.new,copy("status_unchanged", "Unchanged"),counts.unchanged,copy("status_overwrite", "Overwrite"),counts.overwrite,copy("status_skipped", "Skipped"),counts.skipped], 12, MUTED)
-	var actions := HBoxContainer.new();actions.add_theme_constant_override("separation", 8);restore.add_child(actions)
-	var execute := button(d, actions, copy("execute_restore", "Restore"), "BackupExecuteRestore", func():_execute_restore(d, s, snapshot, repo, destination.text.strip_edges() if not destination.text.strip_edges().is_empty() else "/restore"));execute.disabled = entries.is_empty() or not bool(s.get("plan_previewed", false))
+	label(d,preview_row,"新規 %d · 上書き %d · 保持 %d" % [counts.new,counts.overwrite,counts.unchanged+counts.skipped],11,MUTED)
+	var execute := button(d, preview_row, copy("execute_restore", "Restore"), "BackupExecuteRestore", func():_execute_restore(d, s, snapshot, repo, destination.text.strip_edges() if not destination.text.strip_edges().is_empty() else "/restore"));execute.disabled = entries.is_empty() or not bool(s.get("plan_previewed", false))
+	var vm=d.game._vm()
+	if vm.has_method("backup_acceptance_view"):
+		var changes := _planned_live_changes(vm.backup_acceptance_view(),entries)
+		var warnings: Array[String]=[]
+		if int(changes.original)>0:warnings.append("原本を変更する予定 "+str(changes.original))
+		if int(changes.unrelated)>0:warnings.append("対象外を変更する予定 "+str(changes.unrelated))
+		if not warnings.is_empty():_wrapped(d,restore,"! "+" · ".join(warnings),"BackupPlannedLiveChanges",12,Color("efc45d"))
 	var plan_table := VBoxContainer.new();plan_table.name = "BackupPlanEntries";plan_table.add_theme_constant_override("separation", 6);restore.add_child(plan_table);_plan_rows(d, plan_table, entries)
-	_acceptance(d,restore)
+	_acceptance(d,restore,true)
+	button(d,restore,"詳細を閉じる" if bool(s.get("plan_details",false)) else "パスとハッシュの詳細","BackupPlanDetails",func():s["plan_details"]=not bool(s.get("plan_details",false));rerender(d))

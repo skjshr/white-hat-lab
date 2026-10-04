@@ -285,6 +285,14 @@ static func render(d, parent: VBoxContainer, url: String, response: String) -> v
 	_history(d,body,data)
 
 static func _transport_error(d, parent: Node, payload: Dictionary, response: String, url: String) -> void:
+	if bool(d.game.network_request_view(url).get("available",false)):
+		var compact := _panel(parent,Color("fafafa"),12)
+		var line := HBoxContainer.new();line.add_theme_constant_override("separation",12);compact.add_child(line)
+		Glyph.add_to(line,"file",26,MUTED)
+		_label(d,line,"業務画面 · HTTP 応答なし",14,INK)
+		_button(d,line,copy("refresh","Refresh"),"BusinessRefresh",func():d._browse_url(url,false))
+		_response(d,compact,str(payload.get("raw",response)))
+		return
 	var page := VBoxContainer.new(); page.size_flags_horizontal = Control.SIZE_EXPAND_FILL; page.add_theme_constant_override("separation", 12); parent.add_child(page)
 	var box := _panel(page, Color("fafafa"), 24)
 	_label(d, box, copy("unreachable", "This site cannot be reached"), 22, INK)

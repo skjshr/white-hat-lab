@@ -8,6 +8,7 @@ var assertions := 0
 var measurements: Array[Dictionary] = []
 var finishing := false
 var journey_completed := false
+var keyboard_actions := 0
 
 func expect(value: bool, label: String) -> bool:
 	assertions += 1
@@ -52,6 +53,65 @@ func press_control(target: Control, description: String) -> bool:
 
 func press(id: String) -> bool:
 	return await press_control(control(id), id)
+
+func keyboard_activate(id: String, backwards := false) -> bool:
+	var button := control(id) as Button
+	if not expect(is_instance_valid(button) and button.is_visible_in_tree() and not button.disabled, id + " keyboard action available"): return false
+	var visited: Array[String] = []
+	for _attempt in 40:
+		if button.has_focus(): break
+		if backwards:
+			for down in [true,false]:
+				var event := InputEventKey.new(); event.keycode=KEY_TAB; event.physical_keycode=KEY_TAB; event.shift_pressed=true; event.pressed=down; Input.parse_input_event(event); await frames(2)
+			keys += 1; await frames(8)
+		else: await tap(KEY_TAB)
+		var focus := root.gui_get_focus_owner()
+		visited.append(str(focus.name) if focus != null else "none")
+	record("tab_route", id + (" Shift+Tab via " if backwards else " Tab via ") + str(visited))
+	if not expect(button.has_focus(), id + " reached with actual Tab"): return false
+	if not expect(clipped_rect(button).has_point(button.get_global_rect().get_center()), id + " keyboard focus is visible without helper scrolling"): return false
+	var count: Array[int] = [0]
+	button.pressed.connect(func(): count[0] += 1)
+	await tap(KEY_ENTER); await frames(8)
+	keyboard_actions += 1
+	record("keyboard_action", id + " Enter")
+	return expect(count[0] == 1, id + " Enter activates exactly once")
+
+func details_closed() -> bool:
+	if not expect(not ui.next_task_guide.visible and not ui.next_task_guide.expanded, "hint guide remains hidden"): return false
+	var raw := control("NetworkRequestRaw")
+	return expect(raw == null or not raw.is_visible_in_tree(), "raw request details remain collapsed")
+
+func visual_state(status: String, expected: Array[String], complete := false) -> bool:
+	var diagram := control("NetworkRequestDiagram")
+	if not expect(is_instance_valid(diagram) and diagram.is_visible_in_tree(), "actual request diagram is rendered"): return false
+	if not expect(is_equal_approx(float(game.settings.text_scale),1.3 if narrow else 1.0) and is_equal_approx(float(diagram.scale_factor),1.3 if narrow else 1.0), "actual game and diagram use requested text scale"): return false
+	var projected: Dictionary = diagram.projected
+	if not expect(str(projected.status) == status and bool(projected.complete) == complete, "displayed diagram has expected freshness and completion"): return false
+	if not expect(diagram.nodes.size() == 5 and text_in(control("NetworkRequestContext")).contains("販売"), "visible target and five conceptual endpoint nodes exist"): return false
+	for index in 3:
+		var id: String = ["dns","business","admin"][index]
+		var state: String = expected[index]
+		var node: Control = diagram.nodes[id]
+		if not expect(str(projected[id].state) == state and str(projected[id].edge_state) == state and str(node.get_meta("network_state","")) == state, id + " rendered node and edge state " + state): return false
+		var caption := control("NetworkRequest" + id.capitalize()) as Label
+		if not expect(is_instance_valid(caption) and caption.is_visible_in_tree() and caption.text.contains(str(projected[id].detail)), id + " visible caption accompanies graphical state"): return false
+		if not expect(node.size.x > 90 and node.get_global_rect().position.x >= 0 and node.get_global_rect().end.x <= root.get_visible_rect().end.x + 1, id + " diagram node fits horizontal viewport"): return false
+	var source: Button = diagram.nodes.source
+	if not expect(not source.text.is_empty() and source.focus_mode == Control.FOCUS_ALL, "diagram primary action has visible label and keyboard focus"): return false
+	for id in ["source","dns","business","external","admin"]:
+		var node: Control = diagram.nodes[id]
+		if not expect(diagram.get_global_rect().grow(1).encloses(node.get_global_rect()), id + " stays inside actual diagram allocation"): return false
+		if not expect(absf(node.size.y - source.size.y) <= 1, id + " uses the same bounded node height"): return false
+		for label in node.find_children("*","Label",true,false):
+			var natural: float = label.get_theme_font("font").get_string_size(label.text,HORIZONTAL_ALIGNMENT_LEFT,-1,label.get_theme_font_size("font_size")).x
+			if not expect(label.get_line_count() == 1 and label.size.x + 2 >= natural and node.get_global_rect().grow(1).encloses(label.get_global_rect()), id + " visible label fits one line inside its node"): return false
+	var target := control("NetworkRequestTarget") as Label
+	if not expect(is_instance_valid(target) and target.is_visible_in_tree() and target.text.contains(str(game.mission().client)), "actual client target is visibly named"): return false
+	var target_width: float = target.get_theme_font("font").get_string_size(target.text,HORIZONTAL_ALIGNMENT_LEFT,-1,target.get_theme_font_size("font_size")).x
+	if not expect(target.get_line_count() == 1 and target.size.x + 2 >= target_width, "target header is a readable single line"): return false
+	record("displayed_graph", JSON.stringify(projected))
+	return details_closed()
 
 func edit_control(field: LineEdit, value: String, description: String) -> bool:
 	if not await press_control(field, description): return false
@@ -99,9 +159,36 @@ func text_in(node: Node) -> String:
 	return result
 
 func checkpoint(label: String) -> void:
+	details_closed()
 	var state: Dictionary = game.network_request_view(BUSINESS_URL)
-	measurements.append({"stage":label,"request":state.duplicate(true),"clock":game.business_clock(),"cash":game.state.cash,"firewall":game._vm().firewall_snapshot(),"applied":game._vm().state.applied.duplicate(true),"work":game.work_status()})
+	var diagram := control("NetworkRequestDiagram")
+	expect(is_equal_approx(float(game.settings.text_scale),1.3 if narrow else 1.0), "checkpoint uses actual requested game text scale")
+	expect(is_equal_approx(float(ui.text_scale),1.3 if narrow else 1.0), "checkpoint uses actual requested interface text scale")
+	if is_instance_valid(diagram): expect(is_equal_approx(float(diagram.scale_factor),1.3 if narrow else 1.0), "checkpoint uses actual requested diagram text scale")
+	measurements.append({"stage":label,"window_pixels":str(root.size),"game_text_scale":game.settings.text_scale,"interface_text_scale":ui.text_scale,"diagram_text_scale":diagram.scale_factor if is_instance_valid(diagram) else null,"request":state.duplicate(true),"displayed_graph":diagram.projected.duplicate(true) if is_instance_valid(diagram) else {},"clock":game.business_clock(),"cash":game.state.cash,"firewall":game._vm().firewall_snapshot(),"applied":game._vm().state.applied.duplicate(true),"work":game.work_status()})
 	await capture(label)
+	if label in ["03-observed-failure","07-business-restored-and-admin-denied"]:
+		await comparison_capture(label)
+
+func comparison_capture(label: String) -> void:
+	# The immutable before images have the guide visible. This display-only
+	# comparison holds work-area geometry constant and never supplies task help.
+	# Re-enabling via the ordinary UI requires opening Help, so the parent
+	# explicitly approved this one display-setup call, followed by a real toggle.
+	var machine: Dictionary = game._vm().export_state().duplicate(true)
+	var probes: Array = game.diagnostic_probes().duplicate(true)
+	var clock := int(game.clock_minutes()); var cash := int(game.state.cash)
+	if not expect(ui.next_task_guide.set_enabled(true), "comparison-only guide display setup saved"): return
+	await frames(12)
+	if not expect(ui.next_task_guide.visible and not ui.next_task_guide.expanded, "comparison guide visible without expanded hints"): return
+	record("display_comparison_only", label + ": guide enabled for equal-geometry image; no gameplay decision or help content opened")
+	await capture(label + "-guide-visible-comparison-only")
+	if not await press("NextTaskToggle"): return
+	if not details_closed(): return
+	# The toggle has just hidden its focused control. Return focus by a genuine
+	# pointer action to the unchanged address field, then continue actual Tab.
+	if not await press("BrowserAddress"): return
+	if not expect(game._vm().export_state() == machine and game.diagnostic_probes() == probes and int(game.clock_minutes()) == clock and int(game.state.cash) == cash, "display comparison preserves VM probes clock and cash"): return
 
 func scroll_to(target: Control, to_top := false) -> bool:
 	var scroller := target.get_parent()
@@ -117,17 +204,22 @@ func run() -> void:
 	game = root.get_node("Game")
 	if not expect("--qa-profile=network-request-ui" in OS.get_cmdline_user_args(), "isolated network QA profile"): finish(); return
 	game.set_process(false)
-	game.set_settings({"resolution":"960x600" if narrow else "1440x900","window_mode":"windowed","text_scale":1.3 if narrow else 1.0,"volume":0},false)
 	if not expect(game.new_game() and game.choose_strategy("advisory") and game.start_free_career(), "public normal funded career setup"): finish(); return
 	if not expect(int(game.state.cash) == 5000 and int(game.state.day) == 1, "ordinary starting funds and day"): finish(); return
 	var offers: Array = game.state.offers.filter(func(item): return bool(item.get("unlocked",false)) and bool(item.get("market_available",true)) and str(item.get("case_id","")) == "service-2-case-0")
 	if not expect(not offers.is_empty() and game.choose_contract(str(offers[0].id)), "naturally available contract accepted by public API"): finish(); return
 	record("setup_api", "new_game / advisory / free_career / naturally available contract accept; real-time background paused, action costs retained")
 	ui = INTERFACE.new(); root.add_child(ui); await frames(8)
+	# new_game() calls _reset_state() -> _load_settings(); apply the display
+	# fixture after startup so Game/desktop and the outer UI use the same scale.
+	game.set_settings({"resolution":"960x600" if narrow else "1440x900","window_mode":"windowed","text_scale":1.3 if narrow else 1.0,"volume":0},false)
+	if not expect(is_equal_approx(float(game.settings.text_scale),1.3 if narrow else 1.0), "public settings persist after new-game and interface startup"): finish(); return
 	root.size = Vector2i(960,600) if narrow else Vector2i(1440,900)
 	ui._set_text_scale(1.3 if narrow else 1.0); ui.controls.menu.hide(); ui.open_panel("terminal"); await frames(10)
 	root.grab_focus(); await frames(3)
 	record("window", "focus="+str(root.has_focus())+" pixels="+str(root.size)+" logical="+str(root.get_visible_rect().size))
+	if not await press("NextTaskToggle"): finish(); return
+	if not details_closed(): finish(); return
 	if not await route("mail"): finish(); return
 	var mail_row: Button = null
 	for candidate in ui.desktop.widgets.mail.list.find_children("*","Button",true,false):
@@ -145,32 +237,40 @@ func run() -> void:
 	await tap(KEY_ENTER)
 	if not expect(ui.desktop.browser_url == BUSINESS_URL and not ui.desktop.browser_response.contains("HTTP/1.1 200"), "same customer business request actually fails"): finish(); return
 	if not expect(str(game.network_request_view(BUSINESS_URL).status) == "unobserved", "browsing does not manufacture observations"): finish(); return
+	if not visual_state("unobserved",["unknown","unknown","unknown"]): finish(); return
 	await checkpoint("02-business-failure-unobserved")
-	if not await press("NetworkRequestTest"): finish(); return
+	if not await keyboard_activate("NetworkRequestTest"): finish(); return
 	var initial: Dictionary = game.network_request_view(BUSINESS_URL)
 	if not expect(str(initial.status) == "current" and not bool(initial.passed), "explicit request measurement observes actual failure"): finish(); return
+	if not visual_state("current",["fail","unreached","unreached"]): finish(); return
 	await checkpoint("03-observed-failure")
 	var original_rules: Array = game._vm().firewall_snapshot().applied_rules.duplicate(true)
-	if not await press("NetworkRequestSettings"): finish(); return
+	if not await keyboard_activate("NetworkRequestSettings"): finish(); return
 	if not expect(str(ui.desktop.firewall_ui.get("view","")) == "services", "same request opens actual service editor"): finish(); return
 	if not await select_option("FirewallDNS",1): finish(); return
 	if not expect(str((control("FirewallTLS") as OptionButton).get_item_metadata((control("FirewallTLS") as OptionButton).selected)) == "on", "TLS remains enabled in real editor"): finish(); return
 	if not await press("FirewallServicesSave"): finish(); return
+	if not expect(control("FirewallServicesSave").has_focus() and clipped_rect(control("FirewallServicesSave")).has_point(control("FirewallServicesSave").get_global_rect().get_center()), "saved service action restores visible keyboard focus"): finish(); return
 	if not expect(bool(game._vm().firewall_snapshot().pending) and str(game._vm().state.applied.dns) == "off", "saved DNS choice remains unapplied"): finish(); return
+	if not visual_state("stale",["stale","stale","stale"]): finish(); return
 	await checkpoint("04-saved-pending")
-	if not await press("NetworkRequestReturn"): finish(); return
+	if not await keyboard_activate("NetworkRequestReturn",true): finish(); return
 	if not expect(ui.desktop.browser_url == BUSINESS_URL, "return preserves exact customer URL"): finish(); return
 	if not await press("NetworkRequestTest"): finish(); return
 	if not expect(not bool(game.network_request_view(BUSINESS_URL).passed), "same explicit request still fails while change pending"): finish(); return
+	if not visual_state("current",["fail","unreached","unreached"]): finish(); return
 	await checkpoint("05-pending-still-fails")
 	if not await press("NetworkRequestSettings"): finish(); return
 	if not await press("FirewallApply"): finish(); return
+	if not expect(control("NetworkRequestReturn").has_focus() and clipped_rect(control("NetworkRequestReturn")).has_point(control("NetworkRequestReturn").get_global_rect().get_center()), "removed Apply action falls back to visible return focus"): finish(); return
 	if not expect(str(game.network_request_view(BUSINESS_URL).status) == "stale", "applied change invalidates old measurement"): finish(); return
+	if not visual_state("stale",["stale","stale","stale"]): finish(); return
 	if not expect(str(game._vm().state.applied.tls) == "on" and game._vm().firewall_snapshot().applied_rules == original_rules, "repair preserves TLS and exact ordered rules"): finish(); return
 	await checkpoint("06-applied-old-measurement")
 	if not await press("NetworkRequestReturn"): finish(); return
 	if not await press("NetworkRequestTest"): finish(); return
 	if not expect(bool(game.network_request_view(BUSINESS_URL).passed), "fresh exact request and protective regression pass"): finish(); return
+	if not visual_state("current",["pass","pass","blocked"],true): finish(); return
 	if not expect(text_in(control("NetworkRequestAdmin")).contains("遮断"), "WAN administrative denial is visible as required protection"): finish(); return
 	await checkpoint("07-business-restored-and-admin-denied")
 	if narrow:
@@ -212,9 +312,9 @@ func finish() -> void:
 	if finishing: return
 	finishing = true
 	if not journey_completed and failures.is_empty(): failures.append("journey stopped before customer completion")
-	var report := {"assertions":assertions,"narrow":narrow,"clicks":clicks,"keys":keys,"scrolls":scrolls,"failures":failures,"events":events,"measurements":measurements,"method":"Public normal-funded day-one career acceptance setup; simulated background realtime paused; actual action costs retained. Repair, connection, search, verify, delivery by Godot Input mouse/key dispatch; zero direct signal emits or VM/desired/state overrides; known node IDs, not human usability proof."}
+	var report := {"assertions":assertions,"narrow":narrow,"clicks":clicks,"keys":keys,"keyboard_actions":keyboard_actions,"scrolls":scrolls,"failures":failures,"events":events,"measurements":measurements,"method":"Public normal-funded day-one career acceptance setup; simulated background realtime paused; actual action costs retained. Repair, connection, search, verify, delivery by Godot Input mouse/key dispatch; zero direct signal emits or VM/desired/state overrides. Guide hidden by its actual button; request details collapsed; diagram primary actions use Tab/Enter. Known node IDs, not human usability proof."}
 	var file := FileAccess.open(folder.path_join("network-native.json"),FileAccess.WRITE)
 	if file != null: file.store_string(JSON.stringify(report,"  ")); file.close()
-	print("NETWORK_REQUEST_UI_", "PASS" if failures.is_empty() else "FAIL", " assertions=",assertions," clicks=",clicks," keys=",keys," scrolls=",scrolls," failures=",failures)
+	print("NETWORK_REQUEST_UI_", "PASS" if failures.is_empty() else "FAIL", " assertions=",assertions," clicks=",clicks," keys=",keys," keyboard_actions=",keyboard_actions," scrolls=",scrolls," failures=",failures)
 	if is_instance_valid(ui): ui.queue_free(); await frames(5)
 	quit(0 if failures.is_empty() else 1)

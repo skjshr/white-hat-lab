@@ -41,6 +41,11 @@ static func action(d,name: String,payload: Dictionary={}) -> Dictionary:
 	# desktop refresh until its transactional outcome is known so a failed save
 	# does not rebuild the editor before its inline error can be shown.
 	var was_refreshing: bool=bool(d.refreshing)
+	var request_focus := ""
+	var old_page: Control=d.widgets.browser.get("page") if d.widgets.has("browser") else null
+	var owner: Control=d.get_viewport().gui_get_focus_owner()
+	if d.current_app=="browser" and is_instance_valid(old_page) and is_instance_valid(owner) and old_page.is_ancestor_of(owner) and old_page.find_child("NetworkRequestReturn",true,false)!=null:
+		request_focus=str(owner.name)
 	if not was_refreshing:d.refreshing=true
 	var result: Dictionary=d._firewall_action(name,payload)
 	if not was_refreshing:d.refreshing=false
@@ -55,6 +60,19 @@ static func action(d,name: String,payload: Dictionary={}) -> Dictionary:
 			d.firewall_render_signature=d._firewall_snapshot_signature()
 			d._state_changed()
 		render_again(d)
+		if not request_focus.is_empty():
+			# The successful action replaces the focused button. Restore its new
+			# instance, or the request return node when Apply has disappeared.
+			(func():
+				if not is_instance_valid(d) or d.current_app!="browser" or not d._firewall_console_url(d.browser_url): return
+				var page: Control=d.widgets.browser.get("page") if d.widgets.has("browser") else null
+				if not is_instance_valid(page): return
+				var back: Control=page.find_child("NetworkRequestReturn",true,false)
+				if not is_instance_valid(back) or not back.is_visible_in_tree(): return
+				var replacement: Control=page.find_child(request_focus,true,false)
+				if not is_instance_valid(replacement) or not replacement.is_visible_in_tree(): replacement=back
+				replacement.grab_focus()
+			).call_deferred()
 	else:
 		# Keep the current editor controls (and focus) intact; only update the
 		# reserved result area so a failed operation is visible before retrying.
