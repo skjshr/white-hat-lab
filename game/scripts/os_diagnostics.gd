@@ -85,6 +85,41 @@ static func _status_color(probe: Dictionary) -> Color:
 	if not probe.get("fresh", false): return BLUE
 	return GREEN if probe.get("passed", false) else RED
 
+static func _expected_outcome(probe: Dictionary) -> String:
+	# Describe the public acceptance criterion, never hidden configuration values.
+	var expectation := str(probe.get("expectation", ""))
+	var command := str(probe.get("command", ""))
+	var operation := "保存" if command.contains("put ") else "閲覧"
+	if command.begins_with("smbclient "):
+		if expectation == "DENIED" or expectation.contains("ACCESS_DENIED"):
+			return operation + "を拒否する"
+		return operation + "できる"
+	if command.begins_with("sha256sum "): return "ファイル内容が保全した原本と一致する"
+	var description := str(probe.get("description", ""))
+	return description if not description.is_empty() else expectation
+
+static func _actual_outcome(probe: Dictionary) -> String:
+	if not bool(probe.get("recorded", false)): return "未計測です。検査実行で実際の動作を確かめます。"
+	var response := str(probe.get("result", "")).strip_edges()
+	var command := str(probe.get("command", ""))
+	var outcome := response.get_slice("\n", 0)
+	var operation := "保存" if command.contains("put ") else "閲覧"
+	if response == "NT_STATUS_ACCESS_DENIED": outcome = operation + "が拒否されました"
+	elif response.begins_with("NT_STATUS_BAD_NETWORK_NAME"): outcome = "共有に接続できませんでした"
+	elif response.begins_with("putting file ") and response.ends_with(": OK"): outcome = "保存できました"
+	elif response.begins_with("getting file ") and response.ends_with(": OK"): outcome = "読み込みできました"
+	elif command.begins_with("sha256sum ") and response.get_slice(" ", 0).length() == 64:
+		outcome = "ファイル内容が原本と一致しました" if response.get_slice(" ", 0) == str(probe.get("expectation", "")) else "ファイル内容が原本と異なります"
+	if outcome.is_empty(): outcome = "応答は空でした"
+	return ("変更前の記録：" if not bool(probe.get("fresh", false)) else "") + outcome
+
+static func _reveal_result(d) -> void:
+	if not is_instance_valid(d): return
+	var result = d.widgets.verify.right.find_child("DiagnosticResult", true, false)
+	if not is_instance_valid(result): return
+	var scroll = d.widgets.verify.right.get_parent()
+	if scroll is ScrollContainer: scroll.ensure_control_visible(result)
+
 static func refresh(d) -> void:
 	var w: Dictionary = d.widgets.verify
 	var probes: Array = d.game.diagnostic_probes()
@@ -190,7 +225,9 @@ static func refresh(d) -> void:
 	var run = d._primary(UI.copy("identity_test_login") if requires_login else "検査実行", func():
 		d._trace("diagnostic", selected)
 		if requires_login: d._open_identity_login(str(current.get("user","current")))
-		else: d.game.run_diagnostic(selected); refresh(d))
+		else:
+			d.game.run_diagnostic(selected); refresh(d)
+			_reveal_result.call_deferred(d))
 	run.name = "DiagnosticRun"
 	UI.os_primary(run, DIAG_ACCENT)
 	run.disabled = not d.game.vm_info().connected or d.game.current_done()
@@ -209,25 +246,33 @@ static func refresh(d) -> void:
 	right.add_child(result_panel)
 	var result_content = d._box(result_panel, 5)
 	var result_header = d._row(result_content, 6)
-	result_header.add_child(d._label(UI.copy("identity_flow_requirement", "条件"), 12, MUTED))
-	var expected = d._label(expectation, 13, INK)
+	result_header.add_child(d._label("期待する結果", 12, MUTED))
+	var expected = d._label(_expected_outcome(current), 13, INK)
 	expected.name = "DiagnosticExpected"
+	expected.tooltip_text = expectation
 	expected.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	expected.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	result_header.add_child(expected)
 	result_content.add_child(HSeparator.new())
 	var response_header = d._row(result_content, 6)
-	response_header.add_child(d._label(_copy("os_response", "結果"), 12, MUTED))
+	response_header.add_child(d._label("今回の結果" if bool(current.get("fresh", false)) else "記録した結果", 12, MUTED))
 	var result_state = d._label(_status(current), 12, state_color)
 	result_state.name = "DiagnosticResultStatus"
 	response_header.add_child(result_state)
-	var result_label = d._label(summary, 13, INK)
+	var result_label = d._label(_actual_outcome(current), 14, INK)
 	result_label.name = "DiagnosticActual"
 	result_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	result_label.autowrap_mode = TextServer.AUTOWRAP_OFF
-	result_label.clip_text = true
+	result_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	result_label.tooltip_text = result_text
 	result_content.add_child(result_label)
+	if bool(current.get("recorded", false)):
+		var raw_summary = d._label(summary, 12, MUTED)
+		raw_summary.name = "DiagnosticRawResponse"
+		raw_summary.autowrap_mode = TextServer.AUTOWRAP_OFF
+		raw_summary.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		raw_summary.clip_text = true
+		raw_summary.tooltip_text = result_text
+		result_content.add_child(raw_summary)
 	var compare_label := UI.copy("compare_close" if bool(w.raw_visible) else "compare_results")
 	var raw_toggle: Button = _tool(d, "code", compare_label, func(): w.raw_visible = not bool(w.raw_visible); refresh(d), compare_label)
 	raw_toggle.name = "DiagnosticCompare"

@@ -105,7 +105,8 @@ func _advanced_objectives() -> void:
 		game.state.targets = [{"name":"environment","advanced":game.state.advanced.duplicate(true)}]
 		var result: Dictionary = GUIDE.resolve(game)
 		_check(result.route == "advanced", case_id + " advanced route")
-		_check(result.target == "AdvancedTab_results" or result.target == "AdvancedVerify", case_id + " visible target")
+		_check(str(result.target) in GUIDE.ADVANCED_WORK_TARGETS[case_id].values() or result.target == "AdvancedVerify", case_id + " specialist work target")
+		_check(GUIDE.navigation_target(game,{"route":"advanced","target":"AdvancedVerify","open_navigation":true}).is_empty(),case_id+" navigation never executes Verify")
 		_check(not str(result.body).is_empty(), case_id + " public objective text")
 		for forbidden in ["gw01", "ws17", "app-72", "runner-session-19", "endpoint-a"]:
 			_check(not str(result.body).contains(forbidden), case_id + " no hidden culprit " + forbidden)

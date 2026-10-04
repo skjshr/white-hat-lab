@@ -73,6 +73,30 @@ static func _choose_candidate(all_group: Array, group: Array, category: String, 
 		return _seed(day, _id(a)) < _seed(day, _id(b)))
 	return available[0]
 
+static func prioritize_relationships(candidates: Array, leads: Array, priority_ids: Array, protected_ids: Array, day: int) -> Array:
+	var result := leads.duplicate()
+	var by_id := {}
+	for candidate in candidates: by_id[_id(candidate)] = candidate
+	for raw_id in priority_ids:
+		var id := str(raw_id)
+		if id in result or not by_id.has(id): continue
+		var candidate: Dictionary = by_id[id]
+		if not bool(candidate.get("unlocked", false)): continue
+		var category := str(candidate.get("category", ""))
+		var index := CATEGORIES.find(category)
+		if index < 0: continue
+		var category_leads: Array = result.filter(func(lead_id): return str(by_id.get(str(lead_id), {}).get("category", "")) == category)
+		if category_leads.size() < PHASE_COUNTS[phase(day, index)]:
+			result.append(id); continue
+		# Never replace a quote the player has prepared, an accepted job, or a
+		# different customer's earned consultation. No extra daily demand is minted.
+		for slot in range(result.size() - 1, -1, -1):
+			var current := str(result[slot])
+			if current in protected_ids or current in priority_ids: continue
+			if str(by_id.get(current, {}).get("category", "")) != category: continue
+			result[slot] = id; break
+	return result
+
 static func _family(candidate: Dictionary) -> String:
 	var family := str(candidate.get("work_family", ""))
 	return family if not family.is_empty() else "chapter-" + str(candidate.get("chapter", ""))

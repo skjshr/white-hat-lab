@@ -12,6 +12,8 @@ const STATE_VERSION := 1
 const OPERATIONS = preload("res://scripts/operations_dispatch.gd")
 const DAY_LEDGER = preload("res://scripts/day_ledger.gd")
 const BILLING = preload("res://scripts/company_billing.gd")
+const COMPANY_CYCLE = preload("res://scripts/company_cycle.gd")
+const COMPANY_ROADMAP = preload("res://scripts/company_roadmap.gd")
 const BUSINESS_TRANSACTIONS = preload("res://scripts/business_transactions.gd")
 const BUSINESS_DATA = preload("res://scripts/business_workspace.gd")
 const BUSINESS_START_MINUTE := 9 * 60
@@ -301,6 +303,7 @@ func _reset_state() -> void:
 	state.vm_states = {}; state.peak_profit = 0; _machine = null; _machine_key = ""
 	CUSTOMER_STOCK.ensure(state)
 	BILLING.ensure(state)
+	COMPANY_CYCLE.ensure(state)
 	_load_settings()
 
 func profile_defaults() -> Dictionary:
@@ -532,6 +535,7 @@ func _valid_state(candidate: Dictionary) -> bool:
 		for order in candidate.delivery_orders:
 			if not order is Dictionary or str(order.get("id", "")).is_empty(): return false
 	if candidate.has("customer_stock") and not CUSTOMER_STOCK.validate(candidate.customer_stock): return false
+	if candidate.has("company_cycle") and not COMPANY_CYCLE.validate(candidate.company_cycle): return false
 	if candidate.has("pricing_policy") and not _valid_pricing_policy(candidate.pricing_policy): return false
 	if candidate.has("procurement_cart") and not _valid_procurement_cart(candidate.procurement_cart): return false
 	if candidate.has("cash_flow_start_day") and (typeof(candidate.cash_flow_start_day) not in [TYPE_INT, TYPE_FLOAT] or not is_finite(float(candidate.cash_flow_start_day)) or float(candidate.cash_flow_start_day) != floorf(float(candidate.cash_flow_start_day)) or int(candidate.cash_flow_start_day) < 0): return false
@@ -568,6 +572,8 @@ func load_game() -> bool:
 			notified.emit("セーブデータを読み込めませんでした。既存データは保持されています。")
 			return false
 	state = parsed
+	if not state.has("company_cycle"):
+		COMPANY_CYCLE.ensure(state); needs_migration = true
 	if not state.has("customer_stock"):
 		CUSTOMER_STOCK.ensure(state)
 		needs_migration = true
@@ -815,12 +821,21 @@ func save_game() -> bool:
 	_sync_contract_context()
 	_sync_target()
 	state["assignments"] = _assignments.duplicate(true)
+	var save_snapshot: Dictionary = state.duplicate(true)
+	COMPANY_CYCLE.ensure(save_snapshot)
+	if not COMPANY_CYCLE.validate(save_snapshot.company_cycle):
+		notified.emit("保存データ検証失敗。既存データ保持。")
+		return false
 	var temp_path := save_path + ".tmp"
 	var f := FileAccess.open(temp_path, FileAccess.WRITE)
 	if f == null:
 		notified.emit("保存失敗")
 		return false
-	var serialized := JSON.stringify(state, "\t")
+	# Milestone rewards are staged with this exact successful save. Failed writes
+	# cannot award a token or announce an achievement that was not persisted.
+	var earned_goals := COMPANY_ROADMAP.earned_after_save(save_snapshot)
+	save_snapshot.company_cycle.earned_goals = earned_goals
+	var serialized := JSON.stringify(save_snapshot, "\t")
 	f.store_string(serialized)
 	f.flush()
 	var write_error := f.get_error()
@@ -846,6 +861,8 @@ func save_game() -> bool:
 		if FileAccess.file_exists(backup_path): DirAccess.copy_absolute(ProjectSettings.globalize_path(backup_path), ProjectSettings.globalize_path(save_path))
 		notified.emit("保存失敗")
 		return false
+	COMPANY_CYCLE.ensure(state)
+	state.company_cycle.earned_goals = earned_goals
 	return true
 
 func set_setting(key: String, value) -> void:
@@ -2165,6 +2182,9 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 			if fallback_id not in state.market_leads:
 				state.market_leads.append(fallback_id)
 				break
+	var protected_leads: Array = quoted_case_ids.keys()
+	protected_leads.append_array(carried_cases)
+	state.market_leads = MARKET_DEMAND.prioritize_relationships(candidate_offers, state.market_leads, COMPANY_CYCLE.priority_case_ids(self), protected_leads, int(state.day))
 	state.market_day=int(state.day)
 	var lead_set: Dictionary = {}
 	for lead in state.get("market_leads", []): lead_set[str(lead)] = true
@@ -2189,6 +2209,23 @@ func market_summary() -> Dictionary:
 		result[category].count = int(result[category].count) + 1
 		if bool(offer.get("market_available", false)): result[category].available = int(result[category].available) + 1
 	return result
+
+func company_cycle_view() -> Dictionary:
+	var cycle: Dictionary = COMPANY_CYCLE.view(self)
+	var opportunities: Array = cycle.get("leads", []).duplicate(true)
+	for lead in opportunities:
+		# Ready is eligibility; an unoffered consultation waits for the ordinary
+		# daily market slot instead of pretending it can already be accepted.
+		if bool(state.get("career_mode", false)) and str(lead.get("status", "")) == "ready" and not bool(lead.get("market_available", false)):
+			lead.status = "locked"
+			lead.locked_reason = "今日の相談枠は提示済みです。翌日の営業で確認できます。"
+	var ledger := day_preview()
+	var billing := billing_summary()
+	cycle.opportunities = opportunities
+	cycle.goals = COMPANY_ROADMAP.goals(state)
+	var unpaid_care_cost := int(ledger.get("care_cost", 0)) if int(state.get("retainer_settled_day", -1)) != int(state.get("day", 1)) else 0
+	cycle.economy = {"cash":int(state.get("cash",0)),"due_next_day":int(billing.get("due_next_day",0)),"draft_total":int(billing.get("draft_total",0)),"receivable_total":int(billing.get("receivable_total",0)),"care_net":int(ledger.get("care_net",0)),"day_cash_after":int(ledger.get("cash_after",state.get("cash",0))),"payroll_outstanding":int(ledger.get("payroll_outstanding",0)),"payroll_arrears_after":int(ledger.get("arrears",0)),"settlement_costs":unpaid_care_cost+int(ledger.get("paid_wages",0))}
+	return cycle
 
 func offer_operations_preview(offer: Dictionary) -> Dictionary:
 	var requirement: Variant = offer.get("supply_requirement", {}) if offer is Dictionary else {}
@@ -2218,7 +2255,9 @@ func start_free_career() -> bool:
 	var previous_state: Dictionary = state.duplicate(true)
 	var previous_assignments: Dictionary = _assignments.duplicate(true)
 	if current_done():
-		_apply_retainer(); state.day += 1
+		var closing_preview := DAY_LEDGER.preview(self)
+		_apply_retainer(); _settle_staff_payroll(); DAY_LEDGER.settle(self, closing_preview)
+		state.day += 1; state.clock_minutes = BUSINESS_START_MINUTE
 	state.career_mode = true; state.game_complete = false; state.awaiting_contract = true; state.staff_payroll.enabled = true
 	state.accepted = false; state.inspected = false; state.current_contract_id = ""; state.contract = {}; state.targets = []; state.target_index = 0
 	state.checks = []; state.validated_revision = -1; _retain_maintenance_assignments()
@@ -2433,7 +2472,13 @@ func deliver() -> bool:
 		state.last_receipt.invoice_id = str(draft.invoice.id)
 		state.last_receipt.billing_version = 1
 	state.history.append({"id":id,"case_id":state.contract.get("case_id",""),"copy_id":mission().id,"title":mission().title,"day":state.day,"reward":fee,"bonus":bonus,"expense":int(status.costs),"material_cost":int(status.get("material_cost",0)),"hardware_serial":str(_customer_hardware().get("serial","")),"profit":net,"cash_delta":delivery_cash,"billing_version":1 if invoiced else 0,"retainer":0,"checks":state.checks.duplicate(true),"grade":str(review.get("grade","C")),"quality_score":int(review.get("score",0)),"baseline_bonus":baseline_bonus,"satisfaction_before":satisfaction_before,"satisfaction_after":int(relation.satisfaction),"renewal_outcome":renewal_outcome})
+	var delivered_case: Dictionary = CASES.by_id(str(state.contract.get("case_id", "")))
+	state.history[-1].client = client
+	state.history[-1].rating = str(status.quality)
+	state.history[-1].chapter = _current_chapter()
+	state.history[-1].work_family = str(delivered_case.get("work_family", COMPANY_CYCLE.FAMILIES[_current_chapter()]))
 	state.clients[id] = {"title":mission().title,"debrief":mission().debrief,"config":_vm().state.get("applied", {}).duplicate(true),"evidence":mission().evidence.duplicate(true),"checks":state.checks.duplicate(true)}
+	COMPANY_CYCLE.record_delivery(self, id, state.last_receipt)
 	if state.get("career_mode", false): _sync_contract_context(); state.contract_contexts[id].completed = true; _make_offers()
 	if state.contract_plan == "care" and not captured_targets.is_empty():
 		MAINTENANCE_SCOPE.retain_delivery(self,client,captured_targets)
@@ -2538,7 +2583,7 @@ func _apply_retainer() -> void:
 	var active_clients: Array[String] = []
 	for account in portfolio.clients:
 		if str(account.status) == "active": active_clients.append(str(account.client))
-	var earned := 0; var missed := 0
+	var earned := 0; var missed := 0; var verified_jobs := 0
 	for legacy_client in state.get("care_agreements", {}).keys():
 		var legacy_agreement: Dictionary = state.care_agreements[legacy_client]
 		var legacy_name := str(legacy_client)
@@ -2550,7 +2595,7 @@ func _apply_retainer() -> void:
 		var item_client := str(item.get("client", ""))
 		if item_client not in active_clients: continue
 		if str(item.get("status", "")) == "done" and not bool(item.get("paid", false)):
-			earned += int(item.get("fee", 0)); item.paid = true
+			earned += int(item.get("fee", 0)); item.paid = true; verified_jobs += 1
 		elif str(item.get("status", "")) in ["pending", "working", "failed", "queued", "paused"]:
 			if str(item.status) not in ["queued","paused"]: item.status="failed"; item.remaining=0.0
 			item.missed_day = int(state.day); missed += 1
@@ -2566,7 +2611,8 @@ func _apply_retainer() -> void:
 	state.retainer_settled_day = int(state.day)
 	if not state.has("retainer_daily") or not state.retainer_daily is Dictionary: state.retainer_daily = {}
 	state.retainer_daily[str(int(state.day))] = {"day":int(state.day),"retainer":income,"retainer_gross":earned,"retainer_cost":service_cost,"retainer_net":income,"maintenance_earned":earned,"maintenance_missed":missed}
-	state.history.append({"id":"retainer-day-%d" % int(state.day),"day":int(state.day),"retainer":income,"retainer_gross":earned,"retainer_cost":service_cost,"retainer_net":income,"maintenance_earned":earned,"maintenance_missed":missed})
+	state.retainer_daily[str(int(state.day))].maintenance_completed = verified_jobs
+	state.history.append({"id":"retainer-day-%d" % int(state.day),"day":int(state.day),"retainer":income,"retainer_gross":earned,"retainer_cost":service_cost,"retainer_net":income,"maintenance_earned":earned,"maintenance_missed":missed,"maintenance_completed":verified_jobs})
 	if state.history.size() > 100:
 		# Keep every current-day cash row for DayLedger's opening/closing
 		# reconciliation, while retaining the normal recent-history window.

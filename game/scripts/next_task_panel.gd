@@ -186,6 +186,11 @@ func locate_task() -> void:
 		var url := str(task.get("url", ""))
 		if route == "browser" and not url.is_empty(): desktop.show_guide_service(url)
 		else: desktop._show_app(route)
+		var navigation_id: String = GUIDE.navigation_target(game, task)
+		if not navigation_id.is_empty():
+			var navigation: Node = desktop.find_child(navigation_id, true, false)
+			if navigation is BaseButton and navigation.is_visible_in_tree() and not navigation.disabled:
+				navigation.pressed.emit()
 		if route == "editor" and not str(task.get("config_path", "")).is_empty(): desktop._open_editor(str(task.config_path))
 		if route == "monitor" and str(task.get("id", "")) == "apply":
 			desktop.widgets.monitor.tab = "overview"; desktop._refresh_monitor()

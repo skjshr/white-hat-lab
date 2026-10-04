@@ -1268,7 +1268,53 @@ func _company() -> void:
 	match view:
 		"growth": _company_growth(g)
 		"care": _company_care(g)
-		_: _company_operating_desk(g, g.company_operating_summary())
+		_:
+			preload("res://scripts/company_cycle_panel.gd").build(self, g)
+			_company_operating_desk(g, g.company_operating_summary())
+
+func _open_cycle_route(route: String) -> void:
+	match route:
+		"company_growth": _select_company_view("growth")
+		"care": _select_company_view("care")
+		"company_overview":
+			_select_company_view("overview")
+			_scroll_company_operations()
+		"shop": open_panel("shop")
+		_: board_selected_id = ""; open_panel("sales")
+
+func _scroll_company_operations() -> void:
+	await get_tree().process_frame
+	if current_kind != "company" or not is_instance_valid(modal_scroll): return
+	var operating := modal_body.find_child("OperatingDesk", true, false) as Control
+	if is_instance_valid(operating): modal_scroll.ensure_control_visible(operating)
+
+func _open_cycle_recovery(client: String) -> void:
+	board_selected_id = ""; board_filter = "all"; sales_view = "inquiries"; sales_stage = "all"; sales_search = client
+	open_panel("sales")
+
+func _open_cycle_offer(opportunity_id: String) -> void:
+	var g := _game()
+	if g == null or not g.has_method("company_cycle_view"): return
+	var before: Dictionary = g.company_cycle_view()
+	var ready := false
+	for item in before.get("opportunities", []):
+		if item is Dictionary and str(item.get("id", "")) == opportunity_id and str(item.get("status", "")) == "ready": ready = true; break
+	if not ready:
+		_select_company_view("overview"); return
+	if not bool(g.state.get("career_mode", false)) and not g.start_free_career():
+		_management_feedback("進めている依頼を納品してから、この相談を開いてください。")
+		return
+	var view: Dictionary = g.company_cycle_view()
+	for item in view.get("opportunities", []):
+		if not item is Dictionary or str(item.get("id", "")) != opportunity_id: continue
+		if str(item.get("status", "")) != "ready":
+			_select_company_view("overview"); return
+		var offer_id := str(item.get("offer_id", ""))
+		for offer in g.state.get("offers", []):
+			if str(offer.get("id", "")) == offer_id:
+				board_selected_id = offer_id; open_panel("sales"); return
+	_management_feedback("相談の状況が変わりました。会社の相談一覧を確認してください。")
+	_select_company_view("overview")
 
 func _select_company_view(view: String) -> void:
 	set_meta("company_view", view); open_panel("company")
@@ -1298,7 +1344,7 @@ func _company_growth(g) -> void:
 		next_label.name = "SkillNext_" + str(skill.id)
 		next_label.tooltip_text = "\n".join(case_unlocks)
 		effects.add_child(next_label)
-		var learn := _button("習得 / 1 pt", Callable(self, "_learn_skill").bind(skill.id)); learn.custom_minimum_size=Vector2(106,40); learn.size_flags_vertical=Control.SIZE_SHRINK_CENTER; learn.disabled = skill.rank >= int(skill.max_rank) or g.skill_points() <= 0 or str(g.state.strategy) == ""; M.button(learn, "primary"); row.add_child(learn)
+		var learn := _button("習得 / 1 pt", Callable(self, "_learn_skill").bind(skill.id)); learn.name = "LearnSkill_" + str(skill.id); learn.custom_minimum_size=Vector2(106,40); learn.size_flags_vertical=Control.SIZE_SHRINK_CENTER; learn.disabled = skill.rank >= int(skill.max_rank) or g.skill_points() <= 0 or str(g.state.strategy) == ""; M.button(learn, "primary"); row.add_child(learn)
 
 func _company_care(g) -> void:
 	var portfolio: Dictionary = g.care_portfolio()
@@ -1527,14 +1573,51 @@ func _buy(id: String) -> void:
 func _door() -> void:
 	var g := _game(); if g == null: return
 	if g.state.get("career_mode",false):OPERATIONS_PANEL.closeout(self,false);return
-	modal_body.add_child(_label("現在時刻  %s" % (g.business_clock() if g.has_method("business_clock") else "09:00"),22,TEAL))
+	_story_closeout_summary(g)
 	if g.state.game_complete:
 		modal_body.add_child(_button("初週決算確認", Callable(self, "open_panel").bind("ending")))
 		modal_body.add_child(_button("営業を続ける", Callable(self, "_continue_business")))
 		return
+	var review := _button("納品結果を確認" if g.current_done() else "依頼に戻る", func():
+		open_panel("terminal")
+		if is_instance_valid(desktop): desktop._show_app("receipt" if g.current_done() else "mail"))
+	review.name = "StoryCloseoutReturn"; M.button(review,"quiet"); modal_footer.add_child(review)
 	var footer_space := Control.new(); footer_space.size_flags_horizontal = Control.SIZE_EXPAND_FILL; modal_footer.add_child(footer_space)
 	var end_reason := str(g.end_day_reason()) if g.has_method("end_day_reason") else (str(g.maintenance_end_day_reason()) if g.has_method("maintenance_end_day_reason") else ""); var b := _button(_queue_copy("queue_overnight", ""), Callable(self, "_end_day")); b.name="DaySettle"; b.disabled = g.has_method("can_end_day") and not bool(g.can_end_day()) or (not g.has_method("can_end_day") and not end_reason.is_empty()); b.tooltip_text = end_reason if not end_reason.is_empty() else ""; M.button(b,"primary"); modal_footer.add_child(b)
+	if int(g.state.chapter) >= g.RULES.size() - 1: b.text = "初週決算へ進む"
 	if not end_reason.is_empty(): modal_body.add_child(_label(end_reason,16,WARNING))
+
+func _story_closeout_summary(g) -> void:
+	var day := int(g.state.day)
+	var done: bool = g.current_done()
+	var title := _label("DAY %02d の仕事を振り返る" % day,26,TEAL); title.name = "StoryCloseoutTitle"; modal_body.add_child(title)
+	modal_body.add_child(_label("現在時刻  %s" % g.business_clock(),16,MUTED))
+	var receipt: Dictionary = g.completion_receipt()
+	var current_receipt := done and not receipt.is_empty() and int(receipt.get("day", -1)) == day
+	var summary_text := "本日の依頼は未納品です。" if bool(g.state.accepted) else "本日の依頼はまだ引き受けていません。"
+	if current_receipt:
+		summary_text = "納品済み  %s\n%s" % [str(receipt.get("client", "")), str(receipt.get("title", ""))]
+	elif done:
+		summary_text = "本日の依頼は納品済みです。\n%s / %s" % [str(g.mission().get("client", "")), str(g.mission().get("title", ""))]
+	else:
+		summary_text += "\n%s / %s" % [str(g.mission().get("client", "")), str(g.mission().get("title", ""))]
+	var summary := _label(summary_text,19,INK); summary.name = "StoryCloseoutSummary"; modal_body.add_child(summary)
+	var ledger: Dictionary = g.day_preview()
+	var profit := _label("本日の案件利益  ¥%s" % _group_number(int(ledger.get("contract_net", 0))),20,TEAL); profit.name = "StoryCloseoutProfit"; modal_body.add_child(profit)
+	var cash := _label("現在の現金  ¥%s" % _group_number(int(g.state.cash)),20,INK); cash.name = "StoryCloseoutCash"; modal_body.add_child(cash)
+	if current_receipt: modal_body.add_child(_label("納品時の売上・経費は、現在の現金に反映済みです。",14,MUTED))
+	if int(ledger.get("care_gross", 0)) != 0 or int(ledger.get("care_cost", 0)) != 0:
+		var settled := int(g.state.get("retainer_settled_day", -1)) == day
+		modal_body.add_child(_label(("本日の保守精算済み  " if settled else "日を締めるときの保守精算見込み  ") + "¥%s" % _group_number(int(ledger.get("care_net", 0))),16,MUTED))
+	if int(ledger.get("missed_maintenance", 0)) > 0:
+		modal_body.add_child(_label("未完了の保守  %d件。会社画面で状況を確認できます。" % int(ledger.missed_maintenance),16,WARNING))
+	modal_body.add_child(HSeparator.new())
+	var next_text := "依頼を納品すると、一日を締められます。自席PCのメールで作業内容を確認してください。"
+	if done:
+		next_text = "翌日は新着依頼が届きます。自席PCのメールで内容を確認し、次の仕事を引き受けます。"
+		if int(g.state.chapter) >= g.RULES.size() - 1: next_text = "初週の決算を確認します。その後も営業を続け、会社を育てられます。"
+	var next := _label(next_text,17,INK); next.name = "StoryCloseoutNext"; modal_body.add_child(next)
+	var company := _button("会社の資金・次の相談を見る", _select_company_view.bind("overview")); company.name = "StoryCloseoutCompany"; M.button(company,"quiet"); company.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN; modal_body.add_child(company)
 
 func _end_day() -> void:
 	var g := _game()

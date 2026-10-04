@@ -3,13 +3,29 @@ extends RefCounted
 ## Read-only next action resolver. It only observes the game state and returns
 ## navigation metadata; it never accepts, edits, verifies, saves, or delivers.
 const UI_COPY = preload("res://scripts/ui_theme.gd")
+const ADVANCED_REVIEW_TARGETS := {
+	"advanced-hunt":"HuntTab_results", "advanced-pentest":"NetworkTab_results", "advanced-recovery":"RecoveryTab_results",
+	"advanced-cloud":"SpecialistStage_2", "advanced-malware":"SpecialistStage_2", "advanced-detection":"SpecialistStage_2", "advanced-ddos":"SpecialistStage_2",
+	"advanced-api":"SpecialistStage_3", "advanced-supplychain":"SpecialistStage_3"
+}
+const ADVANCED_WORK_TARGETS := {
+	"advanced-hunt":{"default":"HuntTab_timeline","containment":"HuntTab_response","business":"HuntTab_response","false_attribution":"HuntTab_timeline"},
+	"advanced-pentest":{"default":"NetworkTab_explore","path":"NetworkTab_report"},
+	"advanced-recovery":{"default":"RecoveryTab_copies","staging":"RecoveryTab_stage","persistence":"RecoveryTab_stage","identity":"RecoveryTab_release","network":"RecoveryTab_release","business":"RecoveryTab_release","reinfection":"RecoveryTab_release"},
+	"advanced-cloud":{"default":"SpecialistStage_0","evidence":"SpecialistStage_1"},
+	"advanced-malware":{"default":"SpecialistStage_0","quarantine":"SpecialistStage_1","rescan":"SpecialistStage_1"},
+	"advanced-detection":{"default":"SpecialistStage_0","quality":"SpecialistStage_1"},
+	"advanced-ddos":{"default":"SpecialistStage_0","ddos_evidence":"SpecialistStage_1","ddos_access":"SpecialistStage_1"},
+	"advanced-api":{"default":"SpecialistStage_0","api_retest":"SpecialistStage_1","api_business":"SpecialistStage_1"},
+	"advanced-supplychain":{"default":"SpecialistStage_0","supply_evidence":"SpecialistStage_2","supply_business":"SpecialistStage_1"}
+}
 
 static func resolve(game) -> Dictionary:
 	if game == null or game.state.is_empty(): return _item("none", "", "", "", "", "")
 	var s: Dictionary = game.state
 	if bool(_call(game, "incident_active", [], false)):
 		var concluded := str(s.get("advanced", {}).get("exercise", {}).get("phase", "")) == "concluded"
-		return _item("incident", "請求サービスの対応演習", "対応結果を振り返り、条件を変えて再挑戦できます。" if concluded else "顧客の作業予定と記録を照合し、対処後に業務を確認してください。", "", "advanced", "PentestTab_operations")
+		return _item("incident", "請求サービスの対応演習", "対応結果を振り返り、条件を変えて再挑戦できます。" if concluded else "顧客の作業予定と記録を照合し、対処後に業務を確認してください。", "", "advanced", "PentestTab_operations", {"open_navigation":true})
 	if bool(_call(game, "current_done", [], false)):
 		return after_delivery(game)
 	if str(s.get("strategy", "")).is_empty() and not bool(s.get("career_mode", false)):
@@ -171,7 +187,27 @@ static func _advanced(game) -> Dictionary:
 			return _copy_item("validate", "guide_validate_title", "adv_verify", "advanced", "AdvancedVerify")
 	var label_key := str(failed.get("label_key", ""))
 	var objective := UI_COPY.copy(label_key, UI_COPY.copy("next_workbench_body", ""))
-	return _item("workbench", UI_COPY.copy("next_investigate_title"), UI_COPY.copy("next_workbench_body") + "  " + objective, objective, "advanced", "AdvancedTab_results", {"objective_id":str(failed.get("id", ""))})
+	var target := advanced_work_target(game,str(failed.get("id","")))
+	return _item("workbench", UI_COPY.copy("next_investigate_title"), UI_COPY.copy("next_workbench_body") + "  " + objective, objective, "advanced", target, {"objective_id":str(failed.get("id", "")),"open_navigation":not target.is_empty()})
+
+static func navigation_target(game, task: Dictionary) -> String:
+	# Only known view selectors may be activated by Locate. In particular this
+	# excludes Verify, delivery, and any action that changes a customer system.
+	if not bool(task.get("open_navigation",false)) or str(task.get("route",""))!="advanced": return ""
+	var expected := "PentestTab_operations" if bool(_call(game,"incident_active",[],false)) else advanced_work_target(game,str(task.get("objective_id","")))
+	return expected if str(task.get("target",""))==expected else ""
+
+static func advanced_work_target(game, objective_id: String) -> String:
+	var kind := str(game.state.get("contract",{}).get("case_id",""))
+	var targets: Dictionary=ADVANCED_WORK_TARGETS.get(kind,{})
+	var target := str(targets.get(objective_id,targets.get("default","")))
+	# These are public work-state transitions, not inspection of desired values.
+	# A restored draft needs its editor; a report needs collected evidence first.
+	if (kind=="advanced-recovery" and objective_id=="snapshot") or (kind=="advanced-pentest" and objective_id=="path"):
+		var view:=_dict_call(game,"advanced_view")
+		if kind=="advanced-recovery" and not view.get("recovery",{}).get("staged",{}).is_empty():target="RecoveryTab_stage"
+		elif kind=="advanced-pentest" and view.get("evidence",{}).is_empty():target="NetworkTab_explore"
+	return target
 
 static func _portal(game) -> Dictionary:
 	if _validated(game): return _completion_step(game)

@@ -5,6 +5,7 @@ const DELIVERY = preload("res://scripts/equipment_delivery.gd")
 const PLACEMENT_RULES = preload("res://scripts/placement_rules.gd")
 const WORKSTATION_SCREEN = preload("res://scripts/office_workstation_screen.gd")
 const EQUIPMENT_VISUALS = preload("res://scripts/equipment_visuals.gd")
+const COMPANY_PROGRESS = preload("res://scripts/company_progress_display.gd")
 
 var player: CharacterBody3D
 var ui: CanvasLayer
@@ -17,6 +18,7 @@ var upgrades: Dictionary = {}
 var upgrade_collisions: Dictionary = {}
 var status_screen: Label3D
 var mission_board: Label3D
+var company_progress: Node3D
 var colleagues: Array[Node3D] = []
 var staff_actors: Dictionary = {}
 var staff_sync_elapsed := 0.0
@@ -501,10 +503,15 @@ func _build_furniture() -> void:
 	machine_upper.set_meta("coffee_machine",true)
 	_prop("coatRackStanding",Vector3(3.4,0,4.4),1.72)
 	_prop("trashcan",Vector3(-4.8,0,-3.8),0.5)
-	# Whiteboard with six physical result pins.
+	# Saved company milestones become visible tokens on the office board.
 	_box(Vector3(2.65,1.5,0.08),Vector3(3.4,1.98,-4.82),"345354")
 	_box(Vector3(2.45,1.3,0.02),Vector3(3.4,1.98,-4.765),"ede9ce")
 	mission_board = _label3d("",Vector3(3.4,2.13,-4.74),26,Color("284943"))
+	company_progress = COMPANY_PROGRESS.new()
+	company_progress.name = "CompanyProgressDisplay"
+	company_progress.position = Vector3(3.4,1.98,-4.73)
+	add_child(company_progress)
+	company_progress.setup(font)
 	_collision(Vector3(2.65,1.5,0.2),Vector3(3.4,1.98,-4.70),"board","案件ボード [Tab]")
 	for equipment_id in ["plant", "backup", "monitor", "workstation", "diagnostic", "teamdesk"]:
 		var index: int = Game.equipment_slot(equipment_id)
@@ -1205,8 +1212,19 @@ func _state_changed() -> void:
 	_apply_installed_delivery_positions()
 	var day := int(Game.state.get("day",1))
 	var completed: int = Game.state.get("completed_ids",[]).size()
+	var celebrate_live: bool = started and ui != null and not ui.controls.menu.visible
 	if mission_board:
 		mission_board.text = "案件ボード\nDAY %d   Lv.%d\n営業カタログ %d件" % [day,int(Game.company_level().level),Game.CASES.all().size()]
+	var earned_goals: Array[String] = []
+	if company_progress and Game.has_method("company_cycle_view"):
+		mission_board.hide()
+		var cycle_view: Dictionary = Game.company_cycle_view()
+		# The view carries persisted awards; live condition checks alone do not
+		# put a trophy on the wall or produce a success sound.
+		cycle_view["earned_goals"] = Game.state.get("company_cycle", {}).get("earned_goals", {}).duplicate(true)
+		earned_goals = company_progress.sync(cycle_view, {"day":day,"level":int(Game.company_level().level),"catalog_count":Game.CASES.all().size()}, celebrate_live)
+	elif company_progress:
+		company_progress.hide()
 	if status_screen:
 		status_screen.text = "●  完了" if Game.current_done() else ("●  作業中" if Game.state.get("accepted",false) else "●  待機")
 	if company_sign: company_sign.text = _display_name(_company_name(),18)
@@ -1214,9 +1232,12 @@ func _state_changed() -> void:
 	for id in ["aya","ren"]:
 		if colleague_desk_labels.has(id): colleague_desk_labels[id].text = _display_name(_member_name(id),12)
 	_update_daylight()
-	if completed > last_done:
+	if completed > last_done and celebrate_live:
 		_play_sound("confirmation_001")
-		_notify("納品完了  案件利益 ¥%d" % int(Game.completion_receipt().get("net",0)))
+		_notify("納品完了  案件利益 ¥%d%s" % [int(Game.completion_receipt().get("net",0)), "  /  達成「%s」" % "・".join(earned_goals) if not earned_goals.is_empty() else ""])
+	elif not earned_goals.is_empty():
+		Soundscape.play_ui("receipt_positive")
+		_notify("会社の節目を達成  「%s」" % "・".join(earned_goals))
 	if day != last_day:
 		player.position = Vector3(0,0.05,3.4)
 		for colleague in colleagues:
@@ -1361,8 +1382,12 @@ func _notification(what: int) -> void:
 		ui.open_panel("pause")
 
 func _quit() -> void:
-	if ui and is_instance_valid(ui.desktop): ui.desktop._save_session()
-	if started: Game.save_game()
+	if ui and is_instance_valid(ui.desktop) and not ui.desktop._save_session():
+		_notify("保存失敗。終了を中止しました。")
+		return
+	if started and not Game.save_game():
+		_notify("保存失敗。終了を中止しました。")
+		return
 	get_tree().quit()
 
 func _exit_tree() -> void:

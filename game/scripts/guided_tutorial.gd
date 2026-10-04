@@ -170,7 +170,7 @@ func _target_name() -> String:
 		var desktop=_desktop()
 		if desktop!=null and str(desktop.widgets.get("verify",{}).get("selected",""))!=_probe_id: return "DiagnosticProbe_"+_probe_id
 		return "DiagnosticRun"
-	return {"strategy":"GuideStrategy_operations","mail":"GuideMailMessage","accept":"GuideMailAccept","connect":"SambaConnect","baseline":"GuideBaseline","edit":"SambaEdit_share","read_only":"SambaReadOnly","guest":"SambaGuest","users":"SambaValidUsers","save":"SambaSave","restart":"SambaRestart","validate":"DiagnosticValidate","deliver":"GuideDeliver"}.get(current_step,"")
+	return {"mail":"GuideMailMessage","accept":"GuideMailAccept","connect":"SambaConnect","baseline":"GuideBaseline","edit":"SambaEdit_share","read_only":"SambaReadOnly","guest":"SambaGuest","users":"SambaValidUsers","save":"SambaSave","restart":"SambaRestart","validate":"DiagnosticValidate","deliver":"GuideDeliver"}.get(current_step,"")
 
 func _find(id: String) -> Control:
 	if id.is_empty(): return null
@@ -208,7 +208,7 @@ func _render(changed: bool) -> void:
 	_progress.text=UI.copy("guide_progress")+"  ·  %02d / %02d" % [STEPS.find(current_step)+1,STEPS.size()]
 	_title.text=UI.copy("guide_"+current_step+"_title")
 	_body.text=UI.copy("guide_"+current_step+"_body")
-	_body.visible = _expanded or ui.current_kind.is_empty()
+	_body.visible = _expanded or ui.current_kind.is_empty() or current_step == "strategy"
 	_keys.visible=current_step in ["walk","desk"]
 	_keys.text=(("✓  " if bool(_data().get("moved",false)) else "")+"W  A  S  D   ·   "+("✓  " if bool(_data().get("looked",false)) else "")+"↔") if current_step=="walk" else "E   /   F"
 	_skip.text=UI.copy("guide_finish" if current_step=="done" else "guide_skip")
@@ -222,6 +222,7 @@ func _render(changed: bool) -> void:
 	var desktop=_desktop()
 	var elsewhere: bool=not _route().is_empty() and (desktop==null or desktop.current_app!=_route())
 	_locate.visible=(elsewhere or not target_rect.has_area()) and (current_step!="walk" or not ui.current_kind.is_empty()) and (current_step!="done" or elsewhere)
+	if current_step == "strategy" and ui.current_kind == "board": _locate.hide()
 	_locate.text=UI.copy("guide_return" if current_step=="walk" else "guide_locate")
 	var surface: Control = _desktop()
 	if surface == null and ui._is_management_panel(ui.current_kind): surface = ui.modal
