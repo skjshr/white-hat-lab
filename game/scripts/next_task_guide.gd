@@ -34,6 +34,9 @@ static func resolve(game) -> Dictionary:
 		return _copy_item("board", "next_board_title", "next_board_body", "board", "ContractBoard")
 	if not bool(s.get("accepted", false)):
 		return _copy_item("accept", "next_accept_title", "next_accept_body", "mail", "GuideMailMessage")
+	var conversion: Dictionary = _call(game, "care_conversion_offer", [], {})
+	if bool(conversion.get("available", false)):
+		return _item("care-conversion", "契約条件を確認する", "この専門案件は継続保守の対象外です。合意済みの料金・納期を保った単発契約への変更を確認できます。", "", "receipt", "CareConvertStandard")
 	if bool(_call(game, "advanced_active", [], false)):
 		return _advanced(game)
 	return _legacy(game)

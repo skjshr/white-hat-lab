@@ -269,9 +269,13 @@ static func _render_item(ui, game, host: VBoxContainer, item: Dictionary) -> voi
 	if not model.is_empty(): _add_label(info, model, 14, M.MUTED)
 	_add_label(info, _equipment_state(game, id), 14, M.ACCENT if id in game.state.equipment else M.MUTED)
 	var price := int(game.equipment_price(id)) if game.has_method("equipment_price") else int(item.get("price", 0))
-	_add_label(info, "¥%d" % price, 20, M.INK)
+	_add_label(info, "¥%d" % price, 20, M.INK).name = "EquipmentPrice"
+	var catalog_price := int(item.get("price", 0))
+	if id in ["backup", "monitor"] and catalog_price > price and price >= 0:
+		var discount := roundi(100.0 * float(catalog_price - price) / float(catalog_price))
+		_add_label(info, UI.copy("equipment_operations_discount") % [catalog_price, price, discount], 13, M.MUTED).name = "EquipmentDiscount"
 	host.add_child(M.rule())
-	_add_label(host, str(item.get("effect", item.get("description", ""))), 16, M.INK)
+	_add_label(host, str(item.get("effect", item.get("description", ""))), 16, M.INK).name = "EquipmentEffect"
 	var physical := str(item.get("physical", ""))
 	if not physical.is_empty(): _add_label(host, physical, 14, M.MUTED)
 	var order: Dictionary = game.delivery_for(id) if game.has_method("delivery_for") else {}

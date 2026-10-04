@@ -16,7 +16,9 @@ static func advance_day(g) -> void:
 		var agreement: Dictionary = g.state.care_agreements[client]
 		if not bool(agreement.get("active", false)) or g._maintenance_targets_for(client).is_empty(): continue
 		var existing: Dictionary = g.state.care_incidents.get(client, {})
-		if str(existing.get("status", "closed")) != "closed" or _busy_client(g, client): continue
+		# Retained production snapshots are independent from an ordinary job's
+		# working VM. An unfinished job must not suppress production drift.
+		if str(existing.get("status", "closed")) != "closed": continue
 		if not agreement.has("next_incident_day"):
 			agreement.next_incident_day = _next_day(g, client)
 			continue

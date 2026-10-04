@@ -1010,7 +1010,7 @@ func _contract_detail(offer: Dictionary) -> void:
 		_contract_operations_preview(conditions, offer, g, true)
 	var care_reason := ""
 	if selected_plan == "care":
-		var terms: Dictionary = g.care_terms(str(offer.client)); care_reason=str(terms.reason)
+		var terms: Dictionary = g.care_terms(str(offer.client)); care_reason=str(quote.get("reason", terms.reason))
 		var rates_template := UI.copy("care_contract_rates", ""); var billing := UI.copy("care_billing", "")
 		if not rates_template.is_empty(): body.add_child(_label((rates_template % [int(terms.fee),int(terms.cost),int(terms.net)]) + ("\n" + billing if not billing.is_empty() else ""),14,TEAL))
 		if not care_reason.is_empty(): body.add_child(_label(care_reason,14,WARNING))
@@ -1339,11 +1339,15 @@ func _company_growth(g) -> void:
 		effects.add_child(_label("現在: %s" % str(skill.get("current_effect", "未習得")), 12, M.INK))
 		var case_unlocks: Array = g.skill_case_unlocks(str(skill.id))
 		var next_effect := "次: %s" % (str(skill.get("next_effect", "最大ランク")) if skill.rank < int(skill.max_rank) else "最大ランク")
-		if not case_unlocks.is_empty(): next_effect = UI.copy("firm_unlocks") % " / ".join(case_unlocks.slice(0,2))
 		var next_label := _label(next_effect, 12, M.MUTED)
 		next_label.name = "SkillNext_" + str(skill.id)
 		next_label.tooltip_text = "\n".join(case_unlocks)
 		effects.add_child(next_label)
+		if not case_unlocks.is_empty():
+			var unlock_label := _label(UI.copy("firm_unlocks") % " / ".join(case_unlocks.slice(0,2)), 12, M.MUTED)
+			unlock_label.name = "SkillUnlocks_" + str(skill.id)
+			unlock_label.tooltip_text = "\n".join(case_unlocks)
+			effects.add_child(unlock_label)
 		var learn := _button("習得 / 1 pt", Callable(self, "_learn_skill").bind(skill.id)); learn.name = "LearnSkill_" + str(skill.id); learn.custom_minimum_size=Vector2(106,40); learn.size_flags_vertical=Control.SIZE_SHRINK_CENTER; learn.disabled = skill.rank >= int(skill.max_rank) or g.skill_points() <= 0 or str(g.state.strategy) == ""; M.button(learn, "primary"); row.add_child(learn)
 
 func _company_care(g) -> void:

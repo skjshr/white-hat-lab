@@ -451,7 +451,13 @@ func _register_workstation_screen(screen: Node3D, workstation_id: String) -> voi
 	monitor.name = "WorkstationMonitor_%s" % workstation_id
 	add_child(monitor)
 	monitor.setup(screen, Game, workstation_id)
+	monitor.equipment_activated.connect(_equipment_activity_started)
 	monitors[workstation_id] = monitor
+
+func _equipment_activity_started(_work_key: String) -> void:
+	if not started or ui == null or ui.controls.menu.visible: return
+	if str(ui.current_kind) in ["pause", "settings", "confirm_display", "ending"]: return
+	Soundscape.play_ui("click")
 
 func set_desktop_preview(texture: Texture2D) -> void:
 	var monitor = monitors.get("terminal", null)
@@ -462,10 +468,11 @@ func clear_desktop_preview() -> void:
 	if monitor != null and is_instance_valid(monitor): monitor.clear_desktop_preview()
 
 func _refresh_workstation_screens(force := false) -> void:
+	var live: bool = started and ui != null and not ui.controls.menu.visible and str(ui.current_kind) not in ["pause", "settings", "confirm_display", "ending"]
 	for monitor in monitors.values():
 		if monitor == null or not is_instance_valid(monitor): continue
 		if not force and monitor.screen != null and not monitor.screen.is_visible_in_tree(): continue
-		monitor.refresh(force)
+		monitor.refresh(force, live)
 
 func _build_furniture() -> void:
 	_desk(Vector3(-0.5,0,-1.0),_display_name(_player_name(),18),"terminal")
@@ -926,6 +933,8 @@ func _make_overlay() -> void:
 
 func _start() -> void:
 	clear_desktop_preview()
+	for monitor in monitors.values():
+		if is_instance_valid(monitor): monitor.reset_activity_feedback()
 	started = true
 	player.position = Vector3(0,0.05,3.4)
 	player.rotation = Vector3.ZERO

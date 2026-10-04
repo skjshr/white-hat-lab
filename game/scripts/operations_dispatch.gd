@@ -161,6 +161,8 @@ static func assign(g, member_id: String, contract_id: String, target_index: int)
 				config_before = str(machine_fs.get(machine_path, ""))
 	var assignments := previous_assignments.duplicate(true)
 	assignments[member_id] = {"status":"working","remaining":float(preview.duration),"total":float(preview.duration),"work_minutes":float(preview.duration),"revision":int(projected.get("revision", 0)),"chapter":int(projected.get("chapter", 0)),"contract_id":contract_id,"target_index":target_index,"vm_key":vm_key,"role":role,"result_path":result_path,"config_before":config_before,"phase":UI_COPY.copy("care_maintenance_working", "working"),"result":""}
+	assignments[member_id].equipment_effects = g.team_work_effects(member_id)
+	assignments[member_id].equipment_work_id = g.equipment_work_id(member_id)
 	_restore(g, previous_state.duplicate(true), assignments, previous_machine, previous_key)
 	if bool(g.get("_dispatch_transaction")):
 		return true

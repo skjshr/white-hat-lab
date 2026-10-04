@@ -418,6 +418,7 @@ static func refresh_mail(d) -> void:
 		var accept = d._primary("引き受ける",d._accept); accept.name="GuideMailAccept"; accept.icon=UI.symbol("reply"); accept.add_theme_constant_override("icon_max_width",18); accept.disabled = str(g.state.strategy).is_empty() or (selected_plan == "care" and g.has_method("care_eligibility") and not g.care_eligibility(str(m.client)).is_empty()); actions.add_child(accept)
 		if str(g.state.strategy).is_empty(): actions.add_child(d._button("会社方針決定",d._company))
 	else:
+		_add_care_conversion(d, reading_content, "Mail")
 		var info: Dictionary = g.vm_info()
 		var phase := "未接続" if not info.connected else ("完了" if g.current_done() else "接続中")
 		var progress = d._label(phase,13,TEAL); progress.size_flags_horizontal = Control.SIZE_EXPAND_FILL; footer.add_child(progress)
@@ -540,6 +541,8 @@ static func delivery_blockers(g) -> Array:
 	if g.current_done() or g.can_deliver(): return out
 	if not bool(s.get("accepted", false)):
 		return [{"id":"accept", "message":UI.copy("delivery_blocked_accept"), "action":UI.copy("delivery_open_mail"), "route":"mail", "target_index":-1}]
+	if g.has_method("care_conversion_offer") and bool(g.care_conversion_offer().get("available", false)):
+		return [{"id":"care-conversion", "message":"この専門案件は継続保守の対象外です。料金・納期を維持した単発契約への変更を確認してください。", "action":"契約変更を確認", "route":"receipt", "target_index":-1}]
 	var contract_id := str(s.get("current_contract_id", ""))
 	var queued := false
 	for queue in s.get("dispatch_queues", {}).values():
@@ -594,14 +597,36 @@ static func _verify_receipt(d) -> void:
 	if results.is_empty(): d._notify(UI.copy("delivery_verify_failed"))
 	refresh_receipt(d)
 
+static func _add_care_conversion(d, parent: Control, prefix: String = "") -> bool:
+	if not d.game.has_method("care_conversion_offer"): return false
+	var proposal: Dictionary = d.game.care_conversion_offer()
+	if not bool(proposal.get("available", false)): return false
+	var box: VBoxContainer = d._box(parent, 8)
+	box.name = prefix + "CareConversionNotice"
+	box.add_child(d._label("継続保守の契約条件を確認", 17, ORANGE))
+	box.add_child(d._label("この専門案件は継続保守の対象外です。単発契約へ変更して作業を続けられます。", 14, INK))
+	box.add_child(d._label("合意済み料金 ¥%s ・ 納期 %d 分を維持\n調査・証拠・検証結果も引き継ぎます。" % [d._money(int(proposal.fee)), int(proposal.budget)], 14, INK))
+	box.add_child(d._label("この案件の保守料は発生しません。既存の保守契約・別案件の保守予約は維持します。" if bool(proposal.retained_care) else "この案件の保守予約を取り消します。日々の保守料は発生しません。", 13, MUTED))
+	var button: Button = d._primary("料金・納期を維持して単発へ変更", func():
+		if not d.game.convert_current_care_to_standard():
+			d._notify("契約変更を保存できませんでした。契約と作業内容を保持しています。")
+			return
+		d._notify("単発契約へ変更しました。合意済み料金・納期と作業内容を引き継ぎました。")
+		refresh_mail(d); refresh_receipt(d)
+	)
+	button.name = prefix + "CareConvertStandard"; button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	button.custom_minimum_size.y = 42; box.add_child(button)
+	return true
+
 static func refresh_receipt(d) -> void:
 	var body = d.widgets.receipt.body; var footer = d.widgets.receipt.footer; d._clear(body); d._clear(footer); var g = d.game
 	if not g.current_done():
 		body.add_child(d._label(_company_name(g)+"  /  DELIVERY STATEMENT",12,MUTED))
 		body.add_child(d._label("納品前確認",27)); body.add_child(d._label(g.mission().title,17))
+		var conversion: bool = _add_care_conversion(d, body)
 		var work: Dictionary = g.work_status()
 		body.add_child(d._label("作業時間 %d / %d 分  ·  報酬 ¥%s  ·  経費 ¥%s" % [work.minutes,work.budget,d._money(work.estimated_fee),d._money(work.costs)],14,MUTED))
-		var blockers := delivery_blockers(g)
+		var blockers: Array = [] if conversion else delivery_blockers(g)
 		if not blockers.is_empty():
 			var blocked: VBoxContainer = d._box(body, 7); blocked.name = "ReceiptBlockers"
 			blocked.add_child(d._label(UI.copy("delivery_blocked_title"),17,ORANGE))

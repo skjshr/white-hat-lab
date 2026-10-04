@@ -1,11 +1,14 @@
 extends Node3D
 class_name OfficeWorkstationScreen
+signal equipment_activated(work_key: String)
 
 ## A small, physical monitor surface for the office.  The viewport is kept
 ## separate from the desktop application so the room can show truthful work
 ## state without changing the saved game or stealing desktop focus.
 const UI = preload("res://scripts/ui_theme.gd")
 const SCREEN_SIZE := Vector2i(640, 360)
+const EQUIPMENT_VIEW = preload("res://scripts/equipment_activity_view.gd")
+const EQUIPMENT_DISPLAY = preload("res://scripts/equipment_activity_display.gd")
 
 var game = null
 var screen: Node3D
@@ -15,6 +18,7 @@ var page: Control
 var preview: Texture2D
 var last_signature := ""
 var preview_active := false
+var activity_display: Control
 
 func setup(target: Node3D, game_ref, id: String) -> void:
 	screen = target
@@ -38,6 +42,14 @@ func _build_viewport() -> void:
 	page.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	page.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	viewport.add_child(page)
+	if workstation_id == "monitor":
+		activity_display = EQUIPMENT_DISPLAY.new()
+		activity_display.name = "EquipmentActivity"
+		activity_display.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		page.add_child(activity_display)
+		activity_display.activated.connect(func(key: String): equipment_activated.emit(key))
+		activity_display.animation_frame.connect(func(): viewport.render_target_update_mode = SubViewport.UPDATE_ONCE)
+		return
 	var background := TextureRect.new()
 	background.name = "Background"
 	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -234,8 +246,21 @@ func _signature() -> String:
 		"preview": preview_active
 	})
 
-func refresh(force := false) -> void:
+func reset_activity_feedback() -> void:
+	if activity_display != null: activity_display.reset_feedback()
+	last_signature = ""
+
+func refresh(force := false, live := false) -> void:
 	if preview_active or page == null: return
+	if activity_display != null:
+		var activity: Dictionary = EQUIPMENT_VIEW.build(game, workstation_id)
+		var reduced_motion: bool = bool(game.settings.get("reduced_motion", false))
+		var signature := JSON.stringify([activity, live, reduced_motion])
+		if not force and signature == last_signature: return
+		last_signature = signature
+		activity_display.sync(activity, live, reduced_motion)
+		viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+		return
 	var current := _signature()
 	if not force and current == last_signature: return
 	last_signature = current

@@ -32,6 +32,7 @@ const LEVEL_XP := [0,1000,3000,6500,11000,18000,27000,39000,54000,73000,97000,12
 const CASES = preload("res://scripts/case_catalog.gd")
 const UI_COPY = preload("res://scripts/ui_theme.gd")
 const CARE = preload("res://scripts/care_lifecycle.gd")
+const CARE_SUPPORT = preload("res://scripts/care_contract_support.gd")
 const MAINTENANCE_SCOPE = preload("res://scripts/maintenance_scope.gd")
 const MAINTENANCE_DISPATCH = preload("res://scripts/maintenance_dispatch.gd")
 const PLACEMENT_RULES = preload("res://scripts/placement_rules.gd")
@@ -1009,7 +1010,7 @@ func set_contract_plan(id: String) -> bool:
 			state.contract_plan = id; state.offer_plan = id; save_game(); changed.emit(); return true
 	return false
 func strategy_catalog() -> Array:
-	return [{"id":"operations","title":"運用・監視","description":"保守契約と継続監視","benefit":"新規保守契約の単価・契約枠上昇"},{"id":"advisory","title":"診断・改善","description":"診断と改善提案","benefit":"対象案件の報酬35%増"},{"id":"response","title":"事故対応","description":"事故対応と復旧","benefit":"事故対応の報酬70%増"}]
+	return [{"id":"operations","title":"運用・監視","description":"保守契約と継続監視","benefit":"新規保守の単価・枠上昇。バックアップ装置・監視モニター20%割引"},{"id":"advisory","title":"診断・改善","description":"診断と改善提案","benefit":"対象案件の報酬35%増"},{"id":"response","title":"事故対応","description":"事故対応と復旧","benefit":"事故対応の報酬70%増"}]
 
 func choose_strategy(id: String) -> bool:
 	if state.get("accepted", false) or state.get("strategy", "") != "" or id not in ["operations","advisory","response"]: return false
@@ -1800,7 +1801,9 @@ func contract_quote(offer: Dictionary, quoted_override: int = -1) -> Dictionary:
 	var reaction := "discount" if quoted_fee < roundi(reference_fee * 0.9) else ("premium" if quoted_fee > roundi(reference_fee * 1.1) else "fair")
 	var affordable := quoted_fee <= budget_limit
 	var reason := ""
-	if plan.id == "care": reason = care_eligibility(str(offer.get("client", "")))
+	if plan.id == "care":
+		reason = care_case_reason(offer)
+		if reason.is_empty(): reason = care_eligibility(str(offer.get("client", "")))
 	if not affordable: reason = "顧客予算 ¥%d を超えています。" % budget_limit
 	return {"selected_plan":str(plan.id),"plan_label":str(plan.label),"estimated_fee":quoted_fee,"costs":costs,"budget":budget,"deadline_text":_clock_text(BUSINESS_START_MINUTE + int(round(budget))),"invoice_total":quoted_fee+supply_cost,"net":quoted_fee+supply_cost-costs,"reference_fee":reference_fee,"policy_fee":policy_fee,"policy_percent":policy_percent,"quoted_fee":quoted_fee,"budget_limit":budget_limit,"market_label":str(demand.label),"price_reaction":reaction,"affordable":affordable,"reason":reason,"manual_quote":has_saved_quote or quoted_override >= 0}
 
@@ -1914,6 +1917,7 @@ func verify() -> Array:
 	return result
 
 func can_deliver() -> bool:
+	if bool(care_conversion_offer().get("available", false)): return false
 	if incident_active(): return false
 	for queue in _dispatch_queue_map().values():
 		for job in queue:
@@ -1935,7 +1939,7 @@ func can_deliver() -> bool:
 func skill_catalog() -> Array:
 	return [
 		{"id":"advisory","title":"診断・設計","rank":int(state.skills.advisory),"max_rank":10,"nodes":["権限監査","ネットワーク診断","外部共有設計","診断テンプレート","リスク優先度","顧客説明","設計レビュー","監査手順","品質チェック","主任アドバイザー"],"effects":_skill_effects("advisory"),"current_effect":skill_effect("advisory",int(state.skills.advisory)),"next_effect":skill_effect("advisory",int(state.skills.advisory)+1),"description":"診断案件の報酬が段階的に増えます（Lv4以降は+5%ずつ）。"},
-		{"id":"operations","title":"監視・運用","rank":int(state.skills.operations),"max_rank":10,"nodes":["バックアップ運用","ID管理","継続監査","運用手順","保守計画","稼働監視","変更管理","復旧演習","自動点検","運用リーダー"],"effects":_skill_effects("operations"),"current_effect":skill_effect("operations",int(state.skills.operations)),"next_effect":skill_effect("operations",int(state.skills.operations)+1),"description":"新規保守契約の日額が1ランクごとに¥600増え、契約枠も1件増えます。合意済みの日額は変わりません。"},
+		{"id":"operations","title":"監視・運用","rank":int(state.skills.operations),"max_rank":10,"nodes":["バックアップ運用","ID管理","継続監査","運用手順","保守計画","稼働監視","変更管理","復旧演習","自動点検","運用リーダー"],"effects":_skill_effects("operations"),"current_effect":skill_effect("operations",int(state.skills.operations)),"next_effect":skill_effect("operations",int(state.skills.operations)+1),"description":"新規保守契約の日額が1ランクごとに¥600増え、契約枠も1件増えます。合意済みの日額は変わりません。バックアップ装置と監視モニターは20%割引になります。"},
 		{"id":"response","title":"調査・復旧","rank":int(state.skills.response),"max_rank":10,"nodes":["ログ分析","端末隔離","証拠保全","初動手順","影響範囲","復旧計画","証拠レビュー","再発防止","対応訓練","主任レスポンダー"],"effects":_skill_effects("response"),"current_effect":skill_effect("response",int(state.skills.response)),"next_effect":skill_effect("response",int(state.skills.response)+1),"description":"対応案件の報酬が段階的に増えます（Lv4以降は+5%ずつ）。"}]
 
 func skill_effect(id: String, rank: int = -1) -> String:
@@ -2313,6 +2317,15 @@ func contract_eligibility(offer: Dictionary) -> Array:
 	if reasons.is_empty(): reasons.append("受注可能")
 	return reasons
 
+func care_case_reason(offer: Dictionary) -> String:
+	return CARE_SUPPORT.reason(offer)
+
+func care_conversion_offer() -> Dictionary:
+	return CARE_SUPPORT.conversion(self)
+
+func convert_current_care_to_standard() -> bool:
+	return CARE_SUPPORT.convert(self)
+
 func choose_contract(id: String) -> bool:
 	if not state.career_mode or state.game_complete or (not state.awaiting_contract and not state.accepted): return false
 	if _open_contract_count() >= contract_capacity(): return false
@@ -2329,6 +2342,9 @@ func choose_contract(id: String) -> bool:
 				if not bool(existing_context.get("completed",false)) and str(existing_context.get("contract",{}).get("client","")) == str(offer.get("client","")) and str(existing_context.get("contract",{}).get("case_id",existing_context.get("contract",{}).get("id",""))) == str(offer.get("case_id",offer.get("id",""))): return false
 			var quote := contract_quote(offer)
 			var plan_id := str(quote.selected_plan)
+			if plan_id == "care" and not care_case_reason(offer).is_empty():
+				state = previous_state; _assignments = previous_assignments; _machine = previous_machine; _machine_key = previous_machine_key
+				return false
 			var quoted_fee := int(quote.quoted_fee)
 			var duplicate_decline := false
 			for decision in state.quote_decisions:
@@ -2818,6 +2834,24 @@ func team_work_duration(id: String) -> float:
 	if "teamdesk" in state.equipment: duration -= 2.0
 	return maxf(3.0, duration)
 
+func team_work_effects(id: String) -> Dictionary:
+	# Lock attribution with the same installed equipment used to price this job.
+	# Later purchases must not claim a saving on work already queued or started.
+	var effects := {}
+	if colleague_role(id) not in ["aya", "ren"]: return effects
+	if "monitor" in state.get("equipment", []):
+		var duration := team_work_duration(id)
+		var without_monitor := 15.0 if colleague_role(id) == "ren" else 8.0
+		if "backup" in state.equipment: without_monitor -= 1.0
+		if "teamdesk" in state.equipment: without_monitor -= 2.0
+		without_monitor = maxf(3.0, without_monitor)
+		if without_monitor > duration:
+			effects.monitor = {"base_minutes":without_monitor,"actual_minutes":duration,"saved_minutes":without_monitor-duration}
+	return effects
+
+func equipment_work_id(member_id: String) -> String:
+	return "%s:%d:%d" % [member_id, Time.get_ticks_usec(), int(state.day)]
+
 func operations_assign(member_id: String, contract_id: String, target_index: int) -> bool:
 	return OPERATIONS.assign(self,member_id,contract_id,target_index)
 
@@ -2910,6 +2944,8 @@ func dispatch_enqueue(member_id: String, contract_id: String, target_index: int)
 	if _dispatch_duplicate(member_id,"normal",contract_id,target_index): return false
 	var duration:=team_work_duration(member_id)
 	var item: Dictionary={"kind":"normal","status":"queued","member_id":member_id,"role":colleague_role(member_id),"contract_id":contract_id,"target_index":target_index,"remaining":duration,"total":duration,"work_minutes":duration,"work_minutes_accounted":0.0,"queued_day":int(state.day)}
+	item.equipment_effects = team_work_effects(member_id)
+	item.equipment_work_id = equipment_work_id(member_id)
 	if not _dispatch_reason(item,false).is_empty(): return false
 	item.id=_dispatch_id(member_id,item)
 	var previous:=state.duplicate(true); var before:=_assignments.duplicate(true); var machine=_machine; var key:=_machine_key
@@ -2963,6 +2999,10 @@ func dispatch_start(member_id: String, job_id: String) -> bool:
 	if str(active.get("kind","normal"))=="maintenance": active.maintenance_job_id=str(active.get("maintenance_job_id",active.get("id","")))
 	active.id=job_id; active.member_id=member_id; active.kind=str(item.get("kind","normal")); active.role=colleague_role(member_id)
 	active.total=float(item.total); active.remaining=float(item.remaining); active.work_minutes_accounted=float(item.get("work_minutes_accounted",0.0))
+	# The queue owns the original duration and its provenance, including an empty
+	# snapshot for a job reserved before equipment installation or in an old save.
+	active.equipment_effects = item.get("equipment_effects", {}).duplicate(true) if item.get("equipment_effects", {}) is Dictionary else {}
+	active.equipment_work_id = str(item.get("equipment_work_id", ""))
 	if active.kind=="normal": active.work_minutes=float(item.get("work_minutes",item.total))
 	else: active.minutes=float(item.get("minutes",item.total)); active.targets=_maintenance_targets_for(str(item.client)).duplicate(true)
 	active.erase("work_started_at"); active.erase("work_started_day"); active.erase("segment_minutes")
@@ -3053,6 +3093,8 @@ func assign_colleague(id: String) -> void:
 			var config_path := str(machine_state.get("config_path", ""))
 			if files is Dictionary: config_before = str(files.get(config_path, ""))
 	_assignments[id] = {"status":"working","remaining":duration,"total":duration,"work_minutes":duration,"work_minutes_accounted":0.0,"revision":int(state.get("revision",0)),"chapter":int(state.get("chapter",0)),"contract_id":"","target_index":int(state.get("target_index",0)),"vm_key":_vm_key(),"role":colleague_role(id),"result_path":colleague_result_path(id),"config_before":config_before,"phase":UI_COPY.copy("care_maintenance_working", "working"),"result":""}
+	_assignments[id].equipment_effects = team_work_effects(id)
+	_assignments[id].equipment_work_id = equipment_work_id(id)
 	state.assignments = _assignments.duplicate(true)
 	if not save_game():
 		state = previous_state; _assignments = previous_assignments
@@ -3060,7 +3102,7 @@ func assign_colleague(id: String) -> void:
 	changed.emit()
 
 func equipment_catalog() -> Array:
-	var items: Array = [{"id":"backup","title":"バックアップ装置","price":3000,"effect":UI_COPY.copy("staffing_effect_backup"),"description":"復旧用の退避・確認をすばやく進める","physical":"共有ラックに設置"},{"id":"monitor","title":"監視モニター","price":4000,"effect":UI_COPY.copy("staffing_effect_monitor"),"description":"設置効果：診断確認時間短縮・保守枠増加","physical":"復旧担当の机に設置"},{"id":"plant","title":"観葉植物","price":1000,"effect":"オフィス環境改善","description":"作業速度影響なし（常設装飾）","physical":"自由に配置"},{"id":"workstation","title":"高速ワークステーション","price":8000,"effect":"設定の保存・編集を8分から6分に短縮","description":"自席PC編集作業短縮","physical":"自席PCを更新"},{"id":"diagnostic","title":"診断コンソール","price":12000,"effect":"検証を6分から4分に短縮","description":"実測結果の整理を効率化する","physical":"自席PCに診断画面を追加"},{"id":"teamdesk","title":"チーム作業デスク","price":16000,"effect":UI_COPY.copy("staffing_effect_teamdesk"),"description":"設置効果：共同作業時間短縮・保守枠増加","physical":"チーム机を拡張"},{"id":"annexdesk_a","title":UI_COPY.copy("expansion_desk_a"),"price":10000,"effect":UI_COPY.copy("expansion_desk_effect"),"description":UI_COPY.copy("expansion_desk_location"),"physical":UI_COPY.copy("expansion_desk_location")},{"id":"annexdesk_b","title":UI_COPY.copy("expansion_desk_b"),"price":10000,"effect":UI_COPY.copy("expansion_desk_effect"),"description":UI_COPY.copy("expansion_desk_location"),"physical":UI_COPY.copy("expansion_desk_location")}]
+	var items: Array = [{"id":"backup","title":"バックアップ装置","price":3000,"effect":UI_COPY.copy("staffing_effect_backup"),"description":"復旧用の退避・確認をすばやく進める","physical":"共有ラックに設置"},{"id":"monitor","title":"監視モニター","price":4000,"effect":UI_COPY.copy("staffing_effect_monitor"),"description":"設置効果：診断確認時間短縮・保守枠増加","physical":"復旧担当の机に設置"},{"id":"plant","title":"観葉植物","price":1000,"effect":"常設の装飾（作業速度への影響なし）","description":"作業速度影響なし（常設装飾）","physical":"自由に配置"},{"id":"workstation","title":"高速ワークステーション","price":8000,"effect":"設定の保存・編集を8分から6分に短縮","description":"自席PC編集作業短縮","physical":"自席PCを更新"},{"id":"diagnostic","title":"診断コンソール","price":12000,"effect":"検証を6分から4分に短縮・個別の計測 -1分","description":"実測結果の整理を効率化する","physical":"自席PCに診断画面を追加"},{"id":"teamdesk","title":"チーム作業デスク","price":16000,"effect":UI_COPY.copy("staffing_effect_teamdesk"),"description":"設置効果：共同作業時間短縮・保守枠増加","physical":"チーム机を拡張"},{"id":"annexdesk_a","title":UI_COPY.copy("expansion_desk_a"),"price":10000,"effect":UI_COPY.copy("expansion_desk_effect"),"description":UI_COPY.copy("expansion_desk_location"),"physical":UI_COPY.copy("expansion_desk_location")},{"id":"annexdesk_b","title":UI_COPY.copy("expansion_desk_b"),"price":10000,"effect":UI_COPY.copy("expansion_desk_effect"),"description":UI_COPY.copy("expansion_desk_location"),"physical":UI_COPY.copy("expansion_desk_location")}]
 	for item in items:
 		item.physical = UI_COPY.copy("equipment_monitor_fixed" if str(item.id)=="monitor" else "equipment_free_placement")
 		if str(item.id) in ["annexdesk_a","annexdesk_b"]: item.description = item.physical
