@@ -6,6 +6,8 @@ class_name OSBusinessWorkspace
 
 const UI = preload("res://scripts/ui_theme.gd")
 const Glyph = preload("res://scripts/service_glyph.gd")
+const SOURCE_FLOW = preload("res://scripts/business_source_flow.gd")
+const BUSINESS = preload("res://scripts/business_workspace.gd")
 
 const PURPLE := Color("714b67")
 const PURPLE_DARK := Color("51364c")
@@ -25,37 +27,14 @@ static func _external_storage(payload: Dictionary, data: Dictionary) -> Dictiona
 	var value: Variant = payload.get("external_storage", data.get("external_storage", {}))
 	return value if value is Dictionary else {}
 
-static func _storage_copy(key: String, fallback: String = "") -> String:
-	return UI.copy(key, fallback)
-
-static func _storage_error_key(storage: Dictionary) -> String:
-	match str(storage.get("error", "")):
-		"storage_denied": return "branch_storage_denied"
-		"missing_file": return "branch_storage_missing"
-		"provider_unavailable": return "branch_storage_unavailable"
-	return "branch_storage_unavailable"
-
-static func _storage_banner(d, parent: Node, storage: Dictionary) -> bool:
-	if not bool(storage.get("enabled", false)) or bool(storage.get("ok", false)): return false
-	var failed := not bool(storage.get("ok", false))
-	var frame := PanelContainer.new()
-	frame.name = "BusinessExternalStorage"
-	frame.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	frame.add_theme_stylebox_override("panel", UI.style(Color("fff1f0") if failed else Color("eef7f1"), Color("d84a43") if failed else Color("8abf9a"), 8, 8, 1))
-	parent.add_child(frame)
-	var body := VBoxContainer.new(); body.add_theme_constant_override("separation", 3); frame.add_child(body)
-	var title := _storage_copy(_storage_error_key(storage), "External storage unavailable") if failed else _storage_copy("branch_storage_label", "External storage")
-	_label(d, body, title, 12, RED if failed else INK)
-	if not failed:
-		var host := str(storage.get("host", "")); var share := str(storage.get("share", ""))
-		if not host.is_empty() and not share.is_empty(): _label(d, body, "SMB/CIFS  ·  //%s/%s" % [host, share], 11, MUTED)
-		var path := str(storage.get("path", ""))
-		if not path.is_empty(): _label(d, body, path, 11, MUTED)
-	else:
-		var code := int(storage.get("code", 0))
-		if code > 0: _label(d, body, "HTTP %d" % code, 11, MUTED)
-	_button(d, body, copy("refresh", "Refresh"), "BusinessStorageRefresh", func(): d._browse_url(d.browser_url, false))
-	return true
+static func _storage_banner(d, parent: Node, storage: Dictionary, view: String = "sales", response: String = "") -> bool:
+	# Keep the historical return contract: true means the source/error state is
+	# already visible, so the generic error card should not duplicate it.
+	var projection: Dictionary = SOURCE_FLOW.project(view, response)
+	if projection.get("host", "").is_empty() and not storage.is_empty(): projection.host = str(storage.get("host", ""))
+	if projection.get("share", "").is_empty() and not storage.is_empty(): projection.share = str(storage.get("share", ""))
+	SOURCE_FLOW.render(d, parent, projection, func(): d._browse_url(d.browser_url, false))
+	return bool(projection.get("visible", false)) and str(projection.get("status", "")) in ["unavailable", "missing", "malformed"]
 
 static func _customer_source(data: Dictionary) -> String:
 	for key in ["customers_source", "customer_source", "customers_path"]:
@@ -240,9 +219,14 @@ static func render(d, parent: VBoxContainer, url: String, response: String) -> v
 	var payload := _payload(response)
 	var data := _data(payload)
 	var external_storage := _external_storage(payload, data)
-	if bool(external_storage.get("enabled", false)) and not str(external_storage.get("path", "")).is_empty():
-		data = data.duplicate(true)
-		data["source"] = str(external_storage.get("path", ""))
+	data = data.duplicate(true)
+	data["external_storage"] = external_storage.duplicate(true)
+	if view == "sales":
+		data["source"] = str(external_storage.get("path", BUSINESS.ORDERS_FILE)) if bool(external_storage.get("enabled", false)) and not str(external_storage.get("path", "")).is_empty() else BUSINESS.ORDERS_FILE
+	elif view == "customers":
+		data["source"] = _customer_source(data)
+	else:
+		data["source"] = str(data.get("ledger_source", data.get("source", BUSINESS.LEDGER_FILE)))
 	if view == "sales" and bool(payload.get("ok", false)) and _find_order(_orders(data), str(state.get("selected_order", ""))).is_empty(): state.selected_order = ""
 	if bool(payload.get("transport_error", false)):
 		_transport_error(d, parent, payload, response, url)
@@ -262,9 +246,9 @@ static func render(d, parent: VBoxContainer, url: String, response: String) -> v
 	var host := _label(d, head, "intranet.client.test", 12, MUTED); host.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	var body := VBoxContainer.new(); body.size_flags_vertical = Control.SIZE_EXPAND_FILL; body.add_theme_constant_override("separation", 0); page.add_child(body)
 	var search := _toolbar(d, body, state, view)
-	var storage_error_shown: bool = _storage_banner(d, body, _external_storage(payload, data))
+	var storage_error_shown: bool = _storage_banner(d, body, _external_storage(payload, data), view, response)
 	if not bool(payload.get("ok", false)):
-		if not storage_error_shown: _error(d, body, payload, response)
+		if not storage_error_shown and not response.strip_edges().is_empty(): _error(d, body, payload, response)
 		return
 	state["revision"] = str(payload.get("revision",""))
 	state["can_write"] = bool(payload.get("capabilities",{}).get("write",false))
@@ -443,6 +427,7 @@ static func _customers(d, parent: Node, data: Dictionary, state: Dictionary, sea
 	var empty := _label(d,parent,"該当する顧客はありません。",14,MUTED)
 	search.text_changed.connect(func(value): state.query=value; _filter(rows,value,empty,count); _persist(d))
 	_filter(rows,str(state.get("query","")),empty,count)
+	_source(d,parent,data,"",BUSINESS.CUSTOMERS_FILE)
 
 static func _crud_form(d, parent: Node, data: Dictionary, state: Dictionary) -> void:
 	var action := str(state.form)
