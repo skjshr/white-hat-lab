@@ -2,6 +2,8 @@ extends RefCounted
 const UI = preload("res://scripts/ui_theme.gd")
 const CASES = preload("res://scripts/case_catalog.gd")
 const CLOSEOUT = preload("res://scripts/career_closeout_panel.gd")
+const MAIL_THREAD = preload("res://scripts/mail_delivery_thread.gd")
+const MAIL_REQUEST = preload("res://scripts/mail_request_record.gd")
 const INK := UI.INK
 const MUTED := UI.MUTED
 const TEAL := UI.GREEN
@@ -37,19 +39,11 @@ static func _member_name(g, id: String) -> String:
 static func _personalize(g, text: String) -> String:
 	return str(g.personalize(text)) if g != null and g.has_method("personalize") else text
 
-static var _mail_cache: Dictionary = {}
-
 static func _mail_entry(id: String) -> Dictionary:
-	if _mail_cache.is_empty():
-		var file := FileAccess.open("res://content/mail.json", FileAccess.READ)
-		if file != null:
-			var parsed = JSON.parse_string(file.get_as_text())
-			if parsed is Dictionary and parsed.get("entries", {}) is Dictionary:
-				_mail_cache = parsed.get("entries", {})
-	var entry = _mail_cache.get(id, {})
-	return entry if entry is Dictionary else {}
+	return MAIL_REQUEST.entry(id)
 
 static func _mail_for(m: Dictionary, g = null) -> Dictionary:
+	if m.get("request_mail",{}) is Dictionary and not m.get("request_mail",{}).is_empty(): return m.request_mail.duplicate(true)
 	if m.has("maintenance_incident_id"):
 		return {"company":str(m.get("client","")),"subject":str(m.get("title","")),"body":str(m.get("brief","")),"sender":str(m.get("client",""))}
 	var ids: Array[String] = []
@@ -105,9 +99,10 @@ static func _history_items(g) -> Array:
 		items.append({"item": display_item, "index": index})
 	return items
 
-static func _mail_row(d, list: VBoxContainer, sender: String, subject: String, snippet: String, date: String, callback: Callable, selected_item := true) -> void:
+static func _mail_row(d, list: VBoxContainer, sender: String, subject: String, snippet: String, date: String, callback: Callable, selected_item := true, id := "") -> void:
 	var compact: bool=not bool(d.widgets.mail.get("wide",false))
-	var button: Button = d._button("", func(): d.widgets.mail["selected_subject"]=subject; callback.call()); button.custom_minimum_size.y=(62 if compact else 78)*float(d.game.settings.get("text_scale",1.0)); button.size_flags_horizontal=Control.SIZE_EXPAND_FILL
+	var button: Button = d._button("", func(): d.widgets.mail["selected_subject"]=subject; d.widgets.mail.selected_id=id; callback.call()); button.custom_minimum_size.y=(62 if compact else 78)*float(d.game.settings.get("text_scale",1.0)); button.size_flags_horizontal=Control.SIZE_EXPAND_FILL
+	if not id.is_empty(): button.name=("MailHistory_" if d.widgets.mail.get("folder","inbox")=="history" else "MailContract_")+id.validate_node_name()
 	if not bool(d.game.state.get("career_mode",false)) and d.widgets.mail.get("folder","inbox")=="inbox": button.name="GuideMailMessage"
 	var selected: bool=selected_item and bool(d.widgets.mail.get("reading",false)) and str(d.widgets.mail.get("selected_subject",""))==subject
 	var row_style:=UI.style(Color("cfe4fa") if selected else Color.WHITE,Color("edebe9"),10,8,0); row_style.set_border_width_all(0); row_style.border_width_bottom=1
@@ -147,6 +142,7 @@ static func _switch_contract_from_mail(d, id: String) -> void:
 				selected_subject = str(item.get("title", ""))
 				break
 		d.widgets.mail.selected_subject = selected_subject
+		d.widgets.mail.selected_id = id
 		d.widgets.mail.reading = not selected_subject.is_empty()
 		refresh_mail(d)
 
@@ -228,6 +224,7 @@ static func build_mail(d, parent: VBoxContainer) -> void:
 	d.widgets.mail.folder = "history" if str(saved_mail.get("folder", "inbox")) == "history" else "inbox"
 	d.widgets.mail.reading = bool(saved_mail.get("reading", false))
 	d.widgets.mail.selected_subject = str(saved_mail.get("selected_subject", ""))
+	d.widgets.mail.selected_id = str(saved_mail.get("selected_id", ""))
 	d.widgets.mail.history_index = int(saved_mail.get("history_index", 0))
 	d.widgets.mail.single_pane = bool(saved_mail.get("single_pane", false))
 	d.widgets.mail.folders_hidden = bool(saved_mail.get("folders_hidden", false))
@@ -290,7 +287,9 @@ static func refresh_mail(d) -> void:
 				var history_entry: Dictionary = history_entries_for_selection[history_position]
 				var history_item: Dictionary = history_entry.item
 				var history_mail: Dictionary = _mail_for(history_item)
-				if selected_subject == str(history_mail.get("subject", history_item.get("title", ""))):
+				if str(w.get("selected_id","")) == str(history_item.get("id","")) and not str(w.get("selected_id","" )).is_empty():
+					matching_index=history_position; break
+				if str(w.get("selected_id","" )).is_empty() and selected_subject == str(history_mail.get("subject", history_item.get("title", ""))):
 					if matching_index < 0: matching_index = history_position
 					if history_position == remembered_index:
 						matching_index = history_position
@@ -298,6 +297,7 @@ static func refresh_mail(d) -> void:
 			if matching_index >= 0:
 				selection_valid = true
 				w.history_index = matching_index
+				w.selected_id = str(history_entries_for_selection[matching_index].item.get("id",""))
 		else:
 			for queue_item in queue:
 				var queue_subject: String = str(queue_item.get("title", ""))
@@ -306,6 +306,7 @@ static func refresh_mail(d) -> void:
 		if not selection_valid:
 			w.reading = false
 			w.selected_subject = ""
+			w.selected_id = ""
 			reading = false
 			if is_instance_valid(w.get("paper", null)): w.paper.visible = wide
 			list.visible = true
@@ -325,18 +326,24 @@ static func refresh_mail(d) -> void:
 			var queue_context: Dictionary = g.state.get("contract_contexts", {}).get(queue_id, {})
 			var queue_contract: Dictionary = queue_context.get("contract", {})
 			var queue_mail := _mail_for(queue_contract)
+			var saved_reply: Dictionary=MAIL_THREAD.project(g.state,MAIL_THREAD.delivery_for(g.state,queue_id))
+			if bool(saved_reply.completed): queue_snippet=str(saved_reply.body).replace("\n"," "); queue_status="返信 · "+queue_status
 			var queue_haystack := (queue_client + " " + queue_subject + " " + queue_snippet + " " + str(queue_mail.get("sender", "")) + " " + _mail_body(queue_mail) + " " + str(queue_contract.get("brief", ""))).to_lower()
 			if query.is_empty() or queue_haystack.contains(query):
-				_mail_row(d, list, queue_client, queue_subject, queue_snippet, queue_status, _switch_contract_from_mail.bind(d, queue_id), bool(item.get("active", false)))
+				_mail_row(d, list, queue_client, queue_subject, queue_snippet, queue_status, _switch_contract_from_mail.bind(d, queue_id), bool(item.get("active", false)),queue_id)
 		var haystack := (str(mail.get("company",m.client))+" "+str(mail.get("sender",""))+" "+str(mail.get("subject",m.title))+" "+mail_body).to_lower()
 		if queue.is_empty() and (query.is_empty() or haystack.contains(query)):
 			_mail_row(d,list,str(mail.get("company",m.client)),str(mail.get("subject",m.title)),mail_body,"納品済み" if g.current_done() else "対応中" if g.state.accepted else "新着",func(): w.reading=true; refresh_mail(d))
 	if w.get("folder","inbox") == "history":
 		var history_items_for_list := _history_items(g)
 		for filtered_index in history_items_for_list.size():
-			var item: Dictionary = history_items_for_list[filtered_index].item; var history_mail := _mail_for(item); var history_body := _mail_body(history_mail); var history_text := str(history_mail.get("company",item.get("client",""))+" "+str(history_mail.get("sender",""))+" "+str(history_mail.get("subject",item.get("title","完了した依頼")))+" "+history_body); if not query.is_empty() and not history_text.to_lower().contains(query): continue
+			var item: Dictionary = history_items_for_list[filtered_index].item; var history_mail := _mail_for(item); var history_body := _mail_body(history_mail)
 			var outcome := "中止・未完了" if str(item.get("kind", "")) == "cancellation" else "納品済み"
-			_mail_row(d,list,str(history_mail.get("company",item.get("client",""))),str(history_mail.get("subject",item.get("title",""))),outcome + " · " + history_body,outcome + " · DAY %02d" % int(item.get("day",0)),func(): w.history_index=filtered_index; w.reading=true; refresh_mail(d), filtered_index == int(w.get("history_index", -1)))
+			var saved_reply := MAIL_THREAD.project(g.state,item)
+			var snippet: String=str(saved_reply.body) if bool(saved_reply.completed) else outcome+" · "+history_body
+			var history_text := str(history_mail.get("company",item.get("client",""))+" "+str(history_mail.get("sender",""))+" "+str(history_mail.get("subject",item.get("title","完了した依頼")))+" "+history_body+" "+snippet)
+			if not query.is_empty() and not history_text.to_lower().contains(query): continue
+			_mail_row(d,list,str(history_mail.get("company",item.get("client",""))),str(history_mail.get("subject",item.get("title",""))),snippet,outcome + " · DAY %02d" % int(item.get("day",0)),func(): w.history_index=filtered_index; w.reading=true; refresh_mail(d), filtered_index == int(w.get("history_index", -1)),str(item.get("id","")))
 	if not reading:
 		if list.get_child_count() == 1:
 			var empty: VBoxContainer=d._box(list,12); empty.name = "MailNoResults"; empty.add_child(d._icon("mail",80)); empty.add_child(d._label("メールなし" if query.is_empty() else "該当メールなし",14,MUTED))
@@ -345,7 +352,8 @@ static func refresh_mail(d) -> void:
 			var mark: TextureRect=d._icon("mail",72); mark.size_flags_horizontal=Control.SIZE_SHRINK_CENTER; empty.add_child(mark)
 			var hint: Label=d._label(UI.copy("fidelity_mail_select"),16,MUTED); hint.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER; empty.add_child(hint)
 		return
-	var navigation: HBoxContainer=d._row(body,8); navigation.add_child(d._tool_button("back","一覧へ戻る",func(): w.reading=false; refresh_mail(d))); navigation.add_child(d._label("受信トレイ" if w.get("folder","inbox")=="inbox" else "受注履歴",11,MUTED))
+	var navigation: HBoxContainer=d._row(body,8)
+	var back: Button=d._tool_button("back","一覧へ戻る",func(): w.reading=false; refresh_mail(d)); back.name="MailBack"; navigation.add_child(back); navigation.add_child(d._label("受信トレイ" if w.get("folder","inbox")=="inbox" else "受注履歴",11,MUTED))
 	if w.get("folder","inbox") == "history":
 		
 		var history_items := _history_items(g)
@@ -354,6 +362,10 @@ static func refresh_mail(d) -> void:
 			var index := clampi(int(w.get("history_index", history_items.size()-1)), 0, history_items.size()-1); w.history_index = index
 			var item: Dictionary = history_items[index].item; var history_mail := _mail_for(item); var history_body := _mail_body(history_mail)
 			var history_content: VBoxContainer=d._box(body,14); history_content.name="MailHistoryContent"; history_content.size_flags_horizontal=Control.SIZE_SHRINK_BEGIN; history_content.custom_maximum_size.x=_mail_reading_width(d,w,g)
+			if str(item.get("kind","delivery")) == "delivery":
+				history_content.size_flags_horizontal=Control.SIZE_EXPAND_FILL
+				MAIL_THREAD.build(d,history_content,history_mail,item,footer)
+				history_content.add_child(d._button("受信トレイへ",func(): w.folder="inbox"; w.reading=false; refresh_mail(d))); return
 			history_content.add_child(d._label(str(history_mail.get("subject",item.get("title","完了した依頼"))),20,INK))
 			history_content.add_child(d._label("%s  <%s>  ·  DAY %02d" % [str(history_mail.get("sender",item.get("client",m.client))),str(history_mail.get("company",item.get("client",m.client))),int(item.get("day",0))],15,BLUE))
 			history_content.add_child(HSeparator.new())
@@ -372,6 +384,11 @@ static func refresh_mail(d) -> void:
 	var reading_content: VBoxContainer=d._box(body,8); reading_content.name="MailReadingContent"
 	reading_content.size_flags_horizontal=Control.SIZE_SHRINK_BEGIN
 	reading_content.custom_maximum_size.x=_mail_reading_width(d,w,g)
+	if g.current_done():
+		var id: String = str(g.state.current_contract_id) if bool(g.state.get("career_mode",false)) else str(m.get("id",""))
+		reading_content.size_flags_horizontal=Control.SIZE_EXPAND_FILL
+		MAIL_THREAD.build(d,reading_content,mail,MAIL_THREAD.delivery_for(g.state,id),footer)
+		footer.add_child(d._label("✓ 納品済み",15,TEAL)); return
 	reading_content.add_child(d._label(str(mail.get("subject",m.title)),20,INK))
 	var sender_row = d._row(reading_content,12)
 	var avatar := PanelContainer.new(); avatar.custom_minimum_size=Vector2(34,34); avatar.add_theme_stylebox_override("panel",UI.style(Color("b7d7d3"),Color.TRANSPARENT,8,4,20)); sender_row.add_child(avatar)

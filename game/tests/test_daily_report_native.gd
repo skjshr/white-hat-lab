@@ -118,7 +118,7 @@ func run() -> void:
 	if not await route("verify") or not await press("DiagnosticValidate") or not expect(game.can_deliver(), "current real evidence enables delivery"): finish(); return
 	if not await route("receipt") or not await press("GuideDeliver"): finish(); return
 	var receipt: Dictionary = game.completion_receipt()
-	if not receipt_effect(receipt): finish(); return
+	if not await receipt_effect(receipt): finish(); return
 	if not await press("ReceiptFinanceTab") or not await press("ReceiptInvoice") or not await press("BillingPost"): finish(); return
 	if not expect(game.company_invoices().any(func(row): return str(row.id) == str(receipt.invoice_id) and str(row.status) == "paid"), "accepted daily-report work reaches actual paid invoice"): finish(); return
 	await capture("05-daily-work-paid")

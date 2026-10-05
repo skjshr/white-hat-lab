@@ -47,7 +47,8 @@ func run() -> void:
 	if not failures.is_empty():quit(1);return
 	game.set_process(false);ui._new_game();game.choose_strategy("operations");game.accept_mission()
 	game.set_settings({"resolution":"960x600" if narrow else "1280x720","window_mode":"windowed","text_scale":1.3 if narrow else 1.0,"volume":0},false)
-	root.size=Vector2i(960,600) if narrow else Vector2i(1280,720)
+	root.get_node("Graphics").apply_settings(game.settings);await frames()
+	check(not narrow or is_equal_approx(root.get_visible_rect().size.x,960),"narrow fidelity check uses actual small-window coordinates")
 	ui._set_text_scale(1.3 if narrow else 1.0)
 	ui.open_panel("terminal");await frames();pc=ui.desktop
 	pc._run_command("ssh client");await frames()

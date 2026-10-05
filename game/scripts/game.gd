@@ -2784,6 +2784,9 @@ func deliver() -> bool:
 	state.history[-1].rating = str(status.quality)
 	state.history[-1].chapter = _current_chapter()
 	state.history[-1].work_family = str(delivered_case.get("work_family", COMPANY_CYCLE.FAMILIES[_current_chapter()]))
+	# Keep this delivery's existing observations after dispatch contexts retire.
+	state.history[-1].delivery_results = state.last_receipt.delivery_results.duplicate(true)
+	state.history[-1].request_mail = preload("res://scripts/mail_request_record.gd").capture(mission(),str(state.contract.get("case_id","")),str(mission().get("id","" )).begins_with("service-4-case-") and int(_vm().state.get("edr_model_version",1))>=2)
 	state.clients[id] = {"title":mission().title,"debrief":mission().debrief,"config":_vm().state.get("applied", {}).duplicate(true),"evidence":mission().evidence.duplicate(true),"checks":state.checks.duplicate(true)}
 	COMPANY_CYCLE.record_delivery(self, id, state.last_receipt)
 	if state.get("career_mode", false): _sync_contract_context(); state.contract_contexts[id].completed = true; _make_offers()

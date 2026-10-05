@@ -607,6 +607,7 @@ func open_panel(kind: String) -> void:
 			var return_label := UI.copy("board_list") if desktop_return_kind == "board" else _panel_title(desktop_return_kind)
 			desktop.configure_return(return_label if not desktop_return_kind.is_empty() else "")
 		desktop.company_requested.connect(func(): open_panel("company"))
+		desktop.customer_requested.connect(_open_mail_customer)
 		desktop.staffing_requested.connect(func(): open_panel("staffing"))
 		desktop.contracts_requested.connect(func(): open_panel("board"))
 		desktop.next_task_requested.connect(next_task_guide.locate_task)
@@ -1313,6 +1314,14 @@ func _open_cycle_route(route: String) -> void:
 			_scroll_company_operations()
 		"shop": open_panel("shop")
 		_: board_selected_id = ""; open_panel("sales")
+
+func _open_mail_customer(client: String) -> void:
+	var g := _game()
+	if g == null: return
+	for item in g.company_cycle_view().get("opportunities",[]):
+		if str(item.get("client","")) == client:
+			set_meta("cycle_customer",str(item.id)); _select_company_view("overview"); return
+	if is_instance_valid(desktop): desktop._notify("顧客相談の記録なし")
 
 func _scroll_company_operations() -> void:
 	await get_tree().process_frame

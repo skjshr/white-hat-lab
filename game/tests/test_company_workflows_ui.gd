@@ -122,7 +122,8 @@ func run() -> void:
 	check(game.new_game() and game.choose_strategy("advisory") and game.start_free_career(), "career fixture")
 	game.state.cash = 100000
 	game.set_settings({"resolution":"960x600" if narrow else "1440x900", "window_mode":"windowed", "text_scale":1.3 if narrow else 1.0, "volume":0}, false)
-	root.size = Vector2i(960,600) if narrow else Vector2i(1440,900)
+	root.get_node("Graphics").apply_settings(game.settings); await frames()
+	check(not narrow or is_equal_approx(root.get_visible_rect().size.x,960), "management fixture uses actual small-window coordinates")
 	ui = load("res://scripts/interface.gd").new(); root.add_child(ui); await frames()
 	ui.controls.menu.hide(); ui.guided_intro.skip(); ui._set_text_scale(1.3 if narrow else 1.0)
 	await open_management("staffing")

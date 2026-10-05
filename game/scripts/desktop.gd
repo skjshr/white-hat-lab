@@ -2,6 +2,7 @@ extends Control
 signal close_requested
 signal return_requested
 signal company_requested
+signal customer_requested(client: String)
 signal staffing_requested
 signal contracts_requested
 signal sales_requested
@@ -879,6 +880,7 @@ func _save_session(persist: bool = true) -> bool:
 		saved_mail_ui["folder"] = str(live_mail.get("folder", "inbox"))
 		saved_mail_ui["reading"] = bool(live_mail.get("reading", false))
 		saved_mail_ui["selected_subject"] = str(live_mail.get("selected_subject", ""))
+		saved_mail_ui["selected_id"] = str(live_mail.get("selected_id", ""))
 		saved_mail_ui["history_index"] = int(live_mail.get("history_index", 0))
 		saved_mail_ui["single_pane"] = bool(live_mail.get("single_pane", false))
 		saved_mail_ui["folders_hidden"] = bool(live_mail.get("folders_hidden", false))
