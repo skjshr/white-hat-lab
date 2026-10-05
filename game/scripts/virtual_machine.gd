@@ -231,7 +231,10 @@ func setup(chapter: int, saved: Dictionary = {}, scenario: Dictionary = {}) -> v
 		state.fs["/var/log/evidence.log"] = state.evidence_original
 	if _chapter == 4:
 		for probe in _active_probes():
-			if str(probe.get("id", "")) == "evidence-log": probe.expectation = str(state.get("evidence_original", EVIDENCE)).sha256_text()
+			if str(probe.get("id", "")) == "evidence-log":
+				var expected := str(state.get("evidence_original", EVIDENCE)).sha256_text()
+				if str(probe.get("expectation", "")) != expected: _clear_probe_measurement(probe)
+				probe.expectation = expected
 	state.fs[OPERATOR_HOME+"/README.txt"] = "HOST " + state.host + "\nCONFIG " + state.config_path + "\nSERVICE " + state.service + "\n\n" + _reference()
 	if _chapter == 5:
 		PortalStorage.ensure(self)
@@ -990,7 +993,7 @@ func _identity_add_business_probe(mfa_required: bool) -> void:
 func _clear_probe_measurement(probe: Dictionary) -> void:
 	# A v2 contract change must not inherit a PASS from an older command or
 	# expectation.  Keep observations intact; only invalidate the measurement.
-	for field in ["recorded", "passed", "fresh", "result", "fingerprint", "initial_result"]:
+	for field in ["recorded", "passed", "fresh", "result", "fingerprint", "fingerprint_kind", "initial_result"]:
 		probe.erase(field)
 
 func _normalize_transport_probes() -> void:
@@ -1077,6 +1080,45 @@ func _identity_actual_probe_user(command: String, output: String) -> String:
 	if not password.is_empty() and password != "<credential>" and _identity_valid_password(password): return "former" if path.begins_with("/former/") else "current"
 	return ""
 
+func _local_file_probe_args(probe: Dictionary) -> Array[String]:
+	var args := _tokens(str(probe.get("command", "")).strip_edges())
+	if not args.is_empty() and args[0] == "sudo": args.remove_at(0)
+	if args.size() == 2 and args[0] == "sha256sum": return args
+	var empty: Array[String] = []
+	return empty
+
+func _local_file_probe_fingerprint(probe: Dictionary) -> String:
+	var args := _local_file_probe_args(probe)
+	if args.is_empty(): return ""
+	var path := _path(args[1]); var exists: bool = state.fs.has(path)
+	return JSON.stringify({"kind":"local-file-v1", "host":state.host, "chapter":_chapter,
+		"command":str(probe.get("command", "")), "expectation":str(probe.get("expectation", "")),
+		"path":path, "exists":exists, "sha256":str(state.fs[path]).sha256_text() if exists else ""}, "", true).sha256_text()
+
+func _probe_fingerprint(probe: Dictionary) -> String:
+	if probe.has("fingerprint_kind"):
+		if str(probe.fingerprint_kind) != "local-file-v1": return ""
+		return _local_file_probe_fingerprint(probe)
+	# Unmarked legacy evidence remains conservative; rendering never upgrades it.
+	return _fingerprint()
+
+func _probe_is_fresh(probe: Dictionary) -> bool:
+	var saved := str(probe.get("fingerprint", ""))
+	return bool(probe.get("recorded", false)) and not saved.is_empty() and saved == _probe_fingerprint(probe)
+
+func _stamp_probe_fingerprint(probe: Dictionary, output: String, whole_vm: String) -> void:
+	probe.erase("fingerprint_kind")
+	probe.fingerprint = whole_vm
+	var args := _local_file_probe_args(probe)
+	if args.is_empty() or not bool(state.connected): return
+	var path := _path(args[1])
+	var actual := str(state.fs[path]).sha256_text() + "  " + args[1] if state.fs.has(path) else "sha256sum: file missing"
+	if output != actual: return
+	# Capture dependencies only after a real local response, including absence.
+	# Service/ACL checks keep their own whole-VM measurement requirement.
+	probe.fingerprint_kind = "local-file-v1"
+	probe.fingerprint = _local_file_probe_fingerprint(probe)
+
 func _record_command(command: String, output: String, before: String, after: String) -> void:
 	if not state.has("observations") or not state.observations is Array: state.observations = []
 	var observation: Dictionary = {"command":_identity_redact_command(command),"output":output,"before":before,"fingerprint":after,"changed":before != after}
@@ -1090,7 +1132,7 @@ func _record_command(command: String, output: String, before: String, after: Str
 		if _normalize_command(str(probe.get("command", ""))) == normalized:
 			matched_probe = str(probe.get("id", ""))
 			if not bool(probe.get("recorded", false)): probe.initial_result = output
-			probe.result = output; probe.recorded = true; probe.fingerprint = after; probe.fresh = true; probe.passed = _probe_passes(output, str(probe.get("expectation", "")))
+			probe.result = output; probe.recorded = true; _stamp_probe_fingerprint(probe, output, after); probe.fresh = true; probe.passed = _probe_passes(output, str(probe.get("expectation", "")))
 			matched_expectation = str(probe.get("expectation", "")); matched_passed = bool(probe.passed)
 	# A real credential-bearing login or password-update command is evidence for
 	# the corresponding user probe even though its secret-bearing command cannot
@@ -1104,7 +1146,7 @@ func _record_command(command: String, output: String, before: String, after: Str
 			if not identity_user.is_empty() and probe_user == identity_user and probe_id in ["current-mfa", "former-login"]:
 				matched_probe = probe_id
 				if not bool(probe.get("recorded", false)): probe.initial_result = output
-				probe.result = output; probe.recorded = true; probe.fingerprint = after; probe.fresh = true; probe.passed = _probe_passes(output, str(probe.get("expectation", "")))
+				probe.result = output; probe.recorded = true; _stamp_probe_fingerprint(probe, output, after); probe.fresh = true; probe.passed = _probe_passes(output, str(probe.get("expectation", "")))
 				matched_expectation = str(probe.get("expectation", "")); matched_passed = bool(probe.passed)
 				break
 	if not matched_probe.is_empty():
@@ -1113,7 +1155,7 @@ func _record_command(command: String, output: String, before: String, after: Str
 		observation["probe_expectation"] = matched_expectation
 	if before != after:
 		for probe in _active_probes():
-			if str(probe.get("id", "")) != matched_probe: probe.fresh = false
+			if str(probe.get("id", "")) != matched_probe: probe.fresh = _probe_is_fresh(probe)
 
 func run(command: String) -> String:
 	var before := _fingerprint()
@@ -1151,7 +1193,7 @@ func _run_internal(command: String) -> String:
 		if args.size() < 2 or args[1] != "--confirm": return "初期状態に戻す場合: reset-lab --confirm"
 		var clean_scenario: Dictionary = state.get("scenario",{}).duplicate(true)
 		for probe in clean_scenario.get("probes",[]):
-			for field in ["recorded","passed","fresh","result","fingerprint","initial_result"]: probe.erase(field)
+			for field in ["recorded","passed","fresh","result","fingerprint","fingerprint_kind","initial_result"]: probe.erase(field)
 		setup(_chapter,{},clean_scenario); state.connected = true; _touch("lab restored from clean image")
 		return "Guest image restored. 顧客環境を作業開始時に戻しました。"
 	if not state.connected: return "Not connected. ssh client で顧客端末に接続してください。"
@@ -1253,7 +1295,7 @@ func probes() -> Array:
 			var probe_id := str(item.get("id", "")); var probe_user := "current" if probe_id == "current-mfa" else ("former" if probe_id == "former-login" else "")
 			if not probe_user.is_empty(): item.user = probe_user; item.requires_login = _identity_probe_requires_login(probe_user)
 		item.result = str(item.get("result","")); item.recorded = bool(item.get("recorded",false))
-		item.fingerprint = str(item.get("fingerprint","")); item.fresh = item.fingerprint == _fingerprint() and item.recorded
+		item.fingerprint = str(item.get("fingerprint","")); item.fresh = _probe_is_fresh(item)
 		item.passed = bool(item.get("passed",false)) and item.fresh
 		result.append(item)
 	return result
@@ -2143,6 +2185,7 @@ func _normalize_backup_probes() -> void:
 		for probe in state.scenario.get("probes", []):
 			var command := str(probe.get("command", ""))
 			if command.begins_with("sha256sum /restore/") and not command.begins_with("sha256sum /restore/srv/data/"):
+				_clear_probe_measurement(probe)
 				probe.command = command.replace("sha256sum /restore/", "sha256sum /restore/srv/data/")
 
 func _normalize_portal_probes() -> void:

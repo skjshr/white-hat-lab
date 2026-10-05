@@ -17,6 +17,8 @@ func refresh_sales() -> bool:
 		if not await connect_machine(1) or not await route("verify") or not await press("DiagnosticProbe_branch-source-orders"): return false
 		var previous: Dictionary = control("ShareDiagnosticWorkbench").observation
 		if not expect(previous.recorded and not previous.fresh and previous.hash_match == "match", "cross-software order edit retains old local match only as stale evidence"): return false
+		var customers: Dictionary = game.diagnostic_probes().filter(func(item): return str(item.id) == "branch-source-customers")[0]
+		if not expect(customers.fresh and customers.passed, "changing actual orders leaves unchanged customer original proof current"): return false
 		await capture("share-original-stale-after-portal-edit")
 		if not await press("DiagnosticRun"): return false
 		var current: Dictionary = control("ShareDiagnosticWorkbench").observation
@@ -30,13 +32,13 @@ func connect_machine(index: int) -> bool:
 	if index == 1 and not source_baseline_checked:
 		source_baseline_checked = true
 		if not await route("verify"): return false
-		for id in ["branch-source-orders", "staff-read", "guest-read"]:
+		for id in ["branch-source-orders", "branch-source-customers", "staff-read", "guest-read"]:
 			if not await press("DiagnosticProbe_" + id): return false
 			var bench = control("ShareDiagnosticWorkbench")
 			if not expect(bench != null and not bool(bench.observation.recorded), "source baseline starts without invented measured access or SHA " + id): return false
 			if not await press("DiagnosticRun"): return false
 			var value: Dictionary = control("ShareDiagnosticWorkbench").observation
-			if id == "branch-source-orders":
+			if id.begins_with("branch-source-"):
 				if not expect(value.outcome == "hash_read" and value.hash_match == "match" and value.transport == "local", "actual local source original intact before unavailable SMB is repaired"): return false
 			else:
 				if not expect(value.outcome == "share_missing" and value.stop_at == "share" and value.files.is_empty(), "actual share outage does not become ACL refusal or file-content evidence"): return false
@@ -56,11 +58,26 @@ func connect_machine(index: int) -> bool:
 	return true
 
 func press(id: String) -> bool:
+	if id in ["SambaSave", "SambaRestart"] and int(game.state.get("target_index", -1)) == 1:
+		var clicked: bool = await super.press(id)
+		if not clicked: return false
+		var original: Dictionary = game.diagnostic_probes().filter(func(item): return str(item.id) == "branch-source-orders")[0]
+		if not expect(original.fresh and original.passed and str(original.get("fingerprint_kind", "")) == "local-file-v1", "actual share draft/apply preserves unchanged local original " + id): return false
+		await capture("original-current-after-" + id)
+		return true
 	if id != "DiagnosticRun" or inspecting_share or int(game.state.get("target_index", -1)) != 1: return await super.press(id)
 	var bench = control("ShareDiagnosticWorkbench")
 	if bench == null: return await super.press(id)
 	var selected: String = str(ui.desktop.widgets.verify.selected)
 	if selected == "staff-write" and not share_retry_checked:
+		# The last local measurement was the changed 12900 order. Restore made
+		# that failure historical; actually remeasure the restored original first.
+		if not await super.press("DiagnosticProbe_branch-source-orders") or not await super.press("DiagnosticRun"): return false
+		var original: Dictionary = game.diagnostic_probes().filter(func(item): return str(item.id) == "branch-source-orders")[0]
+		if not expect(original.fresh and original.passed, "actual restored original remeasured before another-file PUT"): return false
+		await capture("original-remeasured-before-other-put")
+		if not await super.press("DiagnosticProbe_staff-write"): return false
+		bench = control("ShareDiagnosticWorkbench")
 		var before: Dictionary = game._vm().export_state(); var cash := int(game.state.cash); var clock: String = game.business_clock()
 		var durable: Dictionary = bench.observation.duplicate(true); var path: String = game.save_path
 		game.save_path = "user://missing-share-diagnostic-%d/save.json" % OS.get_process_id()
@@ -93,6 +110,8 @@ func _inspect_share(id: String) -> bool:
 	if not expect(value.recorded and value.fresh and value.passed == probe.passed, "graphic keeps saved actual response and authoritative public verdict"): return false
 	if id == "staff-write":
 		if not expect(value.outcome == "written" and game.vm_read("/srv/share/orders.csv") == game.vm_read("/srv/data/orders.csv") and value.hash.is_empty(), "actual PUT changes real shared bytes but never fabricates their hash from receipt"): return false
+		var original: Dictionary = game.diagnostic_probes().filter(func(item): return str(item.id) == "branch-source-orders")[0]
+		if not expect(original.fresh and original.passed, "actual PUT of another file preserves unchanged source-original measurement"): return false
 	elif id == "staff-read" and source_baseline_checked and str(value.outcome) == "listed":
 		if not expect(value.files.has("report.txt") and value.files.has("orders.csv") and value.hash.is_empty(), "actual post-repair LS names reflect prior real PUT without claiming content match"): return false
 	elif id.begins_with("guest") and str(value.outcome) != "share_missing":

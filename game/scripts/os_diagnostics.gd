@@ -15,11 +15,11 @@ const RED := UI.RED
 const BORDER := UI.BORDER
 const OS_PANEL := UI.OS_PANEL
 const OS_NAV := UI.OS_NAV
-const OS_SELECTED := UI.OS_SELECTED
 const OS_BORDER := UI.OS_BORDER
 const OS_ACCENT := UI.OS_ACCENT
 const DIAG_ACCENT := Color("7556ad")
 const DIAG_PANEL := Color("faf8fc")
+const DIAG_SELECTED := Color("e6deef")
 
 static func _copy(key: String, fallback: String) -> String:
 	return UI.copy(key, fallback)
@@ -170,7 +170,7 @@ static func refresh(d) -> void:
 		button.custom_minimum_size = Vector2(0, 42)
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		UI.os_navigation(button, id == selected, DIAG_ACCENT)
-		var item_style = UI.style(OS_SELECTED if id == selected else OS_NAV, Color.TRANSPARENT, 0, 5, 0)
+		var item_style = UI.style(DIAG_SELECTED if id == selected else OS_NAV, Color.TRANSPARENT, 0, 5, 0)
 		if id == selected:
 			item_style.border_color = DIAG_ACCENT
 			item_style.border_width_left = 3
@@ -210,7 +210,7 @@ static func refresh(d) -> void:
 
 	var state_color := _status_color(current)
 	var top = d._row(right, 5)
-	var current_title = d._label(str(current.label), 18, INK)
+	var current_title = d._label(_probe_label(current) + " · 原本照合" if str(current.command).begins_with("sha256sum ") else str(current.label), 18, INK)
 	current_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_child(current_title)
 	var status = d._label(_status(current), 13, state_color)

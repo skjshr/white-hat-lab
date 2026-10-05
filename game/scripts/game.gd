@@ -1891,7 +1891,7 @@ func _business_follow_hashes(before_provider: Dictionary, writes: Dictionary) ->
 				for prior in replacements: expectation = expectation.replace(str(prior),str(replacements[prior]))
 				if expectation != str(probe.get("expectation","")):
 					probe.expectation = expectation
-					for field in ["recorded","passed","fresh","result","fingerprint","initial_result"]: probe.erase(field)
+					for field in ["recorded","passed","fresh","result","fingerprint","fingerprint_kind","initial_result"]: probe.erase(field)
 
 func business_action(action: String, payload: Dictionary = {}) -> Dictionary:
 	if not bool(state.get("accepted",false)) or current_done(): return _business_response(BUSINESS_TRANSACTIONS.rejected(409,"contract_unavailable"))
