@@ -139,13 +139,20 @@ func run() -> void:
 			if not await press("DiagnosticProbe_" + id) or not await press("DiagnosticRun"): finish(); return
 		if not await press("DiagnosticValidate"): finish(); return
 	if not expect(game.can_deliver(), "all three services have fresh actual normal-use and access-denial measurements"): finish(); return
+	if not await before_delivery(): finish(); return
 	if not await press("GuideDeliver") or not await press("ReceiptEvaluationTab"): finish(); return
+	if not await after_delivery(): finish(); return
 	await capture("09-branch-customer-result")
 	if not await press("ReceiptFinanceTab") or not await press("ReceiptInvoice") or not await press("BillingPost"): finish(); return
 	if not expect(game.current_done() and int(game.state.cash) > cash_start, "actual branch delivery and payment grow normally funded company"): finish(); return
+	if not await after_payment(): finish(); return
 	await capture("10-branch-invoice-paid")
 	if not expect(FileAccess.get_file_as_string(source) == source_text, "original available career checkpoint stays byte identical"): finish(); return
 	journey_completed = true; finish()
+
+func before_delivery() -> bool: return true
+func after_delivery() -> bool: return true
+func after_payment() -> bool: return true
 
 func before_invalid_order(_original: String) -> bool:
 	return true

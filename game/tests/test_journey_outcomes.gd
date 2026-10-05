@@ -39,6 +39,19 @@ func click(id: String) -> void:
 	check(node != null and node.is_visible_in_tree(), "visible " + id)
 	if node == null or not node.is_visible_in_tree(): return
 	var rect := clipped(node)
+	# Evidence is intentionally below the impact statement. Reach it through
+	# real wheel input, without a direct scroll-position assignment.
+	for _attempt in 20:
+		if rect.size.y >= minf(24, node.size.y) and rect.has_point(node.get_global_rect().get_center()): break
+		var parent := node.get_parent()
+		while parent != null and not parent is ScrollContainer: parent = parent.get_parent()
+		if not parent is ScrollContainer: break
+		var point: Vector2 = parent.get_global_rect().get_center() * Vector2(root.size) / root.get_visible_rect().size
+		for down in [true, false]:
+			var wheel := InputEventMouseButton.new(); wheel.position = point; wheel.global_position = point; wheel.pressed = down
+			wheel.button_index = MOUSE_BUTTON_WHEEL_DOWN if node.get_global_rect().get_center().y > parent.get_global_rect().get_center().y else MOUSE_BUTTON_WHEEL_UP
+			Input.parse_input_event(wheel)
+		await frames(3); rect = clipped(node)
 	check(rect.has_area(), "reachable " + id)
 	if not rect.has_area(): return
 	var point := rect.get_center() * Vector2(root.size) / root.get_visible_rect().size
@@ -109,10 +122,11 @@ func run() -> void:
 	check(results.size() == 1 and not str(results[0].host).is_empty(), "receipt captures actual target")
 	check(not results.is_empty() and results[0].probes.size() == game.diagnostic_probes().size(), "receipt keeps every recorded probe")
 	check(control("ReceiptEvaluation").visible and not control("ReceiptFinance").visible, "customer outcome is first receipt view")
-	check(control("ReceiptOutcome_staff-write") != null and control("ReceiptOutcome_guest-read") != null, "business and protection results visible")
+	check(control("ReceiptOutcomeBoard") != null and control("ReceiptTarget_0") is Button, "saved impacts and selectable site are first view")
 	await capture("04-customer-outcome")
 	await click("ReceiptEvidenceButton")
 	check(control("ReceiptEvidenceSelection") is OptionButton, "immutable evidence selection available")
+	check(control("ReceiptOutcome_staff-write") != null and control("ReceiptOutcome_guest-read") != null, "all business and protection checks retained behind evidence")
 	check(control("DiagnosticFirst") is CodeEdit and control("DiagnosticLatest") is CodeEdit, "real first/latest comparison retained")
 	await capture("05-recorded-evidence")
 	# Receipt bytes survive both live machine changes and save/reload.

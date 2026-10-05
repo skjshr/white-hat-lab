@@ -44,9 +44,15 @@ static func render(d, body: VBoxContainer, receipt: Dictionary, first_view: bool
 	if bool(d.widgets.receipt.get("evidence", false)):
 		_evidence(d, evaluation, receipt)
 	else:
+		var board := preload("res://scripts/receipt_outcome_board.gd").new()
+		board.name = "ReceiptOutcomeBoard"
+		board.setup(receipt, float(d.game.settings.get("text_scale", 1.0)))
+		evaluation.add_child(board)
+		_invoice(d, evaluation, receipt, sales, "ReceiptOutcome")
 		_outcomes(d, evaluation, receipt)
-		evaluation.add_child(HSeparator.new())
-		_evaluation(d, evaluation, receipt)
+		var details: VBoxContainer = d._disclosure(evaluation, "評価の内訳・作業時間")
+		details.name = "ReceiptImpactDetails"
+		_evaluation(d, details, receipt)
 
 static func _saved_results(receipt: Dictionary) -> Array:
 	var results: Array = receipt.get("delivery_results", [])
@@ -55,70 +61,86 @@ static func _saved_results(receipt: Dictionary) -> Array:
 	return [{"checks":receipt.get("checks", []), "probes":[]}]
 
 static func _outcomes(d, host: VBoxContainer, receipt: Dictionary) -> void:
-	var title := _text(d, "納品時に確認した結果", 18, UI.INK)
+	var title := _text(d, "納品時の記録を開く", 14, UI.INK)
 	title.name = "ReceiptCustomerOutcome"; host.add_child(title)
-	for target in _saved_results(receipt):
-		var context := str(target.get("target", ""))
-		var hostname := str(target.get("host", ""))
-		if not hostname.is_empty(): context += ("  /  " if not context.is_empty() else "") + hostname
-		if not context.is_empty(): host.add_child(_text(d, context, 14, UI.MUTED))
-		var checks: Array = target.get("checks", [])
-		var measured: Array = checks.filter(func(item): return bool(item.get("probe", false)))
-		var visible_checks: Array = measured if not measured.is_empty() else checks
-		if visible_checks.is_empty(): host.add_child(_text(d, "この精算には検証結果の記録がありません。", 14, UI.MUTED))
-		for item in visible_checks.slice(0, 4):
-			var passed := bool(item.get("passed", false))
-			var observed := ""
-			for probe in target.get("probes", []):
-				if str(probe.get("id", "")) == str(item.get("id", "")): observed = _response_summary(probe); break
-			var row := _text(d, ("✓  " if passed else "未達成  ") + str(item.get("label", "検証")) + ("：" + observed if not observed.is_empty() else "（納品判定済み）" if passed else ""), 15, UI.GREEN if passed else UI.WARNING)
-			row.name = "ReceiptOutcome_" + str(item.get("id", host.get_child_count())).validate_node_name(); host.add_child(row)
-		if visible_checks.size() > 4: host.add_child(_text(d, "ほか %d 件の結果は検証記録へ" % (visible_checks.size() - 4), 13, UI.MUTED))
-	var evidence: Button = d._button("納品時の検証記録・初回との比較", func():
-		d.widgets.receipt["evidence"] = true
-		d._refresh_receipt()
-		(d.widgets.receipt.body.get_parent() as ScrollContainer).scroll_vertical = 0
-	)
+	var targets := HFlowContainer.new(); targets.add_theme_constant_override("h_separation", 8); targets.add_theme_constant_override("v_separation", 8); host.add_child(targets)
+	var results := _saved_results(receipt)
+	for index in results.size():
+		var target: Dictionary = results[index]; var checks: Array = target.get("checks", [])
+		var passed: int = checks.filter(func(item): return bool(item.get("passed", false))).size()
+		var paper := preload("res://scripts/receipt_target_button.gd").new()
+		paper.name = "ReceiptTarget_" + str(index); paper.passed = passed; paper.total = checks.size(); paper.text_factor = float(d.game.settings.get("text_scale", 1.0))
+		paper.custom_minimum_size = Vector2(256, 66) * paper.text_factor
+		paper.alignment = HORIZONTAL_ALIGNMENT_LEFT; paper.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		paper.text = str(target.get("target", "対象の記録なし")) + "\n" + ("✓  納品判定 %d / %d" % [passed, checks.size()] if passed == checks.size() and not checks.is_empty() else "×  納品判定 %d / %d" % [passed, checks.size()] if not checks.is_empty() else "—  判定の記録なし")
+		paper.add_theme_font_size_override("font_size", int(13 * paper.text_factor))
+		for kind in ["normal", "hover", "pressed"]:
+			var style := UI.style(Color("fffcf2") if kind == "normal" else Color("e8efec"), Color("d5d0bd"), 8, 0, 2)
+			style.content_margin_left = 59 * paper.text_factor; style.content_margin_right = 10 * paper.text_factor
+			paper.add_theme_stylebox_override(kind, style)
+		paper.tooltip_text = str(target.get("host", "")) + " / 保存した納品判定と実測応答"
+		paper.pressed.connect(_open_evidence.bind(d, 0, str(paper.name), index))
+		targets.add_child(paper)
+	var evidence: Button = d._button("初回との比較・すべての判定", _open_evidence.bind(d, 0, "ReceiptEvidenceButton"))
 	evidence.name = "ReceiptEvidenceButton"; host.add_child(evidence)
 
-static func _response_summary(probe: Dictionary) -> String:
-	var response := str(probe.get("result", "")).strip_edges()
-	if response == "NT_STATUS_ACCESS_DENIED": return "アクセス拒否"
-	if response.begins_with("NT_STATUS_BAD_NETWORK_NAME"): return "共有への接続を拒否"
-	if response.begins_with("putting file ") and response.ends_with(": OK"): return "書き込み成功"
-	if response.begins_with("getting file ") and response.ends_with(": OK"): return "読み込み成功"
-	if "smbclient " in str(probe.get("command", "")) and "blocks of size" in response: return "ファイル一覧を取得"
-	var first := response.get_slice("\n", 0)
-	return first.left(96) + ("…" if first.length() > 96 else "")
+static func _open_evidence(d, index: int, source: String, target_index: int = -1) -> void:
+	d.widgets.receipt["evidence"] = true; d.widgets.receipt["evidence_index"] = index; d.widgets.receipt["evidence_return"] = source
+	d.widgets.receipt["evidence_target"] = target_index
+	d._refresh_receipt()
+	(d.widgets.receipt.body.get_parent() as ScrollContainer).scroll_vertical = 0
+	_focus(d, "ReceiptEvidenceBack")
+
+static func _focus(d, id: String) -> void:
+	var tree: SceneTree = d.get_tree()
+	await tree.process_frame; await tree.process_frame
+	if not is_instance_valid(d): return
+	var control: Control = d.widgets.receipt.body.find_child(id, true, false)
+	if is_instance_valid(control) and control.is_visible_in_tree(): control.grab_focus()
 
 static func _evidence(d, host: VBoxContainer, receipt: Dictionary) -> void:
 	var details := VBoxContainer.new(); details.name = "ReceiptEvidence"; details.add_theme_constant_override("separation", 8); host.add_child(details)
-	var back: Button = d._button("顧客の結果に戻る", func(): d.widgets.receipt["evidence"] = false; d._refresh_receipt())
+	var back: Button = d._button("顧客の結果に戻る", func():
+		d.widgets.receipt["evidence"] = false; d._refresh_receipt()
+		(d.widgets.receipt.body.get_parent() as ScrollContainer).scroll_vertical = 0
+		_focus(d, str(d.widgets.receipt.get("evidence_return", "ReceiptEvidenceButton")))
+	)
 	back.name = "ReceiptEvidenceBack"; details.add_child(back)
 	details.add_child(_text(d, "納品時の検証記録", 18, UI.INK))
 	details.add_child(_text(d, "納品時に保存した判定と実測応答です。初回の記録がある測定だけ比較できます。", 13, UI.MUTED))
 	var targets := _saved_results(receipt)
+	var scope := int(d.widgets.receipt.get("evidence_target", -1))
+	if scope >= 0 and scope < targets.size():
+		var target: Dictionary = targets[scope]
+		var context := _text(d, str(target.get("target", "対象の記録なし")) + (" / " + str(target.host) if target.has("host") else ""), 14, UI.INK)
+		context.name = "ReceiptEvidenceTarget"; details.add_child(context)
 	var options := OptionButton.new(); options.name = "ReceiptEvidenceSelection"; options.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var observations: Array = []
 	for index in targets.size():
+		if scope >= 0 and scope != index: continue
 		var target: Dictionary = targets[index]
 		var context := str(target.get("target", target.get("host", "")))
 		for probe in target.get("probes", []):
 			options.add_item((context + " / " if not context.is_empty() else "") + str(probe.get("label", probe.get("id", "測定"))))
 			observations.append(probe)
 	if observations.is_empty():
+		options.free()
 		details.add_child(_text(d, "実測応答はこの精算に保存されていません。保存済みの判定を表示します。", 14, UI.MUTED))
 	else:
 		var selected := clampi(int(d.widgets.receipt.get("evidence_index", 0)), 0, observations.size() - 1)
 		options.select(selected); details.add_child(options)
-		options.item_selected.connect(func(index): d.widgets.receipt["evidence_index"] = index; d._refresh_receipt())
+		options.item_selected.connect(func(index):
+			d.widgets.receipt["evidence_index"] = index; d._refresh_receipt()
+			_focus(d, "ReceiptEvidenceSelection")
+		)
 		preload("res://scripts/os_diagnostics.gd")._build_comparison(d, details, observations[selected])
 	var checks: VBoxContainer = d._disclosure(details, "すべての納品判定")
 	for target in targets:
 		var context := str(target.get("target", target.get("host", "")))
 		if not context.is_empty(): checks.add_child(_text(d, context, 14, UI.INK))
 		for item in target.get("checks", []):
-			checks.add_child(_text(d, ("✓  " if bool(item.get("passed", false)) else "未達成  ") + str(item.get("label", "検証")), 14, UI.MUTED))
+			var row := _text(d, ("✓  " if bool(item.get("passed", false)) else "未達成  ") + str(item.get("label", "検証")), 14, UI.MUTED)
+			row.name = "ReceiptOutcome_" + str(item.get("id", checks.get_child_count())).validate_node_name(); checks.add_child(row)
 
 static func _tab(d, name: String, text: String, selected: String) -> Button:
 	var button: Button = d._button(text, func():
@@ -126,6 +148,7 @@ static func _tab(d, name: String, text: String, selected: String) -> Button:
 			d.widgets.receipt["tab"] = selected
 		if d.has_method("_refresh_receipt"): d._refresh_receipt()
 		(d.widgets.receipt.body.get_parent() as ScrollContainer).scroll_vertical = 0
+		_focus(d, name)
 	)
 	button.name = name
 	button.toggle_mode = true
@@ -150,7 +173,7 @@ static func _metric(d, host: Node, name: String, title: String, amount: int, col
 	value.add_theme_font_override("font", UI.font(700))
 	stack.add_child(value)
 
-static func _invoice(d, body: VBoxContainer, receipt: Dictionary, sales: int) -> void:
+static func _invoice(d, body: VBoxContainer, receipt: Dictionary, sales: int, prefix: String = "Receipt") -> void:
 	var status := ""
 	var invoice_id := str(receipt.get("invoice_id", ""))
 	var invoice: Dictionary = {}
@@ -171,11 +194,11 @@ static func _invoice(d, body: VBoxContainer, receipt: Dictionary, sales: int) ->
 	else:
 		status = UI.copy("receipt_settled") if sales > 0 else UI.copy("receipt_no_charge")
 	var label: Label = _text(d, status, 13, UI.MUTED)
-	label.name = "ReceiptInvoiceStatus"
-	var status_row := HBoxContainer.new(); status_row.name = "ReceiptInvoiceRow"; status_row.add_theme_constant_override("separation", 8); body.add_child(status_row); label.size_flags_horizontal = Control.SIZE_EXPAND_FILL; status_row.add_child(label)
+	label.name = prefix + "InvoiceStatus"
+	var status_row := HBoxContainer.new(); status_row.name = prefix + "InvoiceRow"; status_row.add_theme_constant_override("separation", 8); body.add_child(status_row); label.size_flags_horizontal = Control.SIZE_EXPAND_FILL; status_row.add_child(label)
 	if not invoice_id.is_empty() and not invoice.is_empty():
 		var open: Button = d._button(UI.copy("billing_open_invoice"), d.open_invoice.bind(invoice_id))
-		open.name = "ReceiptInvoice"
+		open.name = prefix + "Invoice"
 		status_row.add_child(open)
 
 static func _finance(d, host: VBoxContainer, receipt: Dictionary) -> void:
@@ -215,7 +238,11 @@ static func _evaluation(d, host: VBoxContainer, receipt: Dictionary) -> void:
 	var growth := _evaluation_grid(columns)
 	if receipt.has("grade"): _pair(d, result, UI.copy("receipt_grade"), str(receipt.grade))
 	if receipt.has("minutes") and receipt.has("budget"):
-		_pair(d, result, UI.copy("receipt_time"), UI.copy("receipt_time_value") % [int(receipt.minutes), int(receipt.budget)])
+		if receipt.has("elapsed_minutes"):
+			_pair(d, result, "実作業", _time_number(float(receipt.minutes)) + " 分", "ReceiptWorkMinutes")
+			_pair(d, result, "納品まで / 期限", _time_number(float(receipt.elapsed_minutes)) + " / " + _time_number(float(receipt.budget)) + " 分", "ReceiptElapsedValue")
+		else:
+			_pair(d, result, UI.copy("receipt_time"), UI.copy("receipt_time_value") % [int(receipt.minutes), int(receipt.budget)])
 	if receipt.has("credit_before") and receipt.has("credit_after"):
 		_pair(d, result, UI.copy("receipt_credit"), "%d → %d" % [int(receipt.credit_before), int(receipt.credit_after)])
 	if receipt.has("satisfaction_before") and receipt.has("satisfaction_after"):
@@ -262,15 +289,19 @@ static func _row(d, host: VBoxContainer, name: String, label_text: String, amoun
 	value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	row.add_child(value)
 
-static func _pair(d, host: GridContainer, label_text: String, value_text: String) -> void:
+static func _pair(d, host: GridContainer, label_text: String, value_text: String, id: String = "") -> void:
 	var label := _text(d, label_text, 14, UI.MUTED)
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	host.add_child(label)
 	var value := _text(d, value_text, 15, UI.INK)
+	if not id.is_empty(): value.name = id
 	value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	value.autowrap_mode = TextServer.AUTOWRAP_OFF
 	host.add_child(value)
+
+static func _time_number(value: float) -> String:
+	return _number(int(value)) if is_equal_approx(value, roundf(value)) else String.num(value, 1)
 
 static func _text(d, value: String, size: int, color: Color) -> Label:
 	var label: Label = d._label(value, size, color)

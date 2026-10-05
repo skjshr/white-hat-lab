@@ -274,10 +274,12 @@ func _check_receipt_shell(label: String, expected_profit: String, expected_sales
 	check(_receipt_panel("ReceiptEvaluationTab") is BaseButton, label + " evaluation tab")
 	check(_receipt_panel("ReceiptFinance") is Control, label + " finance panel")
 	check(_receipt_panel("ReceiptEvaluation") is Control, label + " evaluation panel")
-	var viewport := Rect2(Vector2.ZERO, Vector2(root.size))
+	# get_global_rect uses the stretched canvas, not physical window pixels.
+	var viewport: Rect2 = root.get_visible_rect()
 	var body: Control = pc.widgets.receipt.body
 	var footer: Control = pc.widgets.receipt.footer
 	var body_rect := body.get_global_rect(); var footer_rect := footer.get_global_rect()
+	print("RECEIPT_COORDINATES ", label, " window=", root.size, " canvas=", viewport, " body=", body_rect, " footer=", footer_rect)
 	check(body_rect.position.x >= -2.0 and body_rect.end.x <= viewport.end.x + 2.0, label + " receipt body horizontal bounds")
 	check(footer_rect.position.x >= -2.0 and footer_rect.end.x <= viewport.end.x + 2.0, label + " receipt footer horizontal bounds")
 	if _receipt_panel("ReceiptMaterialCost") != null:
@@ -347,6 +349,8 @@ func run_receipt() -> void:
 	pc._refresh_receipt()
 	await frames(3)
 	_check_receipt_shell("negative maintenance", "-¥1,200", "¥0", "¥1,200")
+	check(_receipt_panel("ReceiptImpactProfit") is Label and str((_receipt_panel("ReceiptImpactProfit") as Label).text) == "-¥1,200", "first-view graphic retains signed maintenance loss")
+	check(_receipt_panel("ReceiptOutcomeInvoiceStatus") is Label and str((_receipt_panel("ReceiptOutcomeInvoiceStatus") as Label).text) == UI.copy("receipt_no_charge"), "loss without invoice never pretends to be an unpaid sale")
 	await capture("receipt-loss")
 	_receipt_fixture("completion_receipt-legacy",12000,800,4200,3200,false,0,false,300)
 	game.state.last_receipt.erase("material_billable")
@@ -355,7 +359,31 @@ func run_receipt() -> void:
 	await frames(3)
 	_check_receipt_shell("legacy material", "¥8,600", "¥12,800", "¥4,200")
 	check(not contains_text(pc.widgets.receipt.body, "¥16,000"), "legacy missing billable excludes material")
+	var before_legacy: Dictionary = game.state.duplicate(true)
+	check(str((_receipt_panel("ReceiptImpactProfit") as Label).text) == "¥8,600", "legacy first-view profit uses stored net without fabricated hardware billing")
+	for key in ["grade", "satisfaction_before", "satisfaction_after", "credit_before", "credit_after", "level_before", "level_after", "rating"]: game.state.last_receipt.erase(key)
+	pc._refresh_receipt(); await frames(3)
+	for id in ["ReceiptGradeValue", "ReceiptSatisfactionValue", "ReceiptCreditValue", "ReceiptLevelValue"]:
+		check(str((_receipt_panel(id) as Label).text) == "—", "missing legacy outcome stays unknown " + id)
+	check(str((_receipt_panel("ReceiptTarget_0") as Button).text).contains("判定の記録なし"), "legacy no checks does not acquire a success seal")
+	check(int(game.state.cash) == int(before_legacy.cash) and game.state.history == before_legacy.history and game.state.billing == before_legacy.billing, "receipt repaint never transacts or rewards")
 	await capture("receipt-final")
+	# A mixed historical receipt must not borrow another site's raw proof.
+	game.state.last_receipt.delivery_results = [{"target":"Legacy site","checks":[{"label":"old check","passed":true}],"probes":[]}, {"target":"Measured site","host":"example.test","checks":[{"id":"measured","label":"actual check","passed":true}],"probes":[{"id":"measured","label":"actual check","command":"curl fictional.test","result":"FOREIGN_SITE_REPLY","initial_result":"FIRST_REPLY","passed":true,"recorded":true}]}]
+	pc._refresh_receipt(); await frames(3)
+	var mixed: Dictionary = game.state.duplicate(true)
+	press(_receipt_panel("ReceiptTarget_0"), "old site paper"); await frames(3)
+	check(_receipt_panel("ReceiptEvidenceSelection") == null and not contains_text(pc.widgets.receipt.body, "FOREIGN_SITE_REPLY"), "old site without raw proof never displays another site's response")
+	check(str((_receipt_panel("ReceiptEvidenceTarget") as Label).text) == "Legacy site", "old site's known name stays visible without fabricated host")
+	press(_receipt_panel("ReceiptEvidenceBack"), "return from old proof"); await frames(3)
+	press(_receipt_panel("ReceiptTarget_1"), "measured site paper"); await frames(3)
+	check(_receipt_panel("DiagnosticLatest") is CodeEdit and str((_receipt_panel("DiagnosticLatest") as CodeEdit).text) == "FOREIGN_SITE_REPLY", "measured site retains its own exact response")
+	check(game.state == mixed, "site evidence selection never mutates authoritative state")
+	press(_receipt_panel("ReceiptEvidenceBack"), "return from measured proof"); await frames(3)
+	game.state.last_receipt.merge({"minutes":168,"elapsed_minutes":1440,"budget":337.5,"rating":"late"}, true)
+	pc._refresh_receipt(); await frames(3)
+	check(str((_receipt_panel("ReceiptWorkMinutes") as Label).text) == "168 分", "overnight work duration stays separate")
+	check(str((_receipt_panel("ReceiptElapsedValue") as Label).text) == "1,440 / 337.5 分", "overnight elapsed time compares against the actual fractional deadline")
 
 func _invoice(id: String) -> Dictionary:
 	for raw in game.company_invoices():
@@ -364,6 +392,11 @@ func _invoice(id: String) -> Dictionary:
 	return {}
 
 func _finish() -> void:
+	# Close the desktop explicitly so its CodeEdit/popups are released before
+	# the renderer shuts down, then remove only this test's isolated saves.
+	if is_instance_valid(ui):
+		ui.close_panel(false, false); await frames(5)
+		ui.queue_free(); await frames(5)
 	if game != null:
 		for path in [game.save_path, game.backup_path, game.previous_path, game.settings_path]:
 			if FileAccess.file_exists(path):
