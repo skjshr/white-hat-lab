@@ -84,22 +84,22 @@ class AccessStage extends Control:
 
 static func _command(probe: Dictionary, id: String) -> bool:
 	var actor := "staff" if id.begins_with("staff-") else "guest"
-	var suffixes: Array = ["ls"] if id.ends_with("-read") else ['"put /srv/data/orders.csv"', "'put /srv/data/orders.csv'"]
+	var suffixes: Array = ["ls"] if id.ends_with("-read") else ['"put /srv/data/orders.csv"', "'put /srv/data/orders.csv'", '"put /srv/data/report.txt"', "'put /srv/data/report.txt'"]
 	for host in ["client","files01.client.test"]:
 		for suffix in suffixes:
 			if str(probe.get("command","")) == "smbclient //"+host+"/share -U "+actor+" -c "+str(suffix): return true
 	return false
 
-static func _access(output: String, writing: bool) -> String:
+static func _access(output: String, writing: bool, filename := "orders.csv") -> String:
 	var value := output.strip_edges()
 	if value == "NT_STATUS_ACCESS_DENIED": return "denied"
 	if value.begins_with("NT_STATUS_") or value.begins_with("smbclient:") or value.begins_with("put:") or value.begins_with("usage:") or value.begins_with("{"): return "error"
-	if writing: return "allowed" if value == "putting file orders.csv: OK" else "unknown"
+	if writing: return "allowed" if value == "putting file " + filename + ": OK" else "unknown"
 	if value == "0 files": return "allowed"
 	var files := value.split("\n",false)
 	if "report.txt" not in files: return "unknown"
-	for filename in files:
-		if not str(filename).is_valid_filename(): return "unknown"
+	for listed_file in files:
+		if not str(listed_file).is_valid_filename(): return "unknown"
 	return "allowed"
 
 static func project(probes: Array) -> Array:
@@ -111,13 +111,14 @@ static func project(probes: Array) -> Array:
 		var recorded := bool(probe.get("recorded",false))
 		var fresh := recorded and bool(probe.get("fresh",false))
 		var raw := str(probe.get("result","")) if recorded else ""
-		var status := "stale" if recorded and not fresh else _access(raw,id.ends_with("-write")) if fresh else "unknown"
+		var filename := "report.txt" if str(probe.get("command", "")).contains("put /srv/data/report.txt") else "orders.csv"
+		var status := "stale" if recorded and not fresh else _access(raw,id.ends_with("-write"),filename) if fresh else "unknown"
 		var expectation := str(probe.get("expectation",""))
 		var requirement := "deny" if expectation == "DENIED" else "allow" if expectation in ["OK","report.txt"] else "unknown"
 		var passed: Variant = null
 		if fresh and status in ["allowed","denied"] and requirement != "unknown":
 			passed = bool(probe.get("passed",false)) and ((status == "allowed" and requirement == "allow") or (status == "denied" and requirement == "deny"))
-		result.append({"id":id,"actor":"staff" if id.begins_with("staff-") else "guest","operation":"write" if id.ends_with("-write") else "read","recorded":recorded,"fresh":fresh,"status":status,"requirement":requirement,"passed":passed,"raw":raw,"command":str(probe.get("command",""))})
+		result.append({"id":id,"actor":"staff" if id.begins_with("staff-") else "guest","operation":"write" if id.ends_with("-write") else "read","recorded":recorded,"fresh":fresh,"status":status,"requirement":requirement,"passed":passed,"raw":raw,"file":filename,"command":str(probe.get("command",""))})
 	return result
 
 static func should_render_home(d, parsed: Dictionary, probes: Array) -> bool:
@@ -156,7 +157,8 @@ static func build(d, parent: VBoxContainer, probes: Array, applied_path: String)
 			label.name = "SambaAccessActionError"; label.tooltip_text = str(error.message)
 			label.add_theme_color_override("font_color",Color("a1482c"))
 		stage.add_child(label); stage.objects[id] = {"button":button,"label":label}
-	var folder: Button = d._button("share",func(): _select(d))
+	var is_report := stage.results.filter(func(row): return str(row.operation) == "write" and str(row.file) == "report.txt").size() == 2
+	var folder: Button = d._button("日報\nreport.txt" if is_report else "share",func(): _select(d))
 	folder.name = "SambaShare_share"; folder.tooltip_text = "//"+str(d.game.vm_info().host)+"/share → "+applied_path
 	stage.add_child(folder); stage.objects.folder = folder
 	var edit: Button = d._button("編集",func(): _select(d)); edit.name = "SambaEdit_share"; stage.add_child(edit); stage.objects.edit = edit
@@ -176,6 +178,7 @@ static func _select(d) -> void:
 	d.samba_ui.selected_share = "share"; d.samba_ui.tab = "shares"; d.samba_ui.workspace = "config"; d._render_samba()
 
 static func _run(d, id: String) -> void:
+	var retrying := str(d.samba_ui.get("probe_action_error", {}).get("id", "")) == id
 	d.samba_ui["_focus_probe_id"] = id; d.samba_ui.erase("probe_action_error")
 	var was_refreshing: bool = d.refreshing
 	d.refreshing = true
@@ -183,10 +186,18 @@ static func _run(d, id: String) -> void:
 	d.refreshing = was_refreshing
 	d._invalidate_smb()
 	var error: Variant = JSON.parse_string(output) if output.strip_edges().begins_with("{") else null
+	# The public measurement API retains a Japanese rollback response for old
+	# callers. It must surface as an action failure, not a new access observation.
+	if output == "測定結果を保存できませんでした。操作前の状態へ戻しました。": error = {"error":"save_failed"}
 	if error is Dictionary and str(error.get("error","")) in ["save_failed","hardware_unavailable"]:
 		var message := "測定を保存できません。再試行できます。" if str(error.error) == "save_failed" else "顧客端末に接続できません。"
 		d.samba_ui.probe_action_error = {"id":id,"message":message,"error":str(error.error)}
 		d._notify(message)
+	elif retrying:
+		for row in project(d.game.diagnostic_probes()):
+			if str(row.id) == id and bool(row.fresh) and str(row.raw) == output and str(row.status) in ["allowed", "denied"]:
+				d._notify("測定を保存しました。")
+				break
 	d._render_samba()
 	if d.widgets.has("verify"): d._refresh_checks()
 	if d.widgets.has("monitor"): d._refresh_monitor()

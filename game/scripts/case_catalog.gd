@@ -50,7 +50,7 @@ static func all() -> Array:
 	var incident := {"pc_a":"isolated","pc_b":"connected","logs":"keep","reset":"wait"}
 	var portal := {"staff":"write","partner":"read","public":"none","expires":"7d","mfa":"on","tls":"on","audit":"on"}
 	# File permissions: repair, read-only archive, guest publication, containment.
-	_add(0,0,"社員が日報を保存できない","社員の保存操作のみ拒否されます。ゲストアクセスの遮断を維持し、社員の書き込み権限を復旧してください。",_with(shared,{"staff":"read"}),shared)
+	_add(0,0,"社員が日報を保存できない","社員の保存操作のみ拒否されます。ゲストアクセスの遮断を維持し、社員の書き込み権限を復旧してください。",_with(shared,{"staff":"read"}),shared,{"share_work_file":"/srv/data/report.txt","intake":{"kind":"daily-report"},"fs_overrides":{"/srv/data/report.txt":"つばさ文具 / 経理日報\n本日受付 12件\n照合待ち 2件\n締め担当 staff\n","/srv/share/report.txt":"つばさ文具 / 経理日報\n前日受付 9件\n照合待ち 0件\n締め担当 staff\n"}})
 	_add(0,1,"保管資料を閲覧専用にする","確定済み資料の誤更新を防ぎます。社員は読み取りのみ、ゲストは拒否してください。",shared,{"staff":"read","guest":"none"})
 	_add(0,2,"公開資料フォルダーを整備","この共有フォルダーは公開資料専用です。社員に更新権限、来客に閲覧権限のみ付与してください。",{"staff":"read","guest":"write"},{"staff":"write","guest":"read"})
 	_add(0,3,"ゲストの書き込みを禁止","公開資料に外部から書き込みが可能です。来客の閲覧を残し、書き込みだけを拒否してください。",{"staff":"write","guest":"write"},{"staff":"write","guest":"read"})
@@ -272,6 +272,9 @@ static func _probes(chapter: int, desired: Dictionary, extra: Dictionary) -> Arr
 	var probes: Array = []
 	if chapter == 0:
 		probes = [{"id":"staff-read","label":"社員の閲覧","command":"smbclient //client/share -U staff -c ls","expectation":"report.txt" if desired.get("staff") in ["read","write"] else "DENIED"},{"id":"staff-write","label":"社員の保存","command":"smbclient //client/share -U staff -c \"put /srv/data/orders.csv\"","expectation":"OK" if desired.get("staff") == "write" else "DENIED"},{"id":"guest-read","label":"来客の閲覧","command":"smbclient //client/share -U guest -c ls","expectation":"report.txt" if desired.get("guest") in ["read","write"] else "DENIED"},{"id":"guest-write","label":"来客の保存","command":"smbclient //client/share -U guest -c \"put /srv/data/orders.csv\"","expectation":"OK" if desired.get("guest") == "write" else "DENIED"}]
+		if str(extra.get("share_work_file", "")) == "/srv/data/report.txt":
+			for probe in probes:
+				if str(probe.id).ends_with("-write"): probe.command = str(probe.command).replace("/srv/data/orders.csv", "/srv/data/report.txt")
 	elif chapter == 1:
 		var required: Array = extra.get("required_files", ["/srv/data/ledger.txt"])
 		var hashes := {"customers.csv":"20c8fd203bc89fd002d46648ced954d5cb3748a97cde755b0ce43fc895bbf115","orders.csv":"3870c28fbbaf84f8f89e8cae67a924d2830c688a67b570a2977aa8787864eff3","ledger.txt":"624393b28c7619034eb619898b67e9ff4dc49c605fd73bb926417d68bdf21a9e"}
