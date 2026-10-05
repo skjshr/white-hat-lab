@@ -117,15 +117,12 @@ func _ready() -> void:
 	if "--performance" in OS.get_cmdline_user_args(): call_deferred("_performance")
 
 func _refresh_window_surface() -> void:
-	# Refresh the initial WGL surface after layout; some Windows drivers present black until a resize.
+	# Settle content scaling and the initial render target before presenting.
+	# Keep the requested window geometry instead of resizing during first draw.
 	if DisplayServer.get_name() == "headless": return
-	await get_tree().process_frame
-	await get_tree().process_frame
-	if DisplayServer.window_get_mode() != DisplayServer.WINDOW_MODE_WINDOWED: return
-	var original := get_window().size
-	get_window().size = original + Vector2i(1,0)
-	await get_tree().process_frame
-	get_window().size = original
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	RenderingServer.force_draw()
 
 func _setup_input() -> void:
 	var actions := {"move_forward":KEY_W,"move_back":KEY_S,"move_left":KEY_A,"move_right":KEY_D,"sprint":KEY_SHIFT,"interact":KEY_E,"cases":KEY_TAB,"workstation":KEY_F,"crew_aya":KEY_1,"crew_ren":KEY_2,"equipment":KEY_3,"company":KEY_4}
