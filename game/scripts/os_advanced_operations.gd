@@ -11,6 +11,12 @@ static func _kind(d) -> String:
 	return str(d.game.state.get("advanced",{}).get("kind",d.game.state.get("contract",{}).get("case_id","")))
 
 static func build(d,parent: VBoxContainer) -> void:
+	var model: Dictionary = d.game.state.get("advanced", {})
+	if model.is_empty():
+		d.widgets.advanced = {"unassigned":true}
+		var state: Label = d._label("高度案件の作業対象なし",16); state.name="AdvancedUnassigned"; parent.add_child(state)
+		var open: Button = d._button("案件を開く",d._contracts); open.name="AdvancedOpenContracts"; parent.add_child(open)
+		return
 	match _kind(d):
 		"advanced-portal": PENTEST_PORTAL.build(d,parent)
 		"advanced-hunt": HUNT.build(d,parent)
@@ -20,6 +26,12 @@ static func build(d,parent: VBoxContainer) -> void:
 
 static func refresh(d) -> void:
 	if not d.widgets.has("advanced"): return
+	if bool(d.widgets.advanced.get("unassigned",false)):
+		var model: Dictionary = d.game.state.get("advanced", {})
+		if not model.is_empty():
+			var parent: VBoxContainer = d.windows.advanced.content
+			d._clear(parent); build(d,parent); d._wire_focus(parent,"advanced")
+		return
 	if d.widgets.advanced.get("pentest",false): PENTEST_PORTAL.refresh(d); return
 	match str(d.widgets.advanced.get("family","")):
 		"advanced-hunt": HUNT.refresh(d)

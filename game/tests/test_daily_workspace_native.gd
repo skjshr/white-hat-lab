@@ -2,6 +2,9 @@ extends "res://tests/test_daily_report_native.gd"
 ## Same genuine earned company; add the employee's real file/editor workflow.
 var file_round := 0
 
+func after_copy_saved() -> bool: return true
+func after_transfer_persistence_failure() -> bool: return true
+
 func receipt_effect(receipt: Dictionary) -> bool:
 	return expect(game.current_done() and str(receipt.rating) == "late" and int(receipt.fee) < int(receipt.agreed_fee) and int(receipt.satisfaction_after) < int(receipt.satisfaction_before), "real repeated employee work exceeds deadline, reducing fee and customer trust")
 
@@ -38,7 +41,7 @@ func employee_begin() -> bool:
 	if not await route("files") or not expect(same_values(game._vm().export_state(), before_return) and int(game.state.clock_minutes) == minutes, "returning to copy desk redraws without requesting or spending work time"): return false
 	if not expect(control("SmbCopyState").text == "● 未保存の編集" and control("SmbPreview").text == initial_report, "draft changes copy state without rewriting captured share specimen"): return false
 	if not await press("SmbUploadEdited") or not expect(control("SmbUpload").disabled and control("SmbSourceDraft").visible, "unsaved actual report copy cannot be sent"): return false
-	if not await route("editor") or not await press("EditorSave") or not await route("files"): return false
+	if not await route("editor") or not await press("EditorSave") or not await after_copy_saved() or not await route("files"): return false
 	if not await press("SmbUpload") or not expect(str(ui.desktop.samba_ui.access_output) == "NT_STATUS_ACCESS_DENIED" and game.vm_read("/srv/share/report.txt") == initial_report, "saved employee copy still encounters real server permission refusal"): return false
 	await capture("employee-02-real-copy-save-denied")
 	var machine: Dictionary = game._vm().export_state()
@@ -56,6 +59,7 @@ func employee_retry() -> bool:
 	game.save_path = "user://missing-employee-transfer/save.json"
 	var clicked := await press("SmbUpload"); game.save_path = path
 	if not clicked or not expect(same_values(game._vm().export_state(), before) and str(ui.desktop.samba_ui.access_output).contains("save_failed") and ui.desktop.status.text.contains("保存失敗"), "failed actual transfer persistence restores report/copy bytes and visible failure"): return false
+	if not await after_transfer_persistence_failure(): return false
 	if not await press("SmbUpload") or not expect(game.vm_read("/srv/share/report.txt") == daily_report and ui.desktop.status.text == "転送保存済み", "same employee transfer succeeds and replaces failure after real permission repair"): return false
 	if not await press("SmbFile_report_txt") or not await document_visible(): return false
 	if not expect(control("SmbPreview").text == daily_report and control("SmbCopyState").text == "✓ 取得時と同じ", "real read-back shows today's report through the consumer software"): return false

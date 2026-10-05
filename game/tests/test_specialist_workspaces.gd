@@ -40,6 +40,8 @@ func click(id: String) -> void:
 	check(control is BaseButton and not control.disabled,"action "+id)
 	if not control is BaseButton or control.disabled: return
 	check(control.is_visible_in_tree(),"rendered action "+id)
+	var presses := [0]
+	control.pressed.connect(func(): presses[0] += 1)
 	var ancestor: Node=control.get_parent()
 	while ancestor!=null:
 		if ancestor is ScrollContainer: ancestor.ensure_control_visible(control)
@@ -49,14 +51,17 @@ func click(id: String) -> void:
 		if control is CheckBox: control.button_pressed=not control.button_pressed
 		control.pressed.emit()
 	else:
-		var point: Vector2=control.get_global_rect().get_center()
+		var point: Vector2=control.get_global_rect().get_center() * Vector2(root.size) / root.get_visible_rect().size
 		check(Rect2(Vector2.ZERO,Vector2(root.size)).has_point(point),"visible "+id)
-		var motion:=InputEventMouseMotion.new(); motion.position=point; Input.parse_input_event(motion)
-		var down:=InputEventMouseButton.new(); down.position=point; down.button_index=MOUSE_BUTTON_LEFT; down.pressed=true; Input.parse_input_event(down)
-		await frames(1)
-		var up:=InputEventMouseButton.new(); up.position=point; up.button_index=MOUSE_BUTTON_LEFT; up.pressed=false; Input.parse_input_event(up)
+		var motion:=InputEventMouseMotion.new(); motion.position=point; motion.global_position=point; Input.parse_input_event(motion); Input.flush_buffered_events()
+		var hovered: Control=root.gui_get_hovered_control()
+		check(hovered==control or (hovered!=null and control.is_ancestor_of(hovered)),"pointer reaches actual action "+id+" point="+str(point)+" hover="+str(hovered))
+		for pressed in [true,false]:
+			var event:=InputEventMouseButton.new(); event.position=point; event.global_position=point; event.button_index=MOUSE_BUTTON_LEFT; event.pressed=pressed
+			Input.parse_input_event(event); Input.flush_buffered_events()
 	clicks+=1
 	await frames(5)
+	check(presses[0]==1,"one actual action fires "+id)
 
 func edit(id: String, value: String) -> void:
 	await reveal(id)
@@ -118,11 +123,18 @@ func start_case(id: String) -> bool:
 	if offer.is_empty(): return false
 	offer.market_available=true
 	game.set_offer_quote(str(offer.id),int(game.contract_quote(offer).estimated_fee))
-	check(game.choose_contract(str(offer.id)),"accept "+id)
 	game.set_process(false)
-	game.settings.text_scale=1.3 if narrow else 1.0
+	game.set_settings({"resolution":"960x600" if narrow else "1920x1080","window_mode":"windowed","text_scale":1.3 if narrow else 1.0,"volume":0},false)
+	root.get_node("Graphics").apply_settings(game.settings)
 	desk=load("res://scripts/desktop.gd").new(); root.add_child(desk); desk.setup(game); desk._show_app("advanced")
 	await frames(8)
+	print("SPECIALIST_DISPLAY case=",id," pixels=",root.size," logical=",root.get_visible_rect().size)
+	check(node("AdvancedUnassigned") != null and node("AdvancedOpenContracts") != null,"unassigned tool opens before accepting "+id)
+	check(game.choose_contract(str(offer.id)),"accept "+id)
+	game.set_process(false)
+	desk.session_key=game._vm_key(); desk._show_app("advanced")
+	await frames(8)
+	check(node("AdvancedUnassigned") == null,"same tool becomes actual accepted workspace "+id)
 	desk.windows.advanced.maximized=true; desk.windows.advanced.position=Vector2.ZERO; desk.windows.advanced.size=desk.workspace.size; desk._refresh_advanced()
 	await frames(5)
 	check(str(desk.widgets.advanced.get("family",""))==id,"specialist router "+id)
@@ -151,7 +163,6 @@ func api_request(actor: String, operation: String, resource: String, pin:=false)
 
 func run() -> void:
 	game=root.get_node("Game"); game.set_process(false)
-	root.size=Vector2i(960,600) if narrow else Vector2i(1440,900)
 	await run_specialist_cases()
 	if is_instance_valid(desk): desk.queue_free(); await frames()
 	print("SPECIALIST_WORKSPACES assertions=",assertions," failures=",failures.size()," engine_clicks=",clicks," selections=",selections," field_edits=",edits," narrow=",narrow)

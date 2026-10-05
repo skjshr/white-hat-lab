@@ -38,12 +38,14 @@ func alt_tab() -> void:
 	await frames()
 
 func mouse_click(point: Vector2) -> void:
-	var down := InputEventMouseButton.new()
-	down.position = point; down.global_position = point; down.button_index = MOUSE_BUTTON_LEFT; down.pressed = true
-	Input.parse_input_event(down)
-	await frames(1)
-	var up := down.duplicate() as InputEventMouseButton; up.pressed = false
-	Input.parse_input_event(up)
+	var pixels := point * Vector2(root.size) / root.get_visible_rect().size
+	var motion := InputEventMouseMotion.new(); motion.position = pixels; motion.global_position = pixels
+	Input.parse_input_event(motion); Input.flush_buffered_events()
+	var hovered: Control = root.gui_get_hovered_control()
+	check(hovered == pc.widgets.editor.editor, "mouse reaches actual editor field")
+	for pressed in [true, false]:
+		var event := InputEventMouseButton.new(); event.position = pixels; event.global_position = pixels; event.button_index = MOUSE_BUTTON_LEFT; event.pressed = pressed
+		Input.parse_input_event(event); Input.flush_buffered_events()
 	await frames()
 
 func front_focus(label: String) -> void:
@@ -66,9 +68,10 @@ func run() -> void:
 	await frames()
 	check(ui._new_game(), "isolated new company")
 	ui.guided_intro.skip(); ui.next_task_guide.set_enabled(false)
-	game.set_settings({"resolution":"960x600" if narrow else "1440x900", "window_mode":"windowed", "text_scale":1.3 if narrow else 1.0, "volume":0}, false)
+	game.set_settings({"resolution":"960x600" if narrow else "1600x900", "window_mode":"windowed", "text_scale":1.3 if narrow else 1.0, "volume":0}, false)
+	root.get_node("Graphics").apply_settings(game.settings)
 	ui._set_text_scale(1.3 if narrow else 1.0)
-	root.size = Vector2i(960,600) if narrow else Vector2i(1440,900)
+	print("DESKTOP_FOCUS_DISPLAY pixels=", root.size, " logical=", root.get_visible_rect().size)
 	ui.open_panel("terminal"); await frames(); pc = ui.desktop
 	var progress := {"revision":game.state.revision,"cash":game.state.cash,"completed":game.state.completed_ids.duplicate(),"accepted":game.state.accepted}
 	pc._open_editor("workstation:/home/operator/Documents/focus-quality.txt")

@@ -411,8 +411,9 @@ func _layout_taskbar() -> void:
 	var available_width: float = maxf(0.0, size.x - fixed_width)
 	var dock_width: float = minf(float(count) * 48.0, available_width)
 	task_scroll.custom_minimum_size.x=dock_width
-	taskbar_offset.custom_minimum_size.x=maxf(0.0,minf((size.x-dock_width-50.0)*0.5-8.0,available_width-dock_width))
-	# Containers may retain an expanded offset after a temporary notice.
+	# Keep the software strip anchored; notices and new apps use the spare
+	# space to its right instead of recentering the primary return targets.
+	taskbar_offset.custom_minimum_size.x=0.0
 	dock.offset_left = 0.0; dock.offset_right = 0.0
 
 func _layout_launcher() -> void:
@@ -551,6 +552,7 @@ func _show_app(app: String) -> void:
 
 func _add_task_button(app: String) -> void:
 	var b:=_button("",_taskbar_activate.bind(app)); b.name="TaskbarApp_"+app; b.icon=UI.icon(app); b.expand_icon=true; b.add_theme_constant_override("icon_max_width",28); b.custom_minimum_size=Vector2(46,42); b.tooltip_text=APPS[app][0]; b.flat=false; app_dock.add_child(b); task_buttons[app]=b
+	b.focus_entered.connect(task_scroll.ensure_control_visible.bind(b))
 	var indicator:=ColorRect.new(); indicator.name="RunningIndicator"; indicator.set_anchors_preset(Control.PRESET_BOTTOM_WIDE); indicator.offset_left=15; indicator.offset_right=-15; indicator.offset_top=-4; indicator.offset_bottom=-1; indicator.mouse_filter=Control.MOUSE_FILTER_IGNORE; b.add_child(indicator)
 	_layout_task_button(app)
 
