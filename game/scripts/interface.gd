@@ -3,6 +3,8 @@ const UI = preload("res://scripts/ui_theme.gd")
 const EQUIPMENT_PANEL = preload("res://scripts/equipment_panel.gd")
 const OPERATIONS_PANEL = preload("res://scripts/operations_panel.gd")
 const SALES_PANEL = preload("res://scripts/sales_panel.gd")
+const HARDWARE_QUOTE_BOARD = preload("res://scripts/hardware_quote_board.gd")
+const QUOTE_PRICE_SCALE = preload("res://scripts/quote_price_scale.gd")
 const PROCUREMENT_PANEL = preload("res://scripts/procurement_panel.gd")
 const GAME_THEME = preload("res://scripts/game_theme.gd")
 const M = preload("res://scripts/management_ui.gd")
@@ -946,7 +948,12 @@ func _contract_detail(offer: Dictionary) -> void:
 	var client_title := _label(str(offer.client),13,UI.MUTED); client_title.autowrap_mode=TextServer.AUTOWRAP_OFF; client_title.size_flags_vertical=Control.SIZE_SHRINK_CENTER; identity.add_child(client_title)
 	var reasons: Array = g.contract_eligibility(offer) if g.has_method("contract_eligibility") else (["受注可能"] if bool(offer.unlocked) else ["受注条件未達"])
 	var quote: Dictionary = g.contract_quote(offer)
-	body.add_child(_label(UI.copy("board_facts") % [int(offer.targets),int(quote.budget),int(quote.costs)],14,INK))
+	var hardware_quote: bool = not offer.get("supply_requirement", {}).is_empty()
+	if hardware_quote:
+		var scene := HARDWARE_QUOTE_BOARD.new()
+		scene.setup(offer, g.offer_operations_preview(offer), text_scale, _open_quote_procurement.bind(str(offer.id)))
+		body.add_child(scene)
+	else: body.add_child(_label(UI.copy("board_facts") % [int(offer.targets),int(quote.budget),int(quote.costs)],14,INK))
 	if not offer.unlocked:
 		var eligibility := _label(" / ".join(PackedStringArray(reasons)),14,WARNING)
 		eligibility.name = "ContractEligibility"
@@ -985,10 +992,22 @@ func _contract_detail(offer: Dictionary) -> void:
 		material_cost_label = _label(UI.copy("stock_material_cost") + "  ¥%d" % supply_cost,13,UI.MUTED); material_cost_label.name="QuoteHardwareMaterial"; material_cost_label.autowrap_mode=TextServer.AUTOWRAP_OFF; material_cost_label.size_flags_horizontal=Control.SIZE_SHRINK_BEGIN; material_totals.add_child(material_cost_label)
 		invoice_total_label = _label(UI.copy("billing_total") + "  ¥%d" % int(quote.get("invoice_total", quote.quoted_fee)),14,INK); invoice_total_label.name="QuoteHardwareTotal"; invoice_total_label.autowrap_mode=TextServer.AUTOWRAP_OFF; invoice_total_label.size_flags_horizontal=Control.SIZE_SHRINK_BEGIN; material_totals.add_child(invoice_total_label)
 	var quote_totals := HBoxContainer.new(); quote_totals.add_theme_constant_override("separation",12); body.add_child(quote_totals)
+	quote_totals.visible = not hardware_quote
 	var quote_limits := _label(UI.copy("board_quote_limits") % [int(quote.reference_fee),int(quote.budget_limit)],12,UI.MUTED); quote_limits.autowrap_mode=TextServer.AUTOWRAP_OFF; quote_limits.size_flags_vertical=Control.SIZE_SHRINK_CENTER; quote_totals.add_child(quote_limits)
 	var price_preview := _label("",14,INK); price_preview.name="QuotePreview"; price_preview.size_flags_horizontal=Control.SIZE_EXPAND_FILL; price_preview.horizontal_alignment=HORIZONTAL_ALIGNMENT_RIGHT; quote_totals.add_child(price_preview)
+	var price_scale: Control
+	var send_state: Label
+	if hardware_quote:
+		price_scale = QUOTE_PRICE_SCALE.new(); price_scale.setup(quote, text_scale); body.add_child(price_scale)
+		send_state = _label("", 12, INK); send_state.name = "QuoteSendState"; send_state.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var update_preview := func(_amount: float) -> void:
 		var proposed: Dictionary = g.contract_quote(offer,roundi(price.value))
+		if hardware_quote: _management_feedback("")
+		if is_instance_valid(price_scale): price_scale.set_quote(proposed)
+		if is_instance_valid(send_state):
+			send_state.text = "✓ 予算内 · 利益 ¥%d" % int(proposed.net) if bool(proposed.affordable) else "× 成約不可 · 上限 ¥%d" % int(proposed.budget_limit)
+			if bool(proposed.affordable) and int(proposed.net) < 0: send_state.text = "! 赤字 · 利益 ¥%d" % int(proposed.net)
+			send_state.add_theme_color_override("font_color", INK if bool(proposed.affordable) and int(proposed.net) >= 0 else WARNING)
 		if is_instance_valid(invoice_total_label): invoice_total_label.text = UI.copy("billing_total") + "  ¥%d" % int(proposed.get("invoice_total", proposed.get("quoted_fee", 0)))
 		var reaction := str(proposed.price_reaction)
 		var reaction_text: String = {"discount":"割安 · 顧客評価 +3","fair":"相場内 · 顧客評価 ±0","premium":"高め · 顧客評価 -3"}.get(reaction,reaction)
@@ -999,7 +1018,7 @@ func _contract_detail(offer: Dictionary) -> void:
 	price.value_changed.connect(update_preview); update_preview.call(price.value)
 	price.value_changed.connect(func(value: float): sales_quote_drafts[str(offer.id)] = roundi(value))
 	var operating_preview: Dictionary = g.offer_operations_preview(offer)
-	if int(operating_preview.get("required", 0)) > 0 or int(operating_preview.get("shortage", 0)) > 0:
+	if not hardware_quote and (int(operating_preview.get("required", 0)) > 0 or int(operating_preview.get("shortage", 0)) > 0):
 		_contract_operations_preview(body, offer, g)
 	var disclosures := HBoxContainer.new(); disclosures.add_theme_constant_override("separation",24); body.add_child(disclosures)
 	var brief := _sales_disclosure(body, UI.copy("board_brief"), disclosures)
@@ -1007,8 +1026,9 @@ func _contract_detail(offer: Dictionary) -> void:
 	var conditions := _sales_disclosure(body, UI.copy("board_conditions"), disclosures)
 	conditions.add_child(_label(UI.copy("billing_terms") + "  " + str(g.invoice_terms(offer).label),14,INK))
 	conditions.add_child(_label("%s · 会社Lv.%d / 専門Lv.%d / 難度%d" % [str(offer.service),offer.required_level,offer.required_rank,offer.grade],14,INK))
-	if int(operating_preview.get("required", 0)) == 0 and int(operating_preview.get("shortage", 0)) == 0:
+	if hardware_quote or (int(operating_preview.get("required", 0)) == 0 and int(operating_preview.get("shortage", 0)) == 0):
 		_contract_operations_preview(conditions, offer, g, true)
+	if hardware_quote: conditions.add_child(_label("%d拠点 · 作業目安 %d分 · 導入・照合・納入" % [int(offer.targets), int(quote.budget)], 14, INK))
 	var care_reason := ""
 	if selected_plan == "care":
 		var terms: Dictionary = g.care_terms(str(offer.client)); care_reason=str(quote.get("reason", terms.reason))
@@ -1018,6 +1038,7 @@ func _contract_detail(offer: Dictionary) -> void:
 	var actions := HBoxContainer.new(); actions.name = "QuoteActions"; actions.add_theme_constant_override("separation",10); modal_footer.add_child(actions)
 	actions.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	actions.alignment = BoxContainer.ALIGNMENT_END
+	if is_instance_valid(send_state): actions.add_child(send_state)
 	var save_draft:=_button(UI.copy("board_save_draft"),func():
 		price.apply()
 		if g.set_offer_quote(str(offer.id),roundi(price.value)):
@@ -1061,6 +1082,7 @@ func _contract_detail(offer: Dictionary) -> void:
 		var decision: Dictionary = decisions[-1]
 		if str(decision.get("offer_id","")) == str(offer.id) and str(decision.get("decision","")) == "declined":
 			var declined := _label("前回: ¥%d / 予算超過" % int(decision.amount),14,WARNING); declined.name = "QuoteDeclined"; body.add_child(declined)
+			if hardware_quote and int(decision.amount) == roundi(price.value): _management_feedback("× 見積不成立。顧客上限 ¥%d を超えました。" % int(quote.budget_limit))
 
 func _contract_operations_preview(body: VBoxContainer, offer: Dictionary, g, details_open: bool = false) -> void:
 	if not g.has_method("offer_operations_preview"):

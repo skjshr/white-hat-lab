@@ -7,6 +7,8 @@ const UI = preload("res://scripts/ui_theme.gd")
 const THEME = preload("res://scripts/game_theme.gd")
 const SALES_CHART = preload("res://scripts/sales_chart.gd")
 const M = preload("res://scripts/management_ui.gd")
+const ART = preload("res://scripts/equipment_art.gd")
+const STOCK = preload("res://scripts/customer_stock.gd")
 
 const HEADER := THEME.HEADER
 const TAB_BAR := M.LINE
@@ -190,6 +192,13 @@ static func _offer_card(ui, g, lane_id: String, item: Dictionary) -> PanelContai
 	_list_row_style(header)
 	card.add_child(header)
 	var row:=HBoxContainer.new();row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT);row.offset_left=10;row.offset_right=-10;row.offset_top=4;row.offset_bottom=-4;row.add_theme_constant_override("separation",12);header.add_child(row)
+	var offer: Dictionary = item.get("offer", {})
+	var requirement: Dictionary = offer.get("supply_requirement", {})
+	if not requirement.is_empty():
+		var object := TextureRect.new(); object.name = "SalesAppliance_" + _node_id(id)
+		object.texture = ART.icon(str(STOCK.product(str(requirement.get("sku", ""))).get("icon", "")))
+		object.custom_minimum_size = Vector2(78, 58); object.expand_mode = TextureRect.EXPAND_IGNORE_SIZE; object.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		row.add_child(object)
 	var identity:=VBoxContainer.new();identity.size_flags_horizontal=Control.SIZE_EXPAND_FILL;identity.add_theme_constant_override("separation",0);row.add_child(identity)
 	var title:=_label(str(item.get("title","")),15,INK);title.add_theme_font_override("font",UI.font(700));title.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART;title.max_lines_visible=2;title.tooltip_text=title.text;identity.add_child(title)
 	var client_text := str(contact.get("company",item.get("client","")))

@@ -130,6 +130,24 @@ func run() -> void:
 	var invoice: Dictionary = invoices[invoices.size() - 1] if not invoices.is_empty() and invoices.back() is Dictionary else {}
 	check(int(invoice.get("material_cost", 0)) == 4800 and int(invoice.get("amount", 0)) == int(invoice.get("fee", 0)) + int(invoice.get("bonus", 0)) + 4800, "billing invoice has one equipment line")
 	check(game.save_game() and game.load_game(), "commissioning survives save reload")
+	var completed_vm: Dictionary = game._vm().export_state()
+	check(bool(game._vm().backup_acceptance_view().get("enforced", false)) and game._vm().evaluate().size() == 5, "newly accepted appliance has separate restoration and original-preservation gates")
+	var changed_original = load("res://scripts/virtual_machine.gd").new()
+	changed_original.setup(1, completed_vm)
+	changed_original.state.fs["/srv/data/ledger.txt"] = "changed after backup"
+	check(not bool(changed_original.backup_acceptance_view().get("original_preserved", true)) and not changed_original.evaluate().all(func(value): return bool(value)), "independent negative model fixture rejects changed original even with matching restored copy")
+	# Explicit compatibility model fixture: remove the new authored stamp from
+	# a completed export to reproduce the pre-change appliance save contract.
+	# This fixture does not supply the native journey's funds or success.
+	var older: Dictionary = game._vm().export_state()
+	older.erase("backup_authorization"); older.erase("backup_authorization_version"); older.erase("backup_restore_origins")
+	older.scenario.erase("backup_preservation_required")
+	older.scenario.checks = ["3台帳の日次退避、別フォルダー復元、ハッシュ照合の完了"]
+	var old_files: Dictionary = older.fs.duplicate(true)
+	var legacy_vm = load("res://scripts/virtual_machine.gd").new()
+	legacy_vm.setup(1, JSON.parse_string(JSON.stringify(older)), load("res://scripts/case_catalog.gd").by_id("hardware-backup-install"))
+	check(not legacy_vm.state.has("backup_authorization") and not bool(legacy_vm.backup_acceptance_view().get("enforced", true)), "legacy appliance is not backfilled from current catalog")
+	check(legacy_vm.state.fs == old_files and legacy_vm.evaluate().size() == 3 and legacy_vm.evaluate().all(func(value): return bool(value)), "old completed appliance retains its files and original three-check acceptance")
 	_finish()
 
 func _finish() -> void:

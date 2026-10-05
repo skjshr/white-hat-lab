@@ -1,6 +1,7 @@
 extends Control
 ## CRM relationship route, projected solely from the saved customer outcome.
 const UI = preload("res://scripts/ui_theme.gd")
+const ART = preload("res://scripts/equipment_art.gd")
 const INK := Color("243940")
 const TEAL := Color("247c72")
 const LINE := Color("c2d5d0")
@@ -33,7 +34,7 @@ func setup(saved: Dictionary, scale: float, inspect: Callable, next: Callable) -
 	_field("CycleRelationshipDay", "顧客満足 · DAY %02d" % int(outcome.get("day", item.get("source_day", 0))), 12, .355, 120, .29)
 	_field("CycleRelationshipStatus", status_label(), 15, .355, 158, .29)
 	_field("CycleNextTitle", str(item.get("title", "次の仕事")), 15, .685, 135, .295)
-	_field("CycleNextService", {"backup":"退避・復元", "permissions":"共有資料", "network":"ネットワーク", "identity":"利用者ID", "external_sharing":"外部ファイル共有", "endpoint":"端末調査"}.get(str(item.get("work_family", "")), "次の業務"), 12, .685, 189, .295)
+	_field("CycleNextService", {"backup":"退避・復元", "deployment_backup":"退避機器の導入", "deployment_gateway":"ゲートウェイの導入", "permissions":"共有資料", "network":"ネットワーク", "identity":"利用者ID", "external_sharing":"外部ファイル共有", "endpoint":"端末調査"}.get(str(item.get("work_family", "")), "次の業務"), 12, .685, 189, .295)
 	resized.connect(_layout); _layout()
 
 func status_label() -> String:
@@ -105,7 +106,10 @@ func _object(index: int) -> void:
 		object.draw_arc(center + Vector2(12,24)*f, 13*f, 0,TAU,32, TEAL if str(item.get("source_rating", "")) == "on_time" else RED, 2*f,true)
 		_mark(object, center + Vector2(12,24)*f, "check" if str(item.get("source_rating", "")) == "on_time" else "late")
 	else:
-		if str(item.get("work_family", "")) == "backup":
+		var family := str(item.get("work_family", ""))
+		if family in ["deployment_backup", "deployment_gateway"]:
+			object.draw_texture_rect(ART.icon("stock_backup" if family == "deployment_backup" else "stock_gateway"), Rect2(center - Vector2(72, 53) * f, Vector2(144, 106) * f), false)
+		elif family == "backup":
 			for offset in [-26,0,26]:
 				object.draw_style_box(UI.style(Color("253c45"), TEAL, 5, 0, 2), Rect2(center + Vector2(-36,offset-10)*f,Vector2(72,21)*f))
 				object.draw_circle(center + Vector2(24,offset)*f, 3*f, Color("e4edbf"))

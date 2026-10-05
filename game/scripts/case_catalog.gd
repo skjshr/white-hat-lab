@@ -168,6 +168,10 @@ static func _add_hardware_backup_install() -> void:
 	var extra := {"required_files":required,"hardware_commissioning":true,"supply_requirement":{"sku":"backup_appliance","quantity":1,"target_index":0}}
 	var probes := _probes(1, desired, extra)
 	_catalog.append({"id":"hardware-backup-install","title":DISPLAY_COPY.copy("stock_backup_case_title","Backup appliance commissioning"),"client":CLIENTS[1],"chapter":1,"category":"operations","tier":1,"required_level":2,"brief":DISPLAY_COPY.copy("stock_backup_case_brief","Commission the customer backup appliance, restore the three required records, and verify their real contents."),"service":SERVICES[1],"evidence":[DISPLAY_COPY.copy("stock_backup_case_check","Verify snapshots, restore output, and file hashes before shipment.")],"hints":[],"debrief":DISPLAY_COPY.copy("stock_backup_case_debrief","The appliance is useful only after a real restore and content verification."),"checks":[DISPLAY_COPY.copy("stock_backup_case_check","Restore and compare all required records before delivery." )],"probes":probes,"desired":desired.duplicate(true),"initial":initial.duplicate(true),"required_files":required.duplicate(true),"reward":9000,"supply_requirement":extra.supply_requirement.duplicate(true),"hardware_commissioning":true})
+	# Capture original records only when accepting a newly authored case.
+	# Existing saved VMs retain their prior scope and are never backfilled.
+	_catalog.back().backup_preservation_required = true
+	_catalog.back().checks = ["日次の退避を有効にする", "拠点内の保存先を使う", "3台帳を /restore に復元・照合する", "元の業務台帳を維持する", "対象外の資料を維持する"]
 
 static func _with(base: Dictionary, changes: Dictionary) -> Dictionary:
 	var result := base.duplicate(true)
