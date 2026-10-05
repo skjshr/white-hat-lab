@@ -203,7 +203,7 @@ func setup(chapter: int, saved: Dictionary = {}, scenario: Dictionary = {}) -> v
 	for name in RECORDS: state.fs["/srv/data/" + name] = RECORDS[name]
 	if _chapter == 1:
 		var manifest := "# 顧客から預かった正常時のファイル照合票 / SHA-256\n"
-		for name in RECORDS: manifest += str(RECORDS[name]).sha256_text()+"  /restore/srv/data/"+name+"\n"
+		for name in _backup_records(): manifest += str(_backup_records()[name]).sha256_text()+"  /restore/srv/data/"+name+"\n"
 		state.fs[OPERATOR_HOME+"/recovery-manifest.sha256"] = manifest
 	if _chapter == 4: _edr_ensure_state(true)
 	state.fs["/var/log/evidence.log"] = EVIDENCE
@@ -224,7 +224,7 @@ func setup(chapter: int, saved: Dictionary = {}, scenario: Dictionary = {}) -> v
 	# The approved source is captured only for a freshly seeded recovery case,
 	# after its damaged/missing files have been installed. Loaded saves never
 	# manufacture a new baseline from the files they happen to contain.
-	if _chapter == 1: BackupAuthorization.initialize(state, scenario, RECORDS)
+	if _chapter == 1: BackupAuthorization.initialize(state, scenario, _backup_records())
 	if _chapter == 4 and int(state.get("edr_model_version",1)) >= EDR_MODEL_VERSION:
 		if EndpointRemediation.enabled(state): EndpointRemediation.initialize(state)
 		state.evidence_original = _edr_serialize_timeline()
@@ -1782,6 +1782,12 @@ func backup_acceptance_view() -> Dictionary:
 			paths[str(source)] = _restored_data_path(str(source).get_file())
 	return BackupAuthorization.view(state, paths)
 
+func _backup_records() -> Dictionary:
+	var result: Dictionary = RECORDS.duplicate(true)
+	var authored: Variant = state.get("scenario", {}).get("backup_expected_records", {})
+	if authored is Dictionary: result.merge(authored, true)
+	return result
+
 func _restic_v2() -> bool:
 	return _chapter == 1 and int(state.get("backup_model_version", 1)) >= 2
 
@@ -2051,10 +2057,10 @@ func _evaluate_scenario() -> Array[bool]:
 			for name in RECORDS: required.append("/srv/data/" + name)
 		for file in required:
 			if str(file).begins_with("/srv/data/"):
-				if state.fs.get(_restored_data_path(str(file).get_file()), "") != RECORDS.get(str(file).get_file(), ""): restored = false
+				if state.fs.get(_restored_data_path(str(file).get_file()), "") != _backup_records().get(str(file).get_file(), ""): restored = false
 		var valid_snapshot := false
 		for snapshot in state.snapshots:
-			if snapshot.get("repository", "") == desired.get("repository", "") and snapshot.get("files", {}) == RECORDS: valid_snapshot = true
+			if snapshot.get("repository", "") == desired.get("repository", "") and snapshot.get("files", {}) == _backup_records(): valid_snapshot = true
 		var acceptance := backup_acceptance_view()
 		if bool(acceptance.get("enforced", false)): restored = bool(acceptance.get("restore_valid", false))
 		if result.size() >= 2: result.append(restored and valid_snapshot)

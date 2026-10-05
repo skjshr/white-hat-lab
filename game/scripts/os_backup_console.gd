@@ -152,6 +152,7 @@ static func _execute_restore(d, s: Dictionary, snapshot: Dictionary, repo: Strin
 	s["restore_result"] = "succeeded" if succeeded else "failed"
 	s["plan_previewed"] = false
 	s["last_restore_result"] = raw
+	if succeeded: d._notify("復元処理完了")
 	if succeeded and _workbench_file(d.game._vm().state,str(s.get("path",""))) and not bool(s.get("file_list_open",false)) and str(s.get("restore_scope",""))=="selected":s["restore_open"]=false
 	persist(d)
 	d._render_backup()
@@ -389,7 +390,7 @@ static func _select_snapshot(d, s: Dictionary, snapshot: Dictionary, repo: Strin
 
 static func _workbench_case(live: Dictionary) -> bool:
 	var scenario:Dictionary=live.get("scenario",{})
-	return str(scenario.get("id",""))=="service-1-case-3" and str(scenario.get("backup_acceptance_mode",""))!="production_replacement"
+	return (str(scenario.get("id",""))=="service-1-case-3" or (str(scenario.get("id",""))=="branch-order-continuity" and bool(scenario.get("backup_preservation_required",false)))) and str(scenario.get("backup_acceptance_mode",""))!="production_replacement"
 
 static func _workbench_file(live:Dictionary,path:String) -> bool:
 	var required:Variant=live.get("scenario",{}).get("required_files",[])

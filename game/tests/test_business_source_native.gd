@@ -185,7 +185,9 @@ func source_visible(host: String, file_name: String) -> bool:
 	if not expect(displayed.contains(host) and displayed.contains(file_name), "actual provider and distinct resource are displayed"): return false
 	if not expect(text_in(control("BusinessSourceStage1")).contains(host) and text_in(control("BusinessSourceStageDetail2")).contains(file_name), "provider and file are visible in the diagram itself"): return false
 	var area := root.get_visible_rect().grow(1)
-	for label in flow.find_children("*", "Label", true, false):
+	# Godot's delayed tooltip Labels may be descendants of the drawn buttons.
+	# They intentionally contain several lines; inspect the authored captions.
+	for label in flow.find_children("BusinessSource*", "Label", true, false):
 		if not label.is_visible_in_tree(): continue
 		if not expect(label.get_global_rect().position.x >= area.position.x and label.get_global_rect().end.x <= area.end.x, "source caption remains within horizontal viewport at actual text scale"): return false
 		if not expect(label.get_theme_font_size("font_size") >= int(14 * float(game.settings.text_scale)), "source diagram respects enlarged readable font size"): return false

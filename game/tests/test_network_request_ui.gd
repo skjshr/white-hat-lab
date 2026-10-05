@@ -22,10 +22,12 @@ func press_control(target: Control, description: String) -> bool:
 	for _attempt in 36:
 		var rect := clipped_rect(target)
 		if rect.size.y >= minf(24, target.size.y) and rect.has_point(target.get_global_rect().get_center()): break
-		var parent := target.get_parent()
-		while parent != null and not parent is ScrollContainer: parent = parent.get_parent()
-		if not parent is ScrollContainer: break
-		mouse(parent.get_global_rect().get_center(), MOUSE_BUTTON_WHEEL_DOWN if target.get_global_rect().get_center().y > parent.get_global_rect().get_center().y else MOUSE_BUTTON_WHEEL_UP)
+		var parent := visible_scroll_ancestor(target)
+		if parent == null: break
+		# A disabled inner table can extend below the app viewport. Its full
+		# rectangle's center may hit the taskbar instead of scrollable content.
+		var point := clipped_rect(parent).get_center()
+		mouse(point, MOUSE_BUTTON_WHEEL_DOWN if target.get_global_rect().get_center().y > point.y else MOUSE_BUTTON_WHEEL_UP)
 		await frames(3)
 	var previous := Rect2(); var stable := 0
 	for _attempt in 24:
@@ -52,6 +54,13 @@ func press_control(target: Control, description: String) -> bool:
 	await frames(8)
 	if is_button and not expect(count[0] == 1, description + " exactly one real press (actual %d)" % count[0]): return false
 	return true
+
+func visible_scroll_ancestor(target: Control) -> ScrollContainer:
+	var parent := target.get_parent()
+	while parent != null:
+		if parent is ScrollContainer and parent.vertical_scroll_mode != ScrollContainer.SCROLL_MODE_DISABLED and clipped_rect(parent).has_area(): return parent
+		parent = parent.get_parent()
+	return null
 
 func press(id: String) -> bool:
 	return await press_control(control(id), id)
@@ -193,12 +202,12 @@ func comparison_capture(label: String) -> void:
 	if not expect(game._vm().export_state() == machine and game.diagnostic_probes() == probes and int(game.clock_minutes()) == clock and int(game.state.cash) == cash, "display comparison preserves VM probes clock and cash"): return
 
 func scroll_to(target: Control, to_top := false) -> bool:
-	var scroller := target.get_parent()
-	while scroller != null and not scroller is ScrollContainer: scroller = scroller.get_parent()
+	var scroller := visible_scroll_ancestor(target)
 	if not expect(scroller is ScrollContainer, "result belongs to scrollable work area"): return false
 	for _attempt in 24:
 		if (to_top and scroller.scroll_vertical == 0) or (not to_top and clipped_rect(target).has_point(target.get_global_rect().get_center())): break
-		mouse(scroller.get_global_rect().get_center(), MOUSE_BUTTON_WHEEL_UP if to_top or target.get_global_rect().get_center().y < scroller.get_global_rect().get_center().y else MOUSE_BUTTON_WHEEL_DOWN)
+		var point := clipped_rect(scroller).get_center()
+		mouse(point, MOUSE_BUTTON_WHEEL_UP if to_top or target.get_global_rect().get_center().y < point.y else MOUSE_BUTTON_WHEEL_DOWN)
 		await frames(3)
 	return expect(clipped_rect(target).has_point(target.get_global_rect().get_center()), "observed target visible after real wheel movement")
 

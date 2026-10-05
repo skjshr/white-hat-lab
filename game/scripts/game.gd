@@ -13,6 +13,7 @@ const OPERATIONS = preload("res://scripts/operations_dispatch.gd")
 const DAY_LEDGER = preload("res://scripts/day_ledger.gd")
 const BILLING = preload("res://scripts/company_billing.gd")
 const COMPANY_CYCLE = preload("res://scripts/company_cycle.gd")
+const BRANCH_HANDOFF = preload("res://scripts/branch_handoff.gd")
 const CAREER_CLOSEOUT = preload("res://scripts/career_closeout.gd")
 const COMPANY_ROADMAP = preload("res://scripts/company_roadmap.gd")
 const SERVICE_MONITOR_VM = preload("res://scripts/virtual_machine.gd")
@@ -2315,6 +2316,7 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 	state.offers = []
 	var level := int(company_level().level)
 	for selected in CASES.all():
+		if str(selected.id) == BRANCH_HANDOFF.CASE_ID and not BRANCH_HANDOFF.available(state): continue
 		var tier := int(selected.tier)
 		var category: String = selected.category
 		var required_skills := _case_skill_requirements(selected)
@@ -2493,6 +2495,10 @@ func company_cycle_view() -> Dictionary:
 	var cycle: Dictionary = COMPANY_CYCLE.view(self)
 	var opportunities: Array = cycle.get("leads", []).duplicate(true)
 	for lead in opportunities:
+		if str(lead.get("case_id", "")) == BRANCH_HANDOFF.CASE_ID and str(lead.get("status", "")) not in ["paused", "fulfilled"] and not BRANCH_HANDOFF.available(state):
+			lead.status = "locked"; lead.handoff_unavailable = true
+			lead.locked_reason = "引継ぎ元の受注表または納品評価の保存記録がありません。代用データでは受注できません。"
+			continue
 		# Ready is eligibility; an unoffered consultation waits for the ordinary
 		# daily market slot instead of pretending it can already be accepted.
 		if bool(state.get("career_mode", false)) and str(lead.get("status", "")) == "ready" and not bool(lead.get("market_available", false)):
@@ -2611,6 +2617,12 @@ func choose_contract(id: String) -> bool:
 	_sync_contract_context()
 	for offer in state.offers:
 		if offer.id == id and offer.unlocked and _case_skills_met(offer,state.skills) and bool(offer.get("market_available", true)) and int(state.credit) >= int(offer.required_credit) and int(company_level().level) >= int(offer.get("required_level",1)):
+			var handoff_scenario: Dictionary = {}
+			if str(offer.get("case_id", "")) == BRANCH_HANDOFF.CASE_ID:
+				handoff_scenario = BRANCH_HANDOFF.scenario(state, CASES.by_id(BRANCH_HANDOFF.CASE_ID))
+				if handoff_scenario.is_empty():
+					state = previous_state; _assignments = previous_assignments; _machine = previous_machine; _machine_key = previous_machine_key
+					return false
 			if id in state.get("completed_ids",[]): return false
 			if state.contract_contexts.has(id): return false
 			for context_id in state.contract_contexts.keys():
@@ -2642,6 +2654,9 @@ func choose_contract(id: String) -> bool:
 				var target_chapter := int(spec.get("chapter",state.chapter))
 				state.targets.append({"chapter":target_chapter,"case_id":str(spec.get("case_id",offer.case_id)),"name":str(spec.get("name","拠点")),"config":_default_fields(target_chapter),"inspected":false,"checks":[],"revision":0,"validated_revision":-1,"baseline_recorded":false,"baseline_locked":false,"baseline_config":"","baseline_sha":"","baseline_report":"","baseline_report_content":""})
 			var selected_case_id := str(offer.get("case_id", ""))
+			if not handoff_scenario.is_empty():
+				state.targets[0].scenario = handoff_scenario
+				state.contract.handoff = handoff_scenario.handoff.duplicate(true)
 			state.advanced = _advanced_engine(selected_case_id).create(selected_case_id) if _advanced_case_id(selected_case_id) else {}
 			if not state.advanced.is_empty(): state.targets[0].advanced = state.advanced.duplicate(true)
 			_prepare_linked_identity_contract()
