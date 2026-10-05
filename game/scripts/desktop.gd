@@ -79,6 +79,7 @@ var firewall_render_signature := ""
 var backup_ui: Dictionary = {}
 var backup_render_signature := ""
 var samba_ui: Dictionary = {}
+var smb_document_focus := false
 var business_ui: Dictionary = {}
 var billing_ui: Dictionary = {}
 var advanced_ui: Dictionary = {}
@@ -750,6 +751,11 @@ func _focus(app: String, restore_keyboard := true) -> void:
 			UI.shell_navigation(task_buttons[id],id == app,UI.app_tint(id))
 		if task_buttons.has(id): _layout_task_button(id)
 	workspace.move_child(windows[app],workspace.get_child_count()-1); body = windows[app].content
+	if changed_app and app == "files" and _samba_v2() and bool(samba_ui.get("network_open", false)):
+		_remember_editor()
+		# Reconcile the saved/draft copy when returning from another app. This
+		# redraws the captured specimen without issuing a new SMB request.
+		FILES.refresh(self)
 	_wire_focus(windows[app].content, app)
 	if app == "editor": editor = widgets.editor.editor; path_edit = widgets.editor.path; EDITOR.refresh(self)
 	if app == "files": file_list = widgets.files.list; path_edit = widgets.files.path
@@ -1642,13 +1648,16 @@ func _smb_get(name: String, destination: String) -> bool:
 	var ok:=result.begins_with("getting file ") and result.ends_with(": OK")
 	if ok:
 		samba_ui.access_selected=name; samba_ui.access_preview=game.vm_read(destination); samba_ui.access_preview_path=game._vm()._path(destination)
+		smb_document_focus = true
 	return _smb_finish(result,ok)
 
 func _smb_put(source: String, name: String) -> bool:
 	if not _smb_argument(source) or not _smb_argument(name): return _smb_finish("NT_STATUS_INVALID_PARAMETER",false)
 	var result:=_smb_command('put "'+source+'" "'+name+'"')
 	var ok:=result.begins_with("putting file ") and result.ends_with(": OK")
-	if ok: _smb_list()
+	if ok:
+		_smb_list()
+		_notify("転送保存済み")
 	get_node("/root/Soundscape").play_ui("work_success" if ok else "work_failure")
 	return _smb_finish(result,ok)
 

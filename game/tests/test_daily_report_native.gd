@@ -47,6 +47,12 @@ func projected(id: String) -> Dictionary:
 		if str(row.id) == id: return row
 	return {}
 
+func receipt_effect(receipt: Dictionary) -> bool:
+	return expect(game.current_done() and str(receipt.rating) == "on_time" and int(receipt.satisfaction_after) > int(receipt.satisfaction_before), "actual on-time result changes customer trust")
+
+func native_method() -> String:
+	return "Genuine paid DAY6 source, naturally available daily-report case. New work uses Godot mouse/key input. Office Graphics applied. Background work clock paused; explicit work costs accrue. Wrong guest exposure blocks delivery, save failure rolls back PUT, retry and save/resume retain actual bytes and payment. No funds, skills, offers or answer injected. No first-time human participant."
+
 func home() -> bool:
 	if not await press("SambaCancel"): return false
 	return expect(control("SambaAccessBoard") != null, "actual shared-folder paths return after edit")
@@ -112,12 +118,12 @@ func run() -> void:
 	if not await route("verify") or not await press("DiagnosticValidate") or not expect(game.can_deliver(), "current real evidence enables delivery"): finish(); return
 	if not await route("receipt") or not await press("GuideDeliver"): finish(); return
 	var receipt: Dictionary = game.completion_receipt()
-	if not expect(game.current_done() and int(receipt.satisfaction_after) > int(receipt.satisfaction_before), "actual on-time result changes customer trust"): finish(); return
+	if not receipt_effect(receipt): finish(); return
 	if not await press("ReceiptFinanceTab") or not await press("ReceiptInvoice") or not await press("BillingPost"): finish(); return
 	if not expect(game.company_invoices().any(func(row): return str(row.id) == str(receipt.invoice_id) and str(row.status) == "paid"), "accepted daily-report work reaches actual paid invoice"): finish(); return
 	await capture("05-daily-work-paid")
 	var result_state: Dictionary = game.state.duplicate(true)
-	if not expect(game.save_game() and game.load_game() and same_values(game.state.history, result_state.history) and int(game.state.cash) == int(result_state.cash), "payment and decision history persist after save/resume"): finish(); return
+	if not expect(game.save_game() and game.load_game() and same_values(game.state.history, result_state.history) and same_values(game.state.customer_relations, result_state.customer_relations) and same_values(game.state.last_receipt, result_state.last_receipt) and int(game.state.cash) == int(result_state.cash), "payment, customer consequence and decision history persist after save/resume"): finish(); return
 	if not expect(FileAccess.get_file_as_string(source_path) == source_text, "prior earned source untouched"): finish(); return
 	var completed := FileAccess.open(folder.path_join("completed.json"), FileAccess.WRITE)
 	if completed != null: completed.store_string(JSON.stringify(game.state, "\t")); completed.close()
@@ -127,7 +133,7 @@ func finish() -> void:
 	if finishing: return
 	finishing = true
 	if not journey_completed and failures.is_empty(): failures.append("daily-report journey stopped before paid result")
-	var report := {"assertions":assertions,"clicks":clicks,"keys":keys,"scrolls":scrolls,"narrow":narrow,"failures":failures,"events":events,"method":"Genuine paid DAY6 source, naturally available daily-report case. New work uses Godot mouse/key input. Office Graphics applied. Background work clock paused; explicit work costs accrue. Wrong guest exposure blocks delivery, save failure rolls back PUT, retry and save/resume retain actual bytes and payment. No funds, skills, offers or answer injected. No first-time human participant."}
+	var report := {"assertions":assertions,"clicks":clicks,"keys":keys,"scrolls":scrolls,"narrow":narrow,"failures":failures,"events":events,"method":native_method()}
 	var file := FileAccess.open(folder.path_join("daily-report-native.json"), FileAccess.WRITE)
 	if file != null: file.store_string(JSON.stringify(report, "  ")); file.close()
 	print("DAILY_REPORT_NATIVE_", "PASS" if failures.is_empty() else "FAIL", " assertions=", assertions, " failures=", failures)

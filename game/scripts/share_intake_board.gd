@@ -47,7 +47,7 @@ func _object(id: String, value: String, detail: String) -> void:
 	button.add_theme_stylebox_override("hover", UI.style(Color("fff6d8"), INK, 5, 4, 2))
 	button.add_theme_stylebox_override("pressed", UI.style(Color("f1e8c9"), INK, 5, 4, 2))
 	button.add_theme_stylebox_override("focus", UI.style(Color.TRANSPARENT, INK, 2, 2, 2))
-	button.tooltip_text = detail
+	button.tooltip_text = "日報の依頼を開く" if id == "ShareIntakeReport" else "来客の条件を開く"
 	button.pressed.connect(func(): inspection.text = detail)
 	add_child(button); objects[id] = button
 

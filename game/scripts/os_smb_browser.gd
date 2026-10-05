@@ -59,10 +59,7 @@ static func render(d,parent: VBoxContainer) -> void:
 			recovery.name="SmbRecoveryHint";recovery.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART
 	if str(s.get("transfer_mode","")) in ["upload","download"]:
 		_transfer(d,parent,str(s.transfer_mode));return
-	var compact:=float(d.windows.files.size.x)<1100
-	var panes: BoxContainer=VBoxContainer.new() if compact else HBoxContainer.new();panes.add_theme_constant_override("separation",12);parent.add_child(panes)
-	var listing:=panel(panes);listing.get_parent().size_flags_horizontal=Control.SIZE_EXPAND_FILL
-	label(d,listing,copy("name"),13,MUTED);listing.add_child(HSeparator.new())
+	var listing:=HFlowContainer.new();listing.add_theme_constant_override("h_separation",8);listing.add_theme_constant_override("v_separation",6);parent.add_child(listing)
 	var files: Array=s.get("access_files",[])
 	if files.is_empty():label(d,listing,copy("access_denied") if "ACCESS_DENIED" in output else copy("no_files"),14,MUTED)
 	for raw in files:
@@ -73,20 +70,11 @@ static func render(d,parent: VBoxContainer) -> void:
 		entry.alignment=HORIZONTAL_ALIGNMENT_LEFT;entry.size_flags_horizontal=Control.SIZE_EXPAND_FILL
 		entry.add_theme_stylebox_override("normal",UI.style(Color("e7f1fb") if str(s.get("access_selected",""))==name else Color.WHITE,Color.TRANSPARENT,8,8,0))
 	if not str(s.get("access_selected","")).is_empty():
-		var preview:=panel(panes);preview.get_parent().size_flags_horizontal=Control.SIZE_EXPAND_FILL
-		label(d,preview,str(s.access_selected),17)
-		label(d,preview,"プレビュー（取得時の内容）",12,MUTED)
 		var preview_path := _preview_path(d)
-		var path_label:=label(d,preview,"取得先: "+preview_path,12,MUTED);path_label.name="SmbPreviewPath";path_label.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART
-		var actions:=HFlowContainer.new();actions.add_theme_constant_override("h_separation",8);actions.add_theme_constant_override("v_separation",6);preview.add_child(actions)
-		var edit:=button(d,actions,"エディターで開く","SmbEdit",func():d._open_editor(preview_path),true)
-		edit.disabled=preview_path.is_empty()
-		var upload:=button(d,actions,"このファイルを送信","SmbUploadEdited",func():_upload_preview(d))
-		upload.disabled=preview_path.is_empty()
-		var contents:=TextEdit.new();contents.name="SmbPreview";contents.editable=false;contents.text=str(s.get("access_preview",""));contents.custom_minimum_size.y=210;contents.add_theme_font_override("font",d.mono)
-		for kind in ["normal","read_only"]:contents.add_theme_stylebox_override(kind,UI.style(Color("f9fbfd"),LINE,10,10,0))
-		for kind in ["font_color","font_readonly_color","font_uneditable_color"]:contents.add_theme_color_override(kind,INK)
-		preview.add_child(contents)
+		var desk := preload("res://scripts/smb_document_desk.gd").new(); desk.setup(d,str(s.access_selected),preview_path,_upload_preview.bind(d)); parent.add_child(desk)
+		var details: VBoxContainer = d._disclosure(parent,"取得先・接続の詳細")
+		var path_label:=label(d,details,"取得先: "+preview_path,12,MUTED);path_label.name="SmbPreviewPath";path_label.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART
+		label(d,details,"共有: //files01.client.test/"+str(s.get("access_share","share"))+" / 利用者: "+str(s.get("access_user","staff")),12,MUTED)
 
 static func _transfer(d,parent: VBoxContainer,mode: String) -> void:
 	var s: Dictionary=d.samba_ui;var body:=panel(parent)
