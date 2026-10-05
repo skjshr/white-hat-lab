@@ -3,13 +3,16 @@ extends "res://tests/test_portal_diff_ui.gd"
 ## Work, bad data, rollback, diagnostics, delivery and payment use native input.
 const SALES := "https://intranet.client.test/sales"
 
+func qa_profile() -> String: return "business-source-native"
+func report_name() -> String: return "business-source-native"
+
 func control(id: String) -> Control:
 	if id == "NativeTargetSelector" and is_instance_valid(ui) and is_instance_valid(ui.desktop): return ui.desktop.target_selector
 	return super.control(id)
 
 func run() -> void:
 	game = root.get_node("Game")
-	if not expect("--qa-profile=business-source-native" in OS.get_cmdline_user_args(), "isolated business-source QA storage"): finish(); return
+	if not expect("--qa-profile=" + qa_profile() in OS.get_cmdline_user_args(), "isolated business-source QA storage"): finish(); return
 	var source := OS.get_environment("WHL_BRANCH_CAREER_FIXTURE")
 	source_text = FileAccess.get_file_as_string(source)
 	if not expect(not source_text.is_empty() and game.save_path.begins_with("user://qa-"), "genuine completed funded career copied only to QA"): finish(); return
@@ -163,7 +166,7 @@ func finish() -> void:
 	finishing = true
 	if not journey_completed and failures.is_empty(): failures.append("business source journey incomplete")
 	var report := {"assertions":assertions,"narrow":narrow,"clicks":clicks,"keys":keys,"scrolls":scrolls,"failures":failures,"events":events,"cash":game.state.get("cash",0) if game != null else 0,"method":"Actual funded DAY5 public settlement checkpoint; public available acceptance setup. Actual Godot mouse/key for firewall/share repair, save failure/retry, invalid shared amount, version restore, ERP reload, all three targets' diagnostics, delivery and payment. Save/load API tests interruption. No answer/cash/skill/VM state injection. Known controls; not first-time player proof."}
-	var file := FileAccess.open(folder.path_join("business-source-native.json"), FileAccess.WRITE)
+	var file := FileAccess.open(folder.path_join(report_name() + ".json"), FileAccess.WRITE)
 	if file != null: file.store_string(JSON.stringify(report, "  ")); file.close()
 	print("BUSINESS_SOURCE_NATIVE_", "PASS" if failures.is_empty() else "FAIL", " assertions=",assertions," clicks=",clicks," keys=",keys," scrolls=",scrolls," failures=",failures)
 	if is_instance_valid(ui): ui.queue_free(); await frames(5)

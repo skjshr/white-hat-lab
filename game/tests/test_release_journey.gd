@@ -21,8 +21,10 @@ func _init() -> void:
 	folder = OS.get_environment("WHL_CAPTURE_DIR")
 	if folder.is_empty(): folder = ProjectSettings.globalize_path("res://../../audit/release-candidate/journey/screens")
 	DirAccess.make_dir_recursive_absolute(folder)
-	create_timer(240).timeout.connect(func(): failures.append("journey timeout"); finish())
+	create_timer(journey_timeout()).timeout.connect(func(): failures.append("journey timeout"); finish())
 	call_deferred("run")
+
+func journey_timeout() -> float: return 240.0
 
 func frames(count := 8) -> void:
 	for _i in count: await process_frame

@@ -2,6 +2,7 @@ extends RefCounted
 ## A conventional service console backed by the same guest VM as the shell.
 const UI = preload("res://scripts/ui_theme.gd")
 const DASHBOARD = preload("res://scripts/os_monitor_dashboard.gd")
+const BRANCH = preload("res://scripts/os_branch_monitor.gd")
 const SERVICE_ACCENT := Color("315b91")
 
 static func build(d, parent: VBoxContainer) -> void:
@@ -103,6 +104,7 @@ static func refresh(d) -> void:
 	for entry in [["monitor","監視"],["overview","詳細"],["config","構成"],["logs","ログ"]]:
 		var tab_id: String = entry[0]
 		var tab_button = d._button(entry[1], func(): d.widgets.monitor.tab=tab_id; d.monitor_ui["tab"]=tab_id; d._save_session(false); refresh(d))
+		tab_button.name = "MonitorTab_" + tab_id
 		UI.os_navigation(tab_button, tab_id == w.tab, SERVICE_ACCENT)
 		tabbar.add_child(tab_button)
 	var content: VBoxContainer = d._box(box, 8)
@@ -117,6 +119,14 @@ static func refresh(d) -> void:
 		item.set_text(0,str(info.service))
 		item.set_metadata(0,str(info.service)); item.select(0)
 	w.service_tree.set_block_signals(false)
+	if w.tab == "monitor":
+		var branch: Dictionary = d.game.branch_monitor_snapshot()
+		if bool(branch.get("available", false)):
+			w.host.text = str(branch.get("client", "")) + " · 案件全体"
+			w.badge.text = str(info.host).get_slice(".", 0) + (" 接続中" if bool(info.connected) else " 未接続")
+			w.badge.add_theme_color_override("font_color", SERVICE_ACCENT)
+			BRANCH.render(d, box, branch)
+			return
 	if not info.connected:
 		w.badge.text=UI.copy("os_disconnected")
 		box.add_child(d._label(UI.copy("os_disconnected"), 22))

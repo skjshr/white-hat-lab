@@ -1355,43 +1355,41 @@ func vm_info() -> Dictionary:
 
 ## Read-only monitor projection. Never initialize the game's VM while rendering:
 ## only a matching live VM export or a saved VM snapshot is eligible for preview.
-func service_monitor_snapshot() -> Dictionary:
-	var chapter := _current_chapter()
-	var key := _vm_key()
+func service_monitor_snapshot(target_index: int = -1) -> Dictionary:
+	var selected_index := int(state.get("target_index", 0)) if target_index < 0 else target_index
+	var chapter := _current_chapter(selected_index)
+	var key := _vm_key(selected_index)
+	var targets: Array = state.get("targets", []) if state.get("targets", []) is Array else []
+	var target: Dictionary = targets[selected_index] if selected_index >= 0 and selected_index < targets.size() and targets[selected_index] is Dictionary else {}
 	var contract: Dictionary = state.get("contract", {}) if state.get("contract", {}) is Dictionary else {}
 	var snapshot: Dictionary = {
 		"initialized":false,"connected":false,"host":SERVICE_MONITOR_VM.HOSTS[chapter],
 		"service":SERVICE_MONITOR_VM.SERVICES[chapter],"config_path":SERVICE_MONITOR_VM.PATHS[chapter],
 		"active":null,"dirty":null,"error":"","applied":{},"pending":{},"models":{},"probes":[],
 		"observations":[],"events":[],"fingerprint":"","freshness_known":false,
-		"guest_state":{},"portal_files":[],"context":key,"current_revision":int(state.get("revision", 0)),
-		"client":str(contract.get("client", "")),"completed":current_done()
+		"guest_state":{},"portal_files":[],"context":key,"current_revision":int(target.get("revision", state.get("revision", 0))),
+		"client":str(contract.get("client", "")),"completed":current_done(),
+		"index":selected_index,"name":str(target.get("name", SERVICE_MONITOR_VM.HOSTS[chapter])),"chapter":chapter,
+		"current":selected_index == int(state.get("target_index", 0))
 	}
-	if not bool(state.get("accepted", false)):
+	if not bool(state.get("accepted", false)) or selected_index < 0 or selected_index >= targets.size():
 		return snapshot
 	var live := _machine != null and _machine_key == key
-	var saved_vm: Variant = _machine.export_state() if live else state.get("vm_states", {}).get(key, {})
-	if not saved_vm is Dictionary or int(saved_vm.get("schema", 0)) != 2 \
-		or not saved_vm.get("fs", null) is Dictionary or not saved_vm.get("applied", null) is Dictionary \
-		or not saved_vm.get("events", null) is Array or not saved_vm.get("dirs", null) is Array \
-		or not saved_vm.get("snapshots", null) is Array:
+	var saved_vm := _service_monitor_vm_snapshot(selected_index)
+	if saved_vm.is_empty():
 		return snapshot
 	# VM.setup performs compatibility normalization on its input copy. All further
 	# bindings and fingerprint work stay on this preview, never on Game._machine.
 	var preview = SERVICE_MONITOR_VM.new()
-	preview.setup(chapter, saved_vm.duplicate(true), _scenario())
+	preview.setup(chapter, saved_vm.duplicate(true), _scenario(selected_index))
 	preview.set_identity(profile())
-	if live:
-		preview.set_linked_identity_provider(_machine._linked_identity_provider.duplicate(true))
-		preview.set_linked_business_provider(_machine._linked_business_provider.duplicate(true))
-	else:
-		_bind_linked_identity(preview)
-		_bind_linked_business(preview)
-	var hardware := _customer_hardware()
+	# Rebind linked inputs from current schema-2 snapshots on the preview. This
+	# refreshes consumer fingerprints after another live target's data changes.
+	var providers_known := _service_monitor_bind_providers(preview, selected_index)
+	var hardware := _customer_hardware(selected_index)
 	if not hardware.is_empty():
 		preview.state.customer_device = {"serial":str(hardware.get("serial", "")),"model":str(hardware.get("model", "")),"supplier":str(hardware.get("supplier", ""))}
 		preview.state.fs["/etc/hardware.json"] = JSON.stringify(preview.state.customer_device)
-	var providers_known := live or _service_monitor_providers_known(preview)
 	var portal_files: Array = preview.portal_snapshot().get("files", []).duplicate(true) if chapter == 5 and int(preview.state.get("portal_model_version", 1)) >= 2 else []
 	var probes: Array = preview.probes()
 	for item in probes:
@@ -1412,7 +1410,7 @@ func service_monitor_snapshot() -> Dictionary:
 		pending = disk_values.get("values", {}).duplicate(true)
 		pending_error = str(disk_values.get("error", ""))
 	snapshot.merge({
-		"initialized":true,"connected":bool(preview.state.get("connected", false)) and _customer_hardware_connected(),
+		"initialized":true,"connected":bool(preview.state.get("connected", false)) and _customer_hardware_connected(selected_index),
 		"host":str(preview.state.get("host", SERVICE_MONITOR_VM.HOSTS[chapter])),
 		"service":str(preview.state.get("service", SERVICE_MONITOR_VM.SERVICES[chapter])),
 		"config_path":str(preview.state.get("config_path", SERVICE_MONITOR_VM.PATHS[chapter])),
@@ -1428,34 +1426,77 @@ func service_monitor_snapshot() -> Dictionary:
 	}, true)
 	return snapshot
 
+func branch_monitor_snapshot() -> Dictionary:
+	var contract: Dictionary = state.get("contract", {}) if state.get("contract", {}) is Dictionary else {}
+	var case_id := str(contract.get("case_id", ""))
+	var result := {"available":bool(state.get("accepted", false)) and case_id == "composite-branch-reopen","client":str(contract.get("client", "")),"case_id":case_id,"current_target":int(state.get("target_index", 0)),"services":[]}
+	if not bool(result.available): return result
+	var targets: Array = state.get("targets", []) if state.get("targets", []) is Array else []
+	var services: Array = []
+	for index in targets.size():
+		if not targets[index] is Dictionary: continue
+		var target: Dictionary = targets[index]
+		var projection := service_monitor_snapshot(index)
+		services.append({"index":index,"name":str(target.get("name", projection.get("name", ""))),"chapter":int(target.get("chapter", projection.get("chapter", -1))),"context":str(projection.get("context", _vm_key(index))),"snapshot":projection,"current":index == int(state.get("target_index", 0))})
+	result.services = services
+	return result
+
+func _service_monitor_valid_vm_snapshot(value: Variant) -> bool:
+	return value is Dictionary and int(value.get("schema", 0)) == 2 \
+		and value.get("fs", null) is Dictionary and value.get("applied", null) is Dictionary \
+		and value.get("events", null) is Array and value.get("dirs", null) is Array \
+		and value.get("snapshots", null) is Array
+
+func _service_monitor_vm_snapshot(index: int) -> Dictionary:
+	var key := _vm_key(index)
+	var value: Variant = _machine.export_state() if _machine != null and _machine_key == key else state.get("vm_states", {}).get(key, {})
+	return value.duplicate(true) if _service_monitor_valid_vm_snapshot(value) else {}
+
+func _service_monitor_find_target(chapter: int) -> int:
+	for index in state.get("targets", []).size():
+		if _current_chapter(index) == chapter: return index
+	return -1
+
+func _service_monitor_bind_providers(preview, target_index: int) -> bool:
+	var known := true
+	if preview.has_linked_branch_storage():
+		var provider_index := _service_monitor_find_target(0)
+		var provider_state := _service_monitor_vm_snapshot(provider_index) if provider_index >= 0 else {}
+		if provider_state.is_empty():
+			preview.set_linked_business_provider({"available":false,"error":"provider_unavailable","fs":{}})
+			known = false
+		else:
+			# The provider factory accepts a value object. Pass a deep copy so no
+			# derived mapping aliases either the saved or live source VM.
+			preview.set_linked_business_provider(_branch_storage_provider_from_state(provider_state.duplicate(true)))
+	elif preview.has_linked_business():
+		var provider_index := _service_monitor_find_target(1)
+		var provider_state := _service_monitor_vm_snapshot(provider_index) if provider_index >= 0 else {}
+		if provider_state.is_empty():
+			preview.set_linked_business_provider({"available":false,"error":"provider_unavailable","fs":{}})
+			known = false
+		else:
+			var source = SERVICE_MONITOR_VM.new()
+			source.setup(1, provider_state.duplicate(true), _scenario(provider_index))
+			preview.set_linked_business_provider({"available":true,"writable":bool(source.state.get("active", false)),"fs":source.state.get("fs", {}).duplicate(true)})
+	if preview.has_linked_identity() and int(state.get("contract", {}).get("linked_identity_version", 0)) == 1 and _current_chapter(target_index) == 5:
+		var identity_index := _service_monitor_find_target(3)
+		var identity_state := _service_monitor_vm_snapshot(identity_index) if identity_index >= 0 else {}
+		if identity_state.is_empty():
+			preview.set_linked_identity_provider({})
+			known = false
+		else:
+			var identity_source = SERVICE_MONITOR_VM.new()
+			identity_source.setup(3, identity_state.duplicate(true), _scenario(identity_index))
+			preview.set_linked_identity_provider({"active":bool(identity_source.state.get("active", false)),"sessions":identity_source.state.get("identity_sessions", []).duplicate(true),"users":identity_source.state.get("identity_users", []).duplicate(true),"realm":str(identity_source.state.get("host", ""))})
+	return known
+
 func _service_monitor_models(vm_state: Dictionary) -> Dictionary:
 	var result := {}
 	for key in ["access_model_version","samba_model_version","backup_model_version","firewall_model_version","identity_model_version","edr_model_version","portal_model_version"]:
 		if vm_state.has(key): result[key] = vm_state[key]
 	return result
 
-func _service_monitor_providers_known(preview) -> bool:
-	var required_chapters: Array[int] = []
-	if preview.has_linked_branch_storage(): required_chapters.append(0)
-	elif preview.has_linked_business(): required_chapters.append(1)
-	if preview.has_linked_identity(): required_chapters.append(3)
-	for provider_chapter in required_chapters:
-		var found := false
-		for index in state.get("targets", []).size():
-			if _current_chapter(index) != provider_chapter: continue
-			var provider_key := _vm_key(index)
-			if _machine != null and _machine_key == provider_key:
-				found = true
-				break
-			var provider_state: Variant = state.get("vm_states", {}).get(provider_key)
-			if provider_state is Dictionary and int(provider_state.get("schema", 0)) == 2 \
-				and provider_state.get("fs", null) is Dictionary and provider_state.get("applied", null) is Dictionary \
-				and provider_state.get("events", null) is Array and provider_state.get("dirs", null) is Array \
-				and provider_state.get("snapshots", null) is Array:
-				found = true
-				break
-		if not found: return false
-	return true
 
 func advanced_active() -> bool:
 	return bool(state.get("accepted", false)) and _advanced_case_id(str(state.get("contract", {}).get("case_id", ""))) and state.get("advanced", {}) is Dictionary and not state.advanced.is_empty()
@@ -3481,8 +3522,8 @@ func _customer_hardware(index: int = -1) -> Dictionary:
 	if _customer_requirement(index).is_empty(): return {}
 	return CUSTOMER_STOCK.assigned(state, str(state.current_contract_id), int(state.get("target_index",0)) if index < 0 else index)
 
-func _customer_hardware_connected() -> bool:
-	return _customer_requirement().is_empty() or str(_customer_hardware().get("status","")) in ["staged","delivered"]
+func _customer_hardware_connected(index: int = -1) -> bool:
+	return _customer_requirement(index).is_empty() or str(_customer_hardware(index).get("status","")) in ["staged","delivered"]
 
 func _customer_material_cost() -> int:
 	var total := 0
