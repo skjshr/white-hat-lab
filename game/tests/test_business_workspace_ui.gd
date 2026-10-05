@@ -155,6 +155,13 @@ func run() -> void:
 		var rendered_status: Label = rendered_flow.find_child("BusinessSourceStatus",true,false)
 		check(rendered_status is Label and str(rendered_status.text).contains("取得済"), "successful fetch remains visible")
 		check(rendered_flow.find_child("BusinessStorageRefresh",true,false) is Button, "source flow provides explicit refresh")
+		var source_paper := rendered_flow.find_child("BusinessSourceObject2",true,false) as Button
+		check(source_paper != null, "actual paper is a selectable evidence object")
+		if source_paper != null:
+			source_paper.pressed.emit()
+			var evidence := rendered_flow.find_child("BusinessSourceDetails",true,false)
+			check(evidence.visible, "object inspection opens evidence without fetching")
+			check(rendered_flow.find_child("BusinessSourceFlowRoute",true,false).projection.raw_response == fixture_response, "diagram retains the exact saved response rather than inventing a specimen")
 	check(game.state == source_before_state and game.clock_minutes() == source_before_clock and int(game.state.cash) == source_before_cash, "source render leaves game state, clock and money unchanged")
 	check(game._vm_key() == source_before_key and game._vm().export_state() == source_before_vm, "source render leaves VM/key unchanged")
 	source_probe.free()

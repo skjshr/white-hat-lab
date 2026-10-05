@@ -10,6 +10,33 @@ func control(id: String) -> Control:
 	if id == "NativeTargetSelector" and is_instance_valid(ui) and is_instance_valid(ui.desktop): return ui.desktop.target_selector
 	return super.control(id)
 
+func select_option(id: String, index: int) -> bool:
+	if id != "NativeTargetSelector": return await super.select_option(id, index)
+	var selector := control(id) as OptionButton
+	if not expect(is_instance_valid(selector) and index >= 0 and index < selector.item_count, "actual target choices exist"): return false
+	if not await press(id): return false
+	var popup := selector.get_popup()
+	if not expect(popup.visible, "actual target popup opened"): return false
+	# As with mouse down/up, keep this input sequence together. Captured
+	# failures show DOWN reaches row 2, then focus changes before the next
+	# sampled frame, consistent with interleaved pointer polling. Never assign
+	# selection or emit its signal.
+	_target_key(popup.get_window_id(), KEY_HOME)
+	for _attempt in selector.item_count + 1:
+		if popup.get_focused_item() == index: break
+		_target_key(popup.get_window_id(), KEY_DOWN)
+	if not expect(popup.get_focused_item() == index, "real keys reach the target row before pointer polling"): return false
+	_target_key(popup.get_window_id(), KEY_ENTER)
+	await frames(10)
+	var committed := control(id) as OptionButton
+	return expect(is_instance_valid(committed) and committed.selected == index and not committed.get_popup().visible and int(game.state.target_index) == index, "keyboard commits the actual customer target")
+
+func _target_key(window_id: int, code: Key) -> void:
+	for down in [true, false]:
+		var event := InputEventKey.new(); event.keycode = code; event.physical_keycode = code; event.pressed = down; event.window_id = window_id
+		Input.parse_input_event(event); Input.flush_buffered_events()
+	keys += 1
+
 func run() -> void:
 	game = root.get_node("Game")
 	if not expect("--qa-profile=" + qa_profile() in OS.get_cmdline_user_args(), "isolated business-source QA storage"): finish(); return
@@ -85,7 +112,9 @@ func run() -> void:
 	if not await browse("https://intranet.client.test/customers") or not await source_visible("files01.client.test", "customers.csv"): finish(); return
 	await capture("06-customers-use-their-own-source")
 	if not await browse("https://intranet.client.test/accounting") or not await source_visible("業務API", "ledger.txt"): finish(); return
-	if not expect(ui.desktop.browser_response.contains("missing_file") and not text_in(control("BusinessSourceFlow")).contains("partner-order.csv"), "missing ledger remains a distinct missing file instead of pretending to use orders"): finish(); return
+	# Raw HTTP evidence may include the API's external-storage metadata. Judge
+	# the displayed file identity, rather than forbidding that real response.
+	if not expect(ui.desktop.browser_response.contains("missing_file") and str(control("BusinessSourceFlowRoute").projection.file.detail) == "/srv/data/ledger.txt" and not text_in(control("BusinessSourceStage2")).contains("partner-order.csv"), "missing ledger remains a distinct missing file instead of pretending to use orders"): finish(); return
 	await capture("07-missing-ledger-is-not-orders")
 	if not await browse(SALES): finish(); return
 	if not expect(ui.desktop._save_session() and game.save_game(), "save real recovered source and browser checkpoint"): finish(); return
@@ -161,6 +190,19 @@ func source_visible(host: String, file_name: String) -> bool:
 		var natural := caption.get_theme_font("font").get_string_size(caption.text, HORIZONTAL_ALIGNMENT_LEFT, -1, caption.get_theme_font_size("font_size")).x
 		if not expect(caption.size.x + 1 >= natural, "source status and last-fetch text fit without clipping"): return false
 	if not expect(control("BusinessStorageRefresh").size.y <= 48 * float(game.settings.text_scale), "source refresh action has a bounded visible height"): return false
+	var diagram := control("BusinessSourceFlowRoute")
+	if not expect(diagram.objects.size() == 3 and str(diagram.projection.get("raw_response", "")) == ui.desktop.browser_response, "three working objects refer to the actual last response"): return false
+	for i in 3:
+		var object := control("BusinessSourceObject%d" % (i + 1)) as Button
+		if not expect(object != null and object.size.y >= 44 * float(game.settings.text_scale), "each drawn source object has an enlarged mouse and keyboard target"): return false
+		if not expect(object.get_global_rect().position.x >= area.position.x and object.get_global_rect().end.x <= area.end.x, "source object stays inside the actual horizontal viewport"): return false
+	var inspect_state: Dictionary = game.state.duplicate(true)
+	var inspect_vm: Dictionary = game._vm().export_state()
+	if not await press("BusinessSourceObject2"): return false
+	if not expect(control("BusinessSourceDetails").visible and text_in(control("BusinessSourceDetails")).contains(ui.desktop.browser_response), "selecting the paper opens the real recorded response without another fetch"): return false
+	if not expect(game.state == inspect_state and game._vm().export_state() == inspect_vm, "inspecting a drawn object never changes the customer, measurements, clock or funds"): return false
+	if not await keyboard_activate("BusinessSourceDetailsToggle"): return false
+	if not expect(not control("BusinessSourceDetails").visible, "keyboard closes the evidence panel after graphical inspection"): return false
 	var before: Dictionary = game._vm().export_state(); var cash := int(game.state.cash); var clock: String = game.business_clock()
 	ui.desktop._render_business_workspace(); await frames(8)
 	return expect(game._vm().export_state() == before and int(game.state.cash) == cash and game.business_clock() == clock, "source redraw never repairs, measures, or changes company funds/time")
@@ -169,6 +211,7 @@ func finish() -> void:
 	if finishing: return
 	finishing = true
 	if not journey_completed and failures.is_empty(): failures.append("business source journey incomplete")
+	if not failures.is_empty() and is_instance_valid(ui): await capture("failed-stage")
 	var report := {"assertions":assertions,"narrow":narrow,"clicks":clicks,"keys":keys,"scrolls":scrolls,"failures":failures,"events":events,"cash":game.state.get("cash",0) if game != null else 0,"method":"Actual funded DAY5 public settlement checkpoint; public available acceptance setup. Actual Godot mouse/key for firewall/share repair, save failure/retry, invalid shared amount, version restore, ERP reload, all three targets' diagnostics, delivery and payment. Save/load API tests interruption. No answer/cash/skill/VM state injection. Known controls; not first-time player proof."}
 	var file := FileAccess.open(folder.path_join(report_name() + ".json"), FileAccess.WRITE)
 	if file != null: file.store_string(JSON.stringify(report, "  ")); file.close()

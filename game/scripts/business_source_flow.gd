@@ -3,8 +3,8 @@ class_name BusinessSourceFlow
 
 ## Read-only projection and compact renderer for the actual business API response.
 const UI = preload("res://scripts/ui_theme.gd")
-const Glyph = preload("res://scripts/service_glyph.gd")
 const BUSINESS = preload("res://scripts/business_workspace.gd")
+const DIAGRAM = preload("res://scripts/business_source_diagram.gd")
 
 const PURPLE := Color("714b67")
 const INK := Color("282828")
@@ -69,6 +69,7 @@ static func project(view: String, response: String) -> Dictionary:
 		"count": 0,
 		"count_label": "",
 		"error": str(payload.get("error", "")),
+		"raw_response": response,
 		"code": int(payload.get("code", 0)),
 		"server": {"symbol":"?","status":"unknown","label":"応答未確認","name":"取得元","detail":""},
 		"file": {"symbol":"?","status":"unknown","label":"未確認","name":"対象ファイル","detail":""},
@@ -196,26 +197,17 @@ static func render(d, parent: Node, projection: Dictionary, refresh_action: Call
 	var state_label := _label(d, top, "%s %s" % [symbol, str(projection.get("label", "未取得"))], 14, label_color)
 	state_label.name = "BusinessSourceStatus"
 	state_label.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	var count_text := ""
-	if str(projection.get("status", "")) == "ok": count_text = "%d %s" % [int(projection.get("count", 0)), str(projection.get("count_label", "件"))]
 	var space := Control.new(); space.size_flags_horizontal = Control.SIZE_EXPAND_FILL; top.add_child(space)
-	if not count_text.is_empty():
-		var count_label := _label(d, top, count_text, 14, MUTED)
-		count_label.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	var flow := HFlowContainer.new()
+	var flow := DIAGRAM.new()
 	flow.name = "BusinessSourceFlowRoute"
 	flow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	flow.add_theme_constant_override("h_separation", 8)
-	flow.add_theme_constant_override("v_separation", 4)
+	flow.text_factor = float(d.game.settings.get("text_scale", 1.0))
+	flow.projection = projection.duplicate(true)
+	flow.custom_minimum_size.y = 156 * flow.text_factor
 	content.add_child(flow)
 	var server: Dictionary = projection.get("server", {})
 	var file: Dictionary = projection.get("file", {})
 	var business: Dictionary = projection.get("business", {})
-	_stage(d, flow, server, "network", 1)
-	Glyph.add_to(flow, "arrow", 18, PURPLE)
-	_stage(d, flow, file, "file", 2)
-	Glyph.add_to(flow, "arrow", 18, PURPLE)
-	_stage(d, flow, business, "process", 3)
 	var footer := HBoxContainer.new()
 	footer.add_theme_constant_override("separation", 8)
 	content.add_child(footer)
@@ -228,35 +220,70 @@ static func render(d, parent: Node, projection: Dictionary, refresh_action: Call
 	if not str(projection.get("error", "")).is_empty(): detail = str(projection.get("error", ""))
 	if int(projection.get("code", 0)) > 0: detail += ("  " if not detail.is_empty() else "") + "HTTP " + str(projection.code)
 	var details := VBoxContainer.new(); details.name = "BusinessSourceDetails"; details.visible = false; content.add_child(details)
-	for info in [str(server.get("detail", "")), str(file.get("tooltip", file.get("detail", ""))), str(business.get("detail", "")), detail]:
-		if str(info).is_empty(): continue
-		var info_label := _label(d, details, str(info), 14, MUTED)
+	var detail_labels: Array[Label] = []
+	for stage in [server, file, business]:
+		var info_label := _label(d, details, str(stage.get("tooltip", stage.get("detail", ""))), 14, MUTED)
 		info_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		info_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var detail_toggle: Button = d._button("詳細", func(): details.visible = not details.visible)
+		detail_labels.append(info_label)
+	for info in [detail, str(projection.get("raw_response", ""))]:
+		if str(info).is_empty(): continue
+		var evidence := _label(d, details, str(info), 14, MUTED)
+		if str(info) == str(projection.get("raw_response", "")):
+			evidence.name = "BusinessSourceRawResponse"
+			evidence.text = "取得応答\n" + str(info)
+		evidence.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		evidence.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var detail_toggle: Button = d._button("詳細", func():
+		details.visible = not details.visible
+		for label in detail_labels: label.show())
 	detail_toggle.name = "BusinessSourceDetailsToggle"; detail_toggle.custom_minimum_size.y = 34
 	detail_toggle.add_theme_font_size_override("font_size", int(14 * float(d.game.settings.get("text_scale", 1.0))))
 	footer.add_child(detail_toggle)
+	detail_toggle.focus_entered.connect(_reveal_focus.bind(detail_toggle))
 	var refresh: Button = d._button("更新", refresh_action)
 	refresh.name = "BusinessStorageRefresh"
 	refresh.custom_minimum_size = Vector2(88, 34)
 	refresh.add_theme_font_size_override("font_size", int(14 * float(d.game.settings.get("text_scale", 1.0))))
 	refresh.tooltip_text = "業務画面を再取得"
 	footer.add_child(refresh)
+	refresh.focus_entered.connect(_reveal_focus.bind(refresh))
+	for i in 3:
+		var stage: Dictionary = [server, file, business][i]
+		var selected := i
+		_stage(d, flow, stage, ["network", "file", "process"][i], i + 1, func():
+			details.show()
+			for j in detail_labels.size(): detail_labels[j].visible = j == selected)
+	flow.layout()
 	return frame
 
-static func _stage(d, parent: Node, stage: Dictionary, icon: String, index: int) -> Control:
-	var section := VBoxContainer.new()
+static func _reveal_focus(control: Control) -> void:
+	if not is_instance_valid(control) or not control.is_inside_tree(): return
+	# Evidence changes the scroll extent. Follow focus after container layout,
+	# so the selected paper and footer actions remain reachable after resume.
+	var tree := control.get_tree()
+	await tree.process_frame
+	await tree.process_frame
+	if not is_instance_valid(control) or not control.has_focus(): return
+	var ancestor := control.get_parent()
+	while ancestor != null and not ancestor is ScrollContainer: ancestor = ancestor.get_parent()
+	if ancestor is ScrollContainer: ancestor.ensure_control_visible(control)
+
+static func _stage(d, parent: Node, stage: Dictionary, icon: String, index: int, inspect: Callable) -> Control:
+	var section := Control.new()
 	section.name = "BusinessSourceStage%d" % index
-	section.custom_minimum_size.x = 190 * float(d.game.settings.get("text_scale", 1.0))
-	section.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	section.add_theme_constant_override("separation", 2)
 	parent.add_child(section)
-	var title_row := HBoxContainer.new()
-	title_row.add_theme_constant_override("separation", 5)
-	section.add_child(title_row)
-	Glyph.add_to(title_row, icon, 22, PURPLE)
-	var title := _label(d, title_row, str(stage.get("name", "取得元")), 14, INK)
+	var button: Button = d._button("", inspect)
+	button.name = "BusinessSourceObject%d" % index
+	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	button.focus_entered.connect(_reveal_focus.bind(button))
+	button.tooltip_text = str(stage.get("name", "")) + " · " + str(stage.get("label", "")) + "\n" + str(stage.get("tooltip", stage.get("detail", "")))
+	button.add_theme_stylebox_override("normal", UI.style(Color.TRANSPARENT, Color.TRANSPARENT, 0, 0, 2))
+	button.add_theme_stylebox_override("hover", UI.style(Color(0.44, 0.29, 0.40, 0.08), PURPLE, 0, 0, 2))
+	button.add_theme_stylebox_override("pressed", UI.style(Color(0.44, 0.29, 0.40, 0.14), PURPLE, 0, 0, 2))
+	button.add_theme_stylebox_override("focus", UI.style(Color.TRANSPARENT, PURPLE, 0, 0, 2))
+	section.add_child(button)
+	var title := _label(d, section, str(stage.get("name", "取得元")), 14, INK)
 	title.name = "BusinessSourceStageName%d" % index
 	var detail := str(stage.get("detail", ""))
 	if icon == "network" and detail.begins_with("//"): detail = detail.trim_prefix("//").get_slice("/", 0)
@@ -274,4 +301,8 @@ static func _stage(d, parent: Node, stage: Dictionary, icon: String, index: int)
 	var state_color: Color = GREEN if str(stage.get("status", "")) == "ok" else (RED if str(stage.get("status", "")) == "error" else MUTED)
 	var status := _label(d, section, state_text, 14, state_color)
 	status.name = "BusinessSourceStageStatus%d" % index
+	for label in [title, value, status]:
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.objects.append({"section":section, "button":button, "title":title, "detail":value, "status":status})
 	return section
