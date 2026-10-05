@@ -394,10 +394,20 @@ func _layout_taskbar() -> void:
 	var count:=0
 	for id in task_buttons:
 		if id in PINNED_APPS or id in running_apps: count+=1
-	var right_width: float=120.0+(100.0 if is_instance_valid(target_selector) and target_selector.visible else 0.0) if narrow else 154.0+(124.0 if is_instance_valid(target_selector) and target_selector.visible else 0.0)
-	var dock_width: float=minf(float(count)*48.0,maxf(144.0,size.x-right_width-72.0))
+	var dock: PanelContainer = taskbar.get_parent()
+	var fixed_width: float = dock.get_theme_stylebox("panel").get_minimum_size().x
+	var visible_count := 0
+	for child in taskbar.get_children():
+		if not child is Control or not child.visible: continue
+		visible_count += 1
+		if child != taskbar_offset and child != task_scroll: fixed_width += child.get_combined_minimum_size().x
+	fixed_width += maxi(0, visible_count - 1) * taskbar.get_theme_constant("separation")
+	var available_width: float = maxf(0.0, size.x - fixed_width)
+	var dock_width: float = minf(float(count) * 48.0, available_width)
 	task_scroll.custom_minimum_size.x=dock_width
-	taskbar_offset.custom_minimum_size.x=maxf(0.0,minf((size.x-dock_width-50.0)*0.5-8.0,size.x-dock_width-right_width-72.0))
+	taskbar_offset.custom_minimum_size.x=maxf(0.0,minf((size.x-dock_width-50.0)*0.5-8.0,available_width-dock_width))
+	# Containers may retain an expanded offset after a temporary notice.
+	dock.offset_left = 0.0; dock.offset_right = 0.0
 
 func _layout_launcher() -> void:
 	if not is_instance_valid(start_menu): return
@@ -976,10 +986,12 @@ func _notify(text: String) -> void:
 	status.text = text
 	status.tooltip_text = text
 	status.add_theme_color_override("font_color",UI.RED if failed else UI.INK)
+	status.custom_minimum_size.x = 148.0
 	status.show()
+	_layout_taskbar()
 	if failed: _trace("error",text.left(240)); return
 	get_tree().create_timer(3).timeout.connect(func():
-		if is_instance_valid(status) and serial == notice_serial: status.hide(); status.remove_theme_color_override("font_color"))
+		if is_instance_valid(status) and serial == notice_serial: status.hide(); status.remove_theme_color_override("font_color"); _layout_taskbar())
 
 func _money(value) -> String:
 	var n := str(absi(int(value))); var out := ""

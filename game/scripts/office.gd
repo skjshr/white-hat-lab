@@ -112,17 +112,8 @@ func _ready() -> void:
 	Game.notified.connect(_notify)
 	_state_changed()
 	get_tree().auto_accept_quit = false
-	call_deferred("_refresh_window_surface")
 	if "--smoke" in OS.get_cmdline_user_args(): call_deferred("_smoke")
 	if "--performance" in OS.get_cmdline_user_args(): call_deferred("_performance")
-
-func _refresh_window_surface() -> void:
-	# Settle content scaling and the initial render target before presenting.
-	# Keep the requested window geometry instead of resizing during first draw.
-	if DisplayServer.get_name() == "headless": return
-	await RenderingServer.frame_post_draw
-	await RenderingServer.frame_post_draw
-	RenderingServer.force_draw()
 
 func _setup_input() -> void:
 	var actions := {"move_forward":KEY_W,"move_back":KEY_S,"move_left":KEY_A,"move_right":KEY_D,"sprint":KEY_SHIFT,"interact":KEY_E,"cases":KEY_TAB,"workstation":KEY_F,"crew_aya":KEY_1,"crew_ren":KEY_2,"equipment":KEY_3,"company":KEY_4}

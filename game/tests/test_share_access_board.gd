@@ -102,6 +102,10 @@ func probe(id: String) -> Dictionary:
 	return {}
 
 func board_geometry() -> void:
+	for id in ["ExitDesktop", "DesktopReturn", "ShowDesktop"]:
+		var action = pc.find_child(id, true, false)
+		if action is Control and action.is_visible_in_tree():
+			check(visible_rect(action).grow(1).encloses(action.get_global_rect()), "desktop exit and return fully visible " + id)
 	for id in IDS:
 		var c = node("SambaAccess_" + id)
 		check(c is Button and c.is_visible_in_tree(), "board operation " + id)
@@ -115,9 +119,15 @@ func board_geometry() -> void:
 	check(is_equal_approx(float(game.settings.text_scale), 1.3 if narrow else 1.0) and is_equal_approx(ui.text_scale, 1.3 if narrow else 1.0), "Game and Interface use actual requested font scale")
 
 func capture(label: String) -> void:
+	await frames(8)
+	for id in ["ExitDesktop", "DesktopReturn", "ShowDesktop"]:
+		var action = pc.find_child(id, true, false)
+		if action is Control and action.is_visible_in_tree():
+			check(visible_rect(action).grow(1).encloses(action.get_global_rect()), "desktop controls visible at " + label + " " + id)
 	if DisplayServer.get_name() == "headless" or "--capture" not in OS.get_cmdline_user_args(): return
-	await frames(8); await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
 	var folder := ProjectSettings.globalize_path("res://../../audit/share-20261005/" + ("narrow" if narrow else "wide"))
+	if not OS.get_environment("WHL_CAPTURE_DIR").is_empty(): folder = OS.get_environment("WHL_CAPTURE_DIR")
 	DirAccess.make_dir_recursive_absolute(folder)
 	check(root.get_texture().get_image().save_png(folder.path_join(label + ".png")) == OK, "capture " + label)
 
@@ -129,8 +139,10 @@ func run() -> void:
 	check(ui._new_game(), "new company starts with normal funds")
 	game.set_process(false); game.choose_strategy("advisory"); ui.guided_intro.skip()
 	var scale := 1.3 if narrow else 1.0
-	game.set_settings({"resolution":"960x600" if narrow else "1920x1080", "text_scale":scale, "window_mode":"windowed", "volume":0}, false)
+	game.set_settings({"resolution":"960x600" if narrow else "1920x1080", "text_scale":scale, "window_mode":"windowed" if narrow else "borderless", "volume":0}, false)
 	ui._set_text_scale(scale); root.size = Vector2i(960,600) if narrow else Vector2i(1920,1080)
+	root.get_node("Graphics").apply_settings(game.settings)
+	check(root.get_visible_rect().size.is_equal_approx(Vector2(960,600) if narrow else Vector2(1280,720)), "native test uses actual game content scale")
 	ui.open_panel("terminal"); pc = ui.desktop; pc._show_app("mail"); await frames()
 	if not pc.windows.mail.maximized: pc.windows.mail.toggle_maximize()
 	await click("GuideMailMessage"); await click("GuideMailAccept")
