@@ -117,13 +117,13 @@ static func record_delivery(game, contract_id: String, receipt: Dictionary) -> D
 	var day := int(receipt.get("day", game.state.get("day", 1)))
 	var good := rating == "on_time" and satisfaction >= 40
 	var lead: Dictionary = cycle.leads.get(client, {})
+	if not lead.is_empty(): lead.last_outcome = {"contract_id":contract_id,"rating":rating,"satisfaction":satisfaction,"day":day}
 	var event := {}
 	if not lead.is_empty() and str(lead.get("status", "")) != "fulfilled":
 		if str(lead.get("case_id", "")) == case_id:
 			lead.status = "fulfilled"; lead.fulfilled_contract_id = contract_id; lead.fulfilled_day = day
 			event = _event(cycle, "fulfilled", contract_id, client, case_id, day, "指名相談の仕事を納品しました。")
 		else:
-			lead.last_outcome = {"contract_id":contract_id,"rating":rating,"satisfaction":satisfaction,"day":day}
 			if not good:
 				lead.status = "paused"
 				event = _event(cycle, "paused", contract_id, client, str(lead.case_id), day, "納期・手戻り・顧客との関係を確認するため、指名相談を保留しました。")

@@ -193,6 +193,10 @@ func _test_completion_and_roundtrip() -> void:
 	_expect(str(_lead(exhausted).get("status","")) == "fulfilled", "exhausted customer retains fulfilled referral")
 	_expect(str(_public_lead(exhausted).get("status","")) == "fulfilled", "fulfilled status is publicly visible")
 	_expect(CYCLE.priority_case_ids(exhausted).is_empty(), "completed or retired catalog cannot be reissued as referrals")
+	var later := _receipt(SOURCE, "late", 55); later.day = 2
+	_record(exhausted, "later-customer-delivery", later)
+	_expect(int(_public_lead(exhausted).last_outcome.satisfaction) == 55 and int(_public_lead(exhausted).last_outcome.day) == 2, "fulfilled customer's gauge retains latest actual delivery, not the original satisfaction")
+	_expect(str(_lead(exhausted).status) == "fulfilled" and str(_lead(exhausted).fulfilled_contract_id) == "last-referral", "later delivery does not undo previously fulfilled work")
 	print("PASS company_cycle group: completion and persistence" if failures.is_empty() else "CHECK company_cycle group: completion and persistence")
 
 func _test_completed_history_retention() -> void:

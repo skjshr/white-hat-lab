@@ -76,7 +76,9 @@ func click(id: String) -> void:
 	await frames(1)
 	var ready := is_instance_valid(button) and visible_rect(button).has_point(point)
 	check(ready, "route remains beneath pointer before click " + id)
-	if not ready: return
+	if not ready:
+		print("COMPANY_CYCLE_UI_POINTER_DIAGNOSTIC ", JSON.stringify({"id":id,"before":str(last_rect),"after":str(visible_rect(button)),"point":str(point),"scroll":ui.modal_scroll.scroll_vertical}))
+		return
 	for down in [true, false]:
 		var event := InputEventMouseButton.new(); event.position = pixel; event.global_position = pixel; event.button_index = MOUSE_BUTTON_LEFT; event.pressed = down; Input.parse_input_event(event)
 		await frames(2)
@@ -180,6 +182,9 @@ func run() -> void:
 	game.set_settings({"resolution":"960x600" if narrow else "1440x900", "window_mode":"windowed", "text_scale":1.3 if narrow else 1.0, "volume":0}, false)
 	root.size = Vector2i(960,600) if narrow else Vector2i(1440,900); ui._set_text_scale(1.3 if narrow else 1.0)
 	check(ui._new_game() and game.choose_strategy("advisory"), "ordinary fixture company")
+	# Headless process frames can run before the initial display/layout has
+	# settled. Observe it after the settings change before testing geometry.
+	await create_timer(0.1).timeout; await frames()
 	await assert_readonly_view()
 	fixture_delivery("cycle-locked-fixture", "on_time")
 	var locked := opportunity("locked")

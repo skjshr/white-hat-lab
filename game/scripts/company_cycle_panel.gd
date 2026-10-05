@@ -1,22 +1,34 @@
 extends RefCounted
 
 const M = preload("res://scripts/management_ui.gd")
+const ROUTE = preload("res://scripts/customer_route_board.gd")
 
 static func build(ui, g) -> void:
 	if not g.has_method("company_cycle_view"): return
 	var view: Dictionary = g.company_cycle_view()
 	var body := VBoxContainer.new(); body.name = "CompanyCycle"; body.add_theme_constant_override("separation", 14); ui.modal_body.add_child(body)
-	body.add_child(ui._label("会社のこれから", 24, M.INK))
-	_economy(ui, body, view.get("economy", {}))
-	_action(ui, body, "今日の受取・在庫・人員を確認", ui._open_cycle_route.bind("company_overview"), "CycleOperations", "quiet")
-	body.add_child(M.rule())
-	body.add_child(ui._label("顧客からの指名相談", 18, M.INK))
+	body.add_child(ui._label("顧客との仕事", 24, M.INK))
 	var opportunities: Array = view.get("opportunities", [])
 	if opportunities.is_empty():
 		body.add_child(ui._label("納品の実績を重ねると、顧客から別の業務について相談が届きます。まずは今の依頼を完了しましょう。", 14, M.MUTED))
 		_action(ui, body, "今の仕事・営業を見る", ui._open_cycle_route.bind("sales"), "CycleBrowse", "quiet")
-	for raw in opportunities:
-		if raw is Dictionary: _opportunity(ui, g, body, raw)
+	if not opportunities.is_empty():
+		var chosen := str(ui.get_meta("cycle_customer", ""))
+		if not opportunities.any(func(item): return str(item.get("id", "")) == chosen):
+			var newest: Dictionary = opportunities[0]
+			for item in opportunities:
+				if int(item.get("source_day", 0)) > int(newest.get("source_day", 0)): newest = item
+			chosen = str(newest.id)
+		var contacts := HFlowContainer.new(); contacts.name = "CycleCustomers"; body.add_child(contacts)
+		for raw in opportunities:
+			if not raw is Dictionary: continue
+			var button := _action(ui, contacts, str(raw.get("client", "")), _select_customer.bind(ui, str(raw.id)), "CycleCustomer_" + str(raw.id).validate_node_name(), "tab")
+			M.button(button, "tab", str(raw.id) == chosen)
+		for raw in opportunities:
+			if raw is Dictionary and str(raw.id) == chosen: _opportunity(ui, g, body, raw)
+	body.add_child(M.rule())
+	_economy(ui, body, view.get("economy", {}))
+	_action(ui, body, "今日の受取・在庫・人員を確認", ui._open_cycle_route.bind("company_overview"), "CycleOperations", "quiet")
 	var goals: Array = view.get("goals", [])
 	if not goals.is_empty():
 		body.add_child(M.rule()); body.add_child(ui._label("会社の成長目標", 18, M.INK))
@@ -48,30 +60,70 @@ static func _card(body: VBoxContainer, name: String) -> VBoxContainer:
 
 static func _opportunity(ui, g, body: VBoxContainer, item: Dictionary) -> void:
 	var id := str(item.get("id", "")); var status := str(item.get("status", "locked"))
-	var content := _card(body, "CycleOpportunity_" + id.validate_node_name())
-	var state_text: String = {"ready":"相談できます", "locked":"準備が必要", "paused":"信頼の回復待ち", "fulfilled":"対応済み"}.get(status, "準備が必要")
-	content.add_child(ui._label("%s  ·  %s" % [str(item.get("client", "")), state_text], 14, M.ACCENT if status in ["ready", "fulfilled"] else M.MUTED))
-	content.add_child(ui._label(str(item.get("title", "")), 18, M.INK))
-	content.add_child(ui._label(str(item.get("reason", "")), 14, M.INK))
-	if not str(item.get("source_title", "")).is_empty():
-		content.add_child(ui._label("きっかけ: DAY %02d「%s」の納品" % [int(item.get("source_day", 0)), str(item.source_title)], 12, M.MUTED))
-	if status == "fulfilled": return
-	var locked_reason := str(item.get("locked_reason", ""))
-	if not locked_reason.is_empty(): content.add_child(ui._label(locked_reason, 13, M.MUTED))
+	var content := VBoxContainer.new(); content.name = "CycleOpportunity_" + id.validate_node_name(); content.add_theme_constant_override("separation", 10); body.add_child(content)
+	var details := VBoxContainer.new(); details.name = "CycleDetails"; details.visible = false
+	var inspect := _toggle_details.bind(ui, details)
+	var next: Callable = inspect
+	var action_name := ""; var action_title := ""
 	if status == "paused":
-		content.add_child(ui._label(str(item.get("recovery_goal", "通常の依頼でこの顧客への期限内納品を完了し、顧客満足度40以上を確認してください。")), 13, M.MUTED))
-		_action(ui, content, "この顧客の通常依頼を探す", ui._open_cycle_recovery.bind(str(item.get("client", ""))), "CycleRecover_" + id.validate_node_name(), "quiet")
+		next = ui._open_cycle_recovery.bind(str(item.get("client", ""))); action_name = "CycleRecover_" + id.validate_node_name(); action_title = "この顧客の通常依頼を探す"
 	elif status == "locked":
-		if bool(g.state.get("career_mode", false)) and item.get("reasons", []).is_empty():
-			_action(ui, content, "日締めと翌日の営業を確認", ui.open_panel.bind("door"), "CycleWait_" + id.validate_node_name(), "quiet")
+		if bool(item.get("handoff_unavailable", false)):
+			next = inspect; action_name = "CycleHandoffMissing"; action_title = "引継ぎ元の記録を確認"
+		elif bool(g.state.get("career_mode", false)) and item.get("reasons", []).is_empty():
+			next = ui.open_panel.bind("door"); action_name = "CycleWait_" + id.validate_node_name(); action_title = "日締めと翌日の営業を確認"
 		else:
-			_action(ui, content, "必要なスキル・成長を確認", ui._open_cycle_route.bind("company_growth"), "CyclePrepare_" + id.validate_node_name(), "quiet")
+			next = ui._open_cycle_route.bind("company_growth"); action_name = "CyclePrepare_" + id.validate_node_name(); action_title = "必要なスキル・成長を確認"
+	elif status == "ready":
+		next = ui._open_cycle_offer.bind(id); action_name = "CycleOpen_" + id.validate_node_name(); action_title = "この顧客の相談へ"
+	var board := ROUTE.new(); board.name = "CycleCustomerRoute"; board.setup(item, ui.text_scale, inspect, next); content.add_child(board)
+	var busy: bool = not bool(g.state.get("career_mode", false)) and bool(g.state.get("accepted", false)) and not g.current_done()
+	board.objects[2].disabled = busy and status == "ready"
+	var actions := HFlowContainer.new(); content.add_child(actions)
+	if not action_name.is_empty():
+		var button := _action(ui, actions, action_title, next, action_name, "primary" if status == "ready" else "secondary")
+		button.disabled = busy and status == "ready"
+	_action(ui, actions, "納品記録・相談の条件", inspect, "CycleDetailsToggle", "quiet")
+	content.add_child(details)
+	details.add_child(ui._label(str(item.get("reason", "")), 14, M.INK))
+	details.add_child(ui._label("きっかけ: DAY %02d「%s」の納品" % [int(item.get("source_day", 0)), str(item.get("source_title", ""))], 13, M.MUTED))
+	var locked_reason := str(item.get("locked_reason", ""))
+	if not locked_reason.is_empty(): details.add_child(ui._label(locked_reason, 13, M.MUTED))
+	if status == "paused":
+		details.add_child(ui._label(str(item.get("recovery_goal", "通常の依頼で期限内納品と顧客満足40以上を確認してください。")), 13, M.MUTED))
+	if busy: details.add_child(ui._label("進めている依頼を納品すると相談できます。", 13, M.MUTED))
+
+static func _toggle_details(ui, details: VBoxContainer) -> void:
+	var opening := not details.visible
+	if opening:
+		var owner: Control = ui.get_viewport().gui_get_focus_owner()
+		var source := str(owner.name) if is_instance_valid(owner) else ""
+		details.set_meta("return_focus", source if source in ["CycleRouteObject0", "CycleRouteObject1", "CycleRouteObject2"] else "CycleRouteObject0")
+	details.visible = opening
+	var toggle := ui.find_child("CycleDetailsToggle", true, false) as Button
+	if toggle != null: toggle.text = "記録を閉じる" if opening else "納品記録・相談の条件"
+	var tree: SceneTree = ui.get_tree()
+	await tree.process_frame; await tree.process_frame
+	if not is_instance_valid(ui) or not is_instance_valid(details) or not details.is_inside_tree(): return
+	if opening:
+		if is_instance_valid(toggle): toggle.grab_focus()
+		ui.modal_scroll.ensure_control_visible(details)
 	else:
-		var button := _action(ui, content, "この顧客の相談へ", ui._open_cycle_offer.bind(id), "CycleOpen_" + id.validate_node_name(), "primary")
-		if not bool(g.state.get("career_mode", false)):
-			var busy: bool = bool(g.state.get("accepted", false)) and not g.current_done()
-			button.disabled = busy
-			content.add_child(ui._label("進めている依頼を納品すると相談できます。" if busy else "営業を始めて、この相談の見積を確認します。初週の順番どおりに進める場合は、日締めへ戻れます。", 12, M.MUTED))
+		var source := ui.find_child(str(details.get_meta("return_focus", "CycleRouteObject0")), true, false) as Control
+		if is_instance_valid(source): source.grab_focus()
+		var board := ui.find_child("CycleCustomerRoute", true, false) as Control
+		if is_instance_valid(board): ui.modal_scroll.ensure_control_visible(board)
+
+static func _select_customer(ui, id: String) -> void:
+	ui.set_meta("cycle_customer", id); ui._select_company_view("overview")
+	_focus_customer(ui, "CycleCustomer_" + id.validate_node_name())
+
+static func _focus_customer(ui, id: String) -> void:
+	var tree: SceneTree = ui.get_tree()
+	await tree.process_frame; await tree.process_frame
+	if not is_instance_valid(ui): return
+	var button := ui.find_child(id, true, false) as Button
+	if button != null: button.grab_focus()
 
 static func _goal(ui, body: VBoxContainer, goal: Dictionary) -> void:
 	var id := str(goal.get("id", "")); var complete := bool(goal.get("complete", false))
