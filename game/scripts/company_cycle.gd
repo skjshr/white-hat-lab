@@ -141,6 +141,20 @@ static func record_delivery(game, contract_id: String, receipt: Dictionary) -> D
 	event = _event(cycle, "requested" if good else "paused", contract_id, client, str(candidate.id), day, reason if good else "次の指名相談は保留中です。通常の依頼で納品と顧客との関係を改善できます。")
 	return {"changed":true,"event":event,"lead":lead.duplicate(true)}
 
+static func record_cancellation(state: Dictionary, contract_id: String, receipt: Dictionary) -> bool:
+	ensure(state)
+	if contract_id.is_empty() or str(receipt.get("kind", "")) != "cancellation" or not validate(state.company_cycle): return false
+	var cycle: Dictionary = state.company_cycle
+	var client := str(receipt.get("client", ""))
+	if client.is_empty(): return true
+	var lead: Dictionary = cycle.leads.get(client, {})
+	if lead.is_empty() or str(lead.get("status", "")) == "fulfilled": return true
+	lead.status = "paused"
+	lead.last_outcome = {"contract_id":contract_id,"rating":"cancelled","satisfaction":int(receipt.get("satisfaction_after",0)),"day":int(receipt.get("day",state.get("day",1)))}
+	cycle.leads[client] = lead
+	_event(cycle, "cancelled", contract_id, client, str(lead.get("case_id", "")), int(receipt.get("day", state.get("day", 1))), "案件が中止されたため、指名相談をいったん保留しました。")
+	return true
+
 static func _eligibility(game, lead: Dictionary) -> Array[String]:
 	var reasons: Array[String] = []
 	var level := int(game.company_level().get("level", 1))

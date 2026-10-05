@@ -6,8 +6,22 @@ static func _state(game) -> Dictionary:
 
 static func _history_for_day(game, day: int) -> Array:
 	var rows: Array = []
+	var cancellation_ids: Dictionary = {}
 	for raw in _state(game).get("history", []):
-		if raw is Dictionary and int(raw.get("day", -1)) == day: rows.append(raw)
+		if raw is Dictionary and int(raw.get("day", -1)) == day:
+			rows.append(raw)
+			if str(raw.get("kind", "")) == "cancellation": cancellation_ids[str(raw.get("id", ""))] = true
+	# A busy day can trim an older cancellation out of the rolling 100-event
+	# history. The closeout archive is authoritative and keeps daily accounting
+	# and same-day retry rules stable until the day turns over.
+	for archive in _state(game).get("contract_closeouts", {}).values():
+		if not archive is Dictionary: continue
+		var receipt: Variant = archive.get("record", {})
+		if not receipt is Dictionary or int(receipt.get("day", -1)) != day: continue
+		var id := str(receipt.get("id", ""))
+		if cancellation_ids.has(id): continue
+		rows.append(receipt)
+		cancellation_ids[id] = true
 	return rows
 
 static func _open_contracts(game) -> int:
@@ -74,6 +88,7 @@ static func _from_records(game, day: int) -> Dictionary:
 		elif kind == "payroll": payroll_expense += int(row.get("expense", row.get("amount", 0)))
 		elif kind == "investment": investment_spending += int(row.get("amount", row.get("expense", 0)))
 		elif kind == "inventory_purchase": inventory_spending += int(row.get("amount",0))
+		elif kind == "cancellation": contract_net += int(row.get("profit", -int(row.get("costs", row.get("expense", 0)))))
 		elif kind.is_empty(): contract_net += int(row.get("profit", 0))
 	var payroll: Dictionary = _payroll(game, day)
 	return {"contract_net":contract_net,"care_gross":care_gross,"care_cost":care_cost,"care_net":care_net,"hiring_cost":hiring_cost,"payroll_due":int(payroll.today_cost),"payroll_outstanding":int(payroll.due),"today_wage_cost":int(payroll.today_cost),"paid_wages":int(payroll.paid),"arrears":int(payroll.arrears),"payroll_expense":payroll_expense,"inventory_spending":inventory_spending,"investment_spending":investment_spending,"missed_maintenance":missed}
@@ -101,6 +116,7 @@ static func _cash_activity(game, day: int) -> Dictionary:
 		elif kind == "investment": flow.investment += int(row.get("amount", 0))
 		elif kind == "staff_cost": flow.recruitment += int(row.get("amount", row.get("expense", 0)))
 		elif kind == "wage_payment": flow.wages_paid += int(row.get("amount", 0))
+		elif kind == "cancellation": flow.job_costs += maxi(0, int(row.get("costs", row.get("expense", 0))) - int(row.get("material_cost", 0)))
 		elif kind.is_empty() and not id.is_empty():
 			var expense := int(row.get("expense", 0))
 			var material := int(row.get("material_cost", 0))

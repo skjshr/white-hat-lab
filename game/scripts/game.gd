@@ -13,6 +13,7 @@ const OPERATIONS = preload("res://scripts/operations_dispatch.gd")
 const DAY_LEDGER = preload("res://scripts/day_ledger.gd")
 const BILLING = preload("res://scripts/company_billing.gd")
 const COMPANY_CYCLE = preload("res://scripts/company_cycle.gd")
+const CAREER_CLOSEOUT = preload("res://scripts/career_closeout.gd")
 const COMPANY_ROADMAP = preload("res://scripts/company_roadmap.gd")
 const BUSINESS_TRANSACTIONS = preload("res://scripts/business_transactions.gd")
 const BUSINESS_DATA = preload("res://scripts/business_workspace.gd")
@@ -298,7 +299,7 @@ func _reset_state() -> void:
 	state = {"version":STATE_VERSION,"maintenance_scope_version":2,"chapter":0,"day":1,"cash":5000,"trust":0,
 		"accepted":false,"inspected":false,"config":_default_fields(0),"revision":0,
 		"validated_revision":-1,"checks":[],"completed_ids":[],"history":[],
-		"equipment":[],"delivery_orders":[],"office_expansion":{"status":"locked","price":28000,"available_day":-1},"assignments":{},"clients":{},"customer_relations":{},"care_agreements":{},"staff":{},"staff_payroll":{"enabled":false,"last_settled_day":-1,"due":[]},"care_incidents":{},"maintenance_targets":{},"maintenance_jobs":[],"maintenance_settled_day":-1,"offer_quotes":{},"quote_decisions":[],"retainer_settled_day":-1,"contract_contexts":{},"offer_plan":"standard","pricing_policy":_default_pricing_policy(),"procurement_cart":CUSTOMER_STOCK.empty_cart(),"desktop_sessions":{},"retainer_daily":{},"restore_preview":0,"strategy":"","skills":{"operations":0,"advisory":0,"response":0},"profit":0,"credit":0,"cash_flow_start_day":0,"recurring_clients":[],"strategy_income":0,"career_mode":false,"contracts_completed":0,"current_contract_id":"","offers":[],"market_day":-1,"market_leads":[],"awaiting_contract":false,"game_complete":false,"errors":[],"profile":profile_defaults(),"diagnostics_required":false,"ui_help_seen":{},"dispatch_queues":{},"dispatch_holds":{}}
+		"equipment":[],"delivery_orders":[],"office_expansion":{"status":"locked","price":28000,"available_day":-1},"assignments":{},"clients":{},"customer_relations":{},"care_agreements":{},"staff":{},"staff_payroll":{"enabled":false,"last_settled_day":-1,"due":[]},"care_incidents":{},"maintenance_targets":{},"maintenance_jobs":[],"maintenance_settled_day":-1,"offer_quotes":{},"quote_decisions":[],"retainer_settled_day":-1,"contract_contexts":{},"contract_closeouts":{},"credit_loss":0,"offer_plan":"standard","pricing_policy":_default_pricing_policy(),"procurement_cart":CUSTOMER_STOCK.empty_cart(),"desktop_sessions":{},"retainer_daily":{},"restore_preview":0,"strategy":"","skills":{"operations":0,"advisory":0,"response":0},"profit":0,"credit":0,"cash_flow_start_day":0,"recurring_clients":[],"strategy_income":0,"career_mode":false,"contracts_completed":0,"current_contract_id":"","offers":[],"market_day":-1,"market_leads":[],"awaiting_contract":false,"game_complete":false,"errors":[],"profile":profile_defaults(),"diagnostics_required":false,"ui_help_seen":{},"dispatch_queues":{},"dispatch_holds":{}}
 	_assignments = {}
 	state.targets = []; state.target_index = 0; state.contract = {}; state.contract_plan = "standard"; state.offer_plan = "standard"; state.clock_minutes = BUSINESS_START_MINUTE; state.work = {"minutes":0.0,"started_at":BUSINESS_START_MINUTE,"started_day":1,"restarts_failed":0,"resets":0,"incident_cost":0,"plan":"standard"}
 	state.vm_states = {}; state.peak_profit = 0; _machine = null; _machine_key = ""
@@ -537,6 +538,8 @@ func _valid_state(candidate: Dictionary) -> bool:
 			if not order is Dictionary or str(order.get("id", "")).is_empty(): return false
 	if candidate.has("customer_stock") and not CUSTOMER_STOCK.validate(candidate.customer_stock): return false
 	if candidate.has("company_cycle") and not COMPANY_CYCLE.validate(candidate.company_cycle): return false
+	if candidate.has("contract_closeouts") and not CAREER_CLOSEOUT.validate(candidate.contract_closeouts): return false
+	if candidate.has("credit_loss") and (typeof(candidate.credit_loss) not in [TYPE_INT, TYPE_FLOAT] or not is_finite(float(candidate.credit_loss)) or float(candidate.credit_loss) < 0.0 or float(candidate.credit_loss) != floorf(float(candidate.credit_loss))): return false
 	if candidate.has("pricing_policy") and not _valid_pricing_policy(candidate.pricing_policy): return false
 	if candidate.has("procurement_cart") and not _valid_procurement_cart(candidate.procurement_cart): return false
 	if candidate.has("cash_flow_start_day") and (typeof(candidate.cash_flow_start_day) not in [TYPE_INT, TYPE_FLOAT] or not is_finite(float(candidate.cash_flow_start_day)) or float(candidate.cash_flow_start_day) != floorf(float(candidate.cash_flow_start_day)) or int(candidate.cash_flow_start_day) < 0): return false
@@ -573,6 +576,10 @@ func load_game() -> bool:
 			notified.emit("セーブデータを読み込めませんでした。既存データは保持されています。")
 			return false
 	state = parsed
+	if not state.has("contract_closeouts"):
+		CAREER_CLOSEOUT.ensure(state); needs_migration = true
+	if not state.has("credit_loss"):
+		state.credit_loss = 0; needs_migration = true
 	if not state.has("company_cycle"):
 		COMPANY_CYCLE.ensure(state); needs_migration = true
 	if not state.has("customer_stock"):
@@ -816,7 +823,7 @@ func _archive_player_save() -> bool:
 	if FileAccess.file_exists(destination): return true
 	return DirAccess.copy_absolute(ProjectSettings.globalize_path(SAVE_NAME),ProjectSettings.globalize_path(destination)) == OK
 
-func save_game() -> bool:
+func save_game(record_milestones: bool = true) -> bool:
 	if _machine != null and not _machine_key.is_empty() and _machine_key == _vm_key():
 		state.vm_states[_machine_key] = _machine.export_state()
 	_sync_contract_context()
@@ -834,7 +841,7 @@ func save_game() -> bool:
 		return false
 	# Milestone rewards are staged with this exact successful save. Failed writes
 	# cannot award a token or announce an achievement that was not persisted.
-	var earned_goals := COMPANY_ROADMAP.earned_after_save(save_snapshot)
+	var earned_goals: Dictionary = COMPANY_ROADMAP.earned_after_save(save_snapshot) if record_milestones else save_snapshot.company_cycle.get("earned_goals", {}).duplicate(true)
 	save_snapshot.company_cycle.earned_goals = earned_goals
 	var serialized := JSON.stringify(save_snapshot, "\t")
 	f.store_string(serialized)
@@ -922,6 +929,12 @@ func _activate_contract_context(id: String) -> bool:
 	_sync_contract_context()
 	var context: Dictionary = state.contract_contexts[id].duplicate(true)
 	state.chapter = int(context.get("chapter",state.chapter)); state.current_contract_id=id; state.contract=context.get("contract",{}).duplicate(true); state.contract_plan=str(context.get("contract_plan","standard")); state.accepted=bool(context.get("accepted",false)); state.awaiting_contract=false; state.inspected=bool(context.get("inspected",false)); state.targets=context.get("targets",[]).duplicate(true); state.target_index=int(context.get("target_index",0)); state.config=context.get("config",{}).duplicate(true); state.checks=context.get("checks",[]).duplicate(true); state.revision=int(context.get("revision",0)); state.validated_revision=int(context.get("validated_revision",-1)); state.work=context.get("work",{}).duplicate(true); state.advanced=context.get("advanced",{}).duplicate(true); state.baseline_recorded=bool(context.get("baseline_recorded",false)); state.baseline_locked=bool(context.get("baseline_locked",false)); state.baseline_config=str(context.get("baseline_config","")); state.baseline_sha=str(context.get("baseline_sha","")); state.baseline_report=str(context.get("baseline_report","")); state.baseline_report_content=str(context.get("baseline_report_content","")); state.diagnostics_required=bool(context.get("diagnostics_required",false)); state.restore_preview=int(context.get("restore_preview",0)); state.last_receipt=context.get("last_receipt",{}).duplicate(true); _machine=null; _machine_key=""; return true
+
+func contract_closeout_preview() -> Dictionary:
+	return CAREER_CLOSEOUT.preview(self)
+
+func cancel_current_contract() -> bool:
+	return CAREER_CLOSEOUT.cancel(self)
 
 func contract_capacity() -> int:
 	return 3 + (2 if "teamdesk" in state.get("equipment",[]) else 0) + (1 if "annexdesk_a" in state.get("equipment",[]) else 0) + (1 if "annexdesk_b" in state.get("equipment",[]) else 0)
@@ -2059,7 +2072,7 @@ func learn_skill(id: String) -> bool:
 
 func _update_growth() -> void:
 	state.peak_profit = maxi(int(state.get("peak_profit",0)),maxi(int(state.profit),int(state.credit)*100))
-	state.credit = maxi(int(state.credit), floori(int(state.peak_profit) / 100))
+	state.credit = maxi(int(state.credit), maxi(0, floori(int(state.peak_profit) / 100) - maxi(0,int(state.get("credit_loss",0)))))
 	state.trust = int(state.credit)
 
 func company_level() -> Dictionary:
@@ -2162,10 +2175,32 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 	var candidate_offers: Array = []
 	var carried_cases: Array = []
 	var completed_cases: Dictionary = {}
+	var canceled_today: Dictionary = {}
+	var canceled_today_cases: Dictionary = {}
+	var canceled_yesterday: Array[String] = []
 	for receipt in state.get("history", []):
-		if receipt is Dictionary:
+		if receipt is Dictionary and str(receipt.get("kind", "")).is_empty():
 			var completed_case_id := str(receipt.get("case_id", ""))
 			if not completed_case_id.is_empty(): completed_cases[completed_case_id] = true
+		elif receipt is Dictionary and str(receipt.get("kind", "")) == "cancellation":
+			var canceled_case_id := str(receipt.get("case_id", ""))
+			if int(receipt.get("day", -1)) == int(state.day) and not str(receipt.get("id", "")).is_empty():
+				canceled_today[str(receipt.id)] = true
+				if not canceled_case_id.is_empty(): canceled_today_cases[canceled_case_id] = true
+			if int(receipt.get("day", -1)) == int(state.day) - 1 and not canceled_case_id.is_empty() and canceled_case_id not in canceled_yesterday: canceled_yesterday.append(canceled_case_id)
+	# Cancellation archives outlive the rolling history, so they remain the
+	# source of truth for today's exact-ID block and yesterday's retry priority.
+	for archive in state.get("contract_closeouts", {}).values():
+		if not archive is Dictionary: continue
+		var record: Variant = archive.get("record", {})
+		if not record is Dictionary: continue
+		var archived_case_id := str(record.get("case_id", archive.get("context", {}).get("contract", {}).get("case_id", "")))
+		var archived_id := str(record.get("id", archive.get("id", "")))
+		if int(record.get("day", archive.get("day", -1))) == int(state.day) and not archived_id.is_empty():
+			canceled_today[archived_id] = true
+			if not archived_case_id.is_empty(): canceled_today_cases[archived_case_id] = true
+		if int(record.get("day", archive.get("day", -1))) == int(state.day) - 1 and not archived_case_id.is_empty() and archived_case_id not in canceled_yesterday:
+			canceled_yesterday.append(archived_case_id)
 	for context_id in state.get("contract_contexts", {}):
 		var context: Dictionary = state.contract_contexts[context_id]
 		var contract: Dictionary = context.get("contract", {})
@@ -2188,6 +2223,7 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 		if bool(state.get("care_agreements", {}).get(candidate_client, {}).get("active", false)) and not candidate_case_id.is_empty():
 			care_replacement_cases[candidate_case_id] = true
 	var existing_leads: Array = state.get("market_leads", []) if int(state.get("market_day", -1)) == int(state.day) else []
+	if not existing_leads.is_empty(): existing_leads = existing_leads.filter(func(raw_id): return not canceled_today_cases.has(str(raw_id)))
 	if not existing_leads.is_empty():
 		existing_leads = existing_leads.filter(func(raw_id):
 			var lead_id := str(raw_id)
@@ -2200,7 +2236,7 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 		var completed_allowed := not completed_cases.has(case_id) or care_replacement or quoted_case_ids.has(case_id) or int(fresh_category_counts.get(str(candidate.get("category", "")), 0)) == 0
 		# Preserve a lead already shown this day, including a quoted/awaiting
 		# retired case. Retirement only affects fresh market generation.
-		if bool(candidate.get("unlocked", false)) and case_id not in carried_cases and completed_allowed and (not retired or case_id in existing_leads): candidate_offers.append(candidate)
+		if bool(candidate.get("unlocked", false)) and not canceled_today.has(str(candidate.get("id", ""))) and case_id not in carried_cases and completed_allowed and (not retired or case_id in existing_leads): candidate_offers.append(candidate)
 	var recent_case_ids: Array = []
 	for receipt in state.get("history", []):
 		if receipt is Dictionary and int(receipt.get("day", -1)) == int(state.day) - 1 and str(receipt.get("kind", "")).is_empty():
@@ -2219,6 +2255,8 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 			if a.required_skills.size() != b.required_skills.size(): return a.required_skills.size() > b.required_skills.size()
 			return str(a.case_id) < str(b.case_id))
 		for candidate in promoted: priority_ids.append(str(candidate.case_id))
+	for canceled_case_id in canceled_yesterday:
+		if canceled_case_id not in priority_ids: priority_ids.append(canceled_case_id)
 	state.market_leads=MARKET_DEMAND.select_by_category(candidate_offers,int(state.day),recent_case_ids,existing_leads,state.skills,priority_ids)
 	# Keep progression moving when demand selection is saturated by a special
 	# route (hardware, endpoint recovery, or advanced work). Prefer a fresh
@@ -2402,6 +2440,7 @@ func convert_current_care_to_standard() -> bool:
 
 func choose_contract(id: String) -> bool:
 	if not state.career_mode or state.game_complete or (not state.awaiting_contract and not state.accepted): return false
+	if state.get("contract_closeouts", {}).has(id): return false
 	if _open_contract_count() >= contract_capacity(): return false
 	var previous_state: Dictionary = state.duplicate(true)
 	var previous_assignments: Dictionary = _assignments.duplicate(true)
