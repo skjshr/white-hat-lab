@@ -54,7 +54,10 @@ static func build(d, parent: VBoxContainer) -> void:
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right.add_theme_stylebox_override("panel", UI.style(Color.WHITE, Color.TRANSPARENT, 20, 18, 0))
 	split.add_child(right)
-	d.widgets.monitor.body = d._scroll(right)
+	var right_stack := VBoxContainer.new(); right.add_child(right_stack)
+	d.widgets.monitor.body = d._scroll(right_stack)
+	var branch_footer := VBoxContainer.new(); branch_footer.name = "BranchActions"; right_stack.add_child(branch_footer)
+	branch_footer.hide(); d.widgets.monitor["branch_footer"] = branch_footer
 	refresh(d)
 
 static func _property(d, parent: Node, title: String, value: String, color: Color = UI.INK) -> void:
@@ -100,6 +103,8 @@ static func refresh(d) -> void:
 	var w: Dictionary = d.widgets.monitor
 	var box: VBoxContainer = w.body
 	d._clear(box)
+	if is_instance_valid(w.get("branch_footer")):
+		d._clear(w.branch_footer); w.branch_footer.hide()
 	var tabbar: HBoxContainer = d._row(box, 3)
 	for entry in [["monitor","監視"],["overview","詳細"],["config","構成"],["logs","ログ"]]:
 		var tab_id: String = entry[0]
@@ -125,7 +130,8 @@ static func refresh(d) -> void:
 			w.host.text = str(branch.get("client", "")) + " · 案件全体"
 			w.badge.text = str(info.host).get_slice(".", 0) + (" 接続中" if bool(info.connected) else " 未接続")
 			w.badge.add_theme_color_override("font_color", SERVICE_ACCENT)
-			BRANCH.render(d, box, branch)
+			w.branch_footer.show()
+			BRANCH.render(d, box, branch, w.branch_footer)
 			return
 	if not info.connected:
 		w.badge.text=UI.copy("os_disconnected")

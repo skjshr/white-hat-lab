@@ -77,7 +77,7 @@ func fit_map() -> bool:
 		if not expect(label.get_theme_font_size("font_size") >= int(14 * float(game.settings.text_scale)) and label.get_line_count() == 1, "topology caption keeps enlarged single-line font"): return false
 		var natural: float = label.get_theme_font("font").get_string_size(label.text, HORIZONTAL_ALIGNMENT_LEFT, -1, label.get_theme_font_size("font_size")).x
 		if not expect(label.size.x + 1 >= natural, "topology caption fits the actual allocated width"): return false
-		var owner := label.get_parent().get_parent() as Control
+		var owner := label.get_parent() as Control
 		if not expect(owner.get_global_rect().grow(1).encloses(label.get_global_rect()), "topology caption stays inside its device shape vertically"): return false
 	var before: Dictionary = game.state.duplicate(true); var live: Dictionary = game._machine.export_state()
 	ui.desktop._refresh_monitor(); await frames(8)
@@ -87,7 +87,8 @@ func source_visible(host: String, file_name: String) -> bool:
 	if not await super.source_visible(host, file_name): return false
 	if not await monitor(): return false
 	if not await fit_map(): return false
-	if not expect(text_in(control("BranchNode_1")).contains("partner-order.csv"), "source data file stays visible from another selected host"): return false
+	var map = control("BranchServiceMap")
+	if not expect(map.file_data.any(func(item): return str(item.path) == "/srv/share/partner-order.csv" and bool(item.known) and bool(item.present)), "actual source file stays present from another selected host"): return false
 	if sales_refreshes == 0:
 		if not expect(text_in(control("BranchNode_2")).contains("未確認"), "unopened portal is unknown instead of an invented healthy VM"): return false
 	if sales_refreshes >= 3:

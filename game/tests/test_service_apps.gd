@@ -15,7 +15,9 @@ func _init() -> void:
 	game.previous_path = "user://qa-service-apps.previous.json"
 	game.settings_path = "user://qa-service-apps-settings.json"
 	ui._new_game()
-	game.state.accepted = true
+	game.set_process(false)
+	_assert(game.choose_strategy("advisory") and game.accept_mission(), "public story acceptance creates actual target and contract state")
+	if not game.state.accepted: print("FAIL: public acceptance setup"); quit(1); return
 	game.vm_run("ssh client")
 	ui.open_panel("terminal")
 	var pc = ui.desktop
@@ -23,6 +25,7 @@ func _init() -> void:
 	await process_frame
 	var monitor: Dictionary = pc.widgets.monitor
 	_assert(monitor.has("body") and is_instance_valid(monitor.body), "service monitor keeps body API")
+	_assert(not monitor.branch_footer.visible, "single-service monitor does not expose branch actions")
 	var service_tree: Tree = monitor.get("service_tree")
 	var service_item: TreeItem = service_tree.get_root().get_first_child() if service_tree != null and service_tree.get_root() != null else null
 	_assert(service_item != null and str(service_item.get_metadata(0)) == str(game.vm_info().service), "real service tree contains selected service")
@@ -33,6 +36,7 @@ func _init() -> void:
 	_assert(logs_button != null, "service tabs expose log view")
 	if logs_button != null: logs_button.emit_signal("pressed")
 	await process_frame
+	_assert(not monitor.branch_footer.visible, "log tab keeps branch actions hidden")
 	var detail_button: Button = _find_button(monitor.body, "詳細")
 	if detail_button != null: detail_button.emit_signal("pressed")
 	await process_frame
@@ -46,18 +50,18 @@ func _init() -> void:
 	var config_path: String = str(game.vm_info().config_path)
 	var saved_config: String = game.vm_read(config_path)
 	game.vm_write(config_path, "invalid configuration")
-	monitor.body.find_child("ServiceRestart", true, false).pressed.emit()
+	_restart(monitor)
 	_assert(not bool(game._vm().state.active) and not bool(monitor.get("operation_ok", true)), "invalid configuration restart reports actual failure")
 	game.vm_write(config_path, saved_config)
-	monitor.body.find_child("ServiceRestart", true, false).pressed.emit()
+	_restart(monitor)
 	_assert(bool(game._vm().state.active) and bool(monitor.get("operation_ok", false)), "corrected configuration can restart successfully")
 	var paths := [game.save_path, game.backup_path, game.previous_path, game.settings_path]
 	game.save_path = "user://missing-monitor-" + str(OS.get_process_id()) + "/save.json"
 	game.backup_path = game.save_path + ".bak"; game.previous_path = game.save_path + ".previous"; game.settings_path = game.save_path + ".settings"
-	monitor.body.find_child("ServiceRestart", true, false).pressed.emit()
+	_restart(monitor)
 	_assert(bool(game._vm().state.active) and str(monitor.get("operation_feedback", "")).contains("保存できませんでした"), "save failure cannot be reported successful merely because rollback remains active")
 	game.save_path = paths[0]; game.backup_path = paths[1]; game.previous_path = paths[2]; game.settings_path = paths[3]
-	monitor.body.find_child("ServiceRestart", true, false).pressed.emit()
+	_restart(monitor)
 	_assert(bool(monitor.get("operation_ok", false)), "restart succeeds after storage is restored")
 	pc._show_app("monitor")
 	await process_frame
@@ -133,6 +137,11 @@ func _init() -> void:
 	await process_frame
 	await create_timer(0.3).timeout
 	quit(0 if failures.is_empty() else 1)
+
+func _restart(monitor: Dictionary) -> void:
+	var button := monitor.body.find_child("ServiceRestart", true, false) as Button
+	_assert(button != null, "restart remains available after refresh")
+	if button != null: button.pressed.emit()
 
 func _find_button(node: Node, text: String):
 	for child in node.get_children():
