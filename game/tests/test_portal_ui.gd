@@ -29,7 +29,7 @@ func capture(label: String) -> void:
 	await frames(6)
 	var scroll: ScrollContainer=pc.widgets.browser.page.get_parent()
 	if narrow and label=="portal-sharing":scroll.ensure_control_visible(control("PortalApply_partner"));await frames(3)
-	elif narrow and label=="portal-version-content":scroll.ensure_control_visible(control("PortalVersionCurrentGrid"));await frames(3)
+	elif narrow and label=="portal-version-content":scroll.ensure_control_visible(control("PortalVersionDiffViewport"));await frames(3)
 	elif narrow:scroll.scroll_vertical=0;await frames(3)
 	await RenderingServer.frame_post_draw
 	var folder:=ProjectSettings.globalize_path("res://../artifacts/simulator/versions/ui");DirAccess.make_dir_recursive_absolute(folder)
@@ -46,6 +46,34 @@ func legacy() -> void:
 	check(int(machine.state.get("portal_model_version",1))==1 and not machine.state.fs.has(FILE),"legacy data not invented")
 	check(machine.probes().size()>0 and machine.probes().all(func(p):return bool(p.passed) and bool(p.fresh)),"actual legacy measurements preserved through JSON roundtrip")
 	check(machine.run("curl -H 'Authorization: Bearer partner-mfa-session' https://portal.client.test/partner").begins_with("HTTP/1.1 200"),"legacy route remains usable")
+
+func _surface_text(node: Node) -> String:
+	var result: String = str(node.text) if node is Label or node is Button else ""
+	for child in node.get_children(): result += "\n" + _surface_text(child)
+	return result
+
+func comparison_boundaries() -> void:
+	# Synthetic display boundaries are separate from the actual recipient/file
+	# journey below. Rendering must preserve the genuine delivered VM state.
+	var before: Dictionary = game._vm().export_state()
+	var clock: String = game.business_clock(); var cash := int(game.state.cash)
+	var renderer = load("res://scripts/os_portal_diff.gd")
+	var host := VBoxContainer.new(); root.add_child(host)
+	renderer.render(pc, host, "id,total\nA,10\nB,20\n", "id,total\nA,11\nC,30\n")
+	var shown: String = _surface_text(host)
+	check(shown.contains("− 20") and shown.contains("＋ 30") and shown.contains("− 10") and shown.contains("＋ 11"), "added/deleted/edited rows expose their actual before and after values")
+	host.free(); host = VBoxContainer.new(); root.add_child(host)
+	renderer.render(pc, host, "id,total\nA,\"unclosed", "id,total\nA,10\n")
+	check(_surface_text(host).contains("表として比較できません") and not _surface_text(host).contains("差分はありません"), "malformed comparison does not claim unchanged content")
+	host.free(); host = VBoxContainer.new(); root.add_child(host)
+	var headers: PackedStringArray = []; var original: PackedStringArray = []; var changed: PackedStringArray = []
+	for index in 34: headers.append("id" if index == 0 else "field" + str(index)); original.append("A"); changed.append("B" if index == 33 else "A")
+	renderer.render(pc, host, ",".join(headers) + "\n" + ",".join(original) + "\n", ",".join(headers) + "\n" + ",".join(changed) + "\n")
+	shown = _surface_text(host)
+	check(shown.contains("先頭32列") and shown.contains("表示範囲の外に差分") and not shown.contains("差分はありません"), "truncated changed columns explicitly defer to exact source rather than claiming no change")
+	check((host.find_child("PortalVersionDiffGrid", true, false) as GridContainer).columns == 33, "large comparison limits instantiated columns without changing complete model counts")
+	host.free()
+	check(game._vm().export_state() == before and game.business_clock() == clock and int(game.state.cash) == cash, "boundary rendering is read-only for actual VM, clock and funds")
 func run() -> void:
 	legacy()
 	ui=load("res://scripts/interface.gd").new();root.add_child(ui);await frames(1);game=ui._game();game.set_process(false)
@@ -105,7 +133,7 @@ func run() -> void:
 	press("PortalNav_all");press("PortalShareFile_0");press("PortalDetailVersions")
 	var saved_version: Dictionary=game._vm().portal_snapshot().versions.back()
 	press("PortalVersionPreview_"+str(saved_version.id));await frames()
-	check(control("PortalVersionPreviewGrid")!=null and control("PortalVersionCurrentGrid")!=null,"saved and current version previews visible")
+	check(control("PortalVersionDiffGrid")!=null and control("PortalDiffSummary")!=null,"saved and current values share an aligned comparison sheet")
 	await capture("portal-version-comparison")
 	if narrow:await capture("portal-version-content")
 	press("PortalVersionRestore_"+str(saved_version.id));await frames()
@@ -158,4 +186,5 @@ func run() -> void:
 	for round_index in 3:
 		for probe in game.diagnostic_probes():game.run_diagnostic(str(probe.id))
 	game.verify();check(game.deliver(),"revalidated real contract delivers")
+	comparison_boundaries()
 	print("PORTAL_UI failures=",failures.size());quit(0 if failures.is_empty() else 1)

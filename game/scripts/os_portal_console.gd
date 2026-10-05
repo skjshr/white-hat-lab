@@ -2,6 +2,7 @@ extends RefCounted
 
 const UI = preload("res://scripts/ui_theme.gd")
 const Glyph = preload("res://scripts/service_glyph.gd")
+const VERSION_DIFF = preload("res://scripts/os_portal_diff.gd")
 const BLUE := Color("006a9e")
 const INK := Color("252525")
 const MUTED := Color("676767")
@@ -130,8 +131,6 @@ static func _apply_live_layout(d, page: Control) -> void:
 				detail_frame.add_theme_stylebox_override("panel", style)
 		var grid := page.find_child("PortalFileGrid", true, false) as GridContainer
 		if grid != null: grid.columns = 2 if compact else 3
-	var panes := page.find_child("PortalVersionPanes", true, false) as BoxContainer
-	if panes != null: panes.vertical = compact
 
 static func _file_content(d, path: String) -> String:
 	var machine: Variant = null
@@ -388,7 +387,7 @@ static func _detail_versions(d, sidebar: VBoxContainer, state: Dictionary, snap:
 		if message.is_empty():message=copy("error_operation_failed")
 		var feedback:=label(d,sidebar,message,13,UI.GREEN if bool(result.get("ok",false)) else UI.RED);feedback.name="PortalVersionFeedback";feedback.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART
 
-static func _version_preview(d, parent: VBoxContainer, state: Dictionary, selected: String, compact: bool) -> void:
+static func _version_preview(d, parent: VBoxContainer, state: Dictionary, selected: String, _compact: bool) -> void:
 	var result: Dictionary=state.get("command_result",{})
 	var version: Dictionary=result.get("version",{})
 	if version.is_empty() or str(version.get("id",""))!=str(state.get("selected_version","")):return
@@ -398,13 +397,7 @@ static func _version_preview(d, parent: VBoxContainer, state: Dictionary, select
 	var restore:=button(d,heading,copy("version_restore"),"PortalVersionRestore_"+_node_token(str(version.id)),func():run(d,"portal restore "+str(version.id)))
 	restore.disabled=saved==current
 	if saved==current:label(d,parent,copy("version_identical"),13,MUTED)
-	var panes:=BoxContainer.new();panes.name="PortalVersionPanes";panes.vertical=compact;panes.add_theme_constant_override("separation",12);parent.add_child(panes)
-	for spec in [["version_before",saved,"PortalVersionPreviewGrid"],["version_after",current,"PortalVersionCurrentGrid"]]:
-		var pane:=VBoxContainer.new();pane.size_flags_horizontal=Control.SIZE_EXPAND_FILL;panes.add_child(pane)
-		label(d,pane,copy(str(spec[0])),14,BLUE)
-		_label_grid(d,pane,str(spec[1]),str(spec[2]),100)
-		var source: VBoxContainer=d._disclosure(pane,copy("file_content"))
-		var text:=TextEdit.new();text.name=str(spec[2])+"Source";text.editable=false;text.text=str(spec[1]);text.custom_minimum_size.y=120;style_editor(d,text);source.add_child(text)
+	VERSION_DIFF.render(d, parent, saved, current)
 
 static func share_row(d,parent: VBoxContainer,state: Dictionary,snap: Dictionary,path: String,role: String) -> void:
 	var share: Dictionary={}
