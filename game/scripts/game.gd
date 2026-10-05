@@ -3389,6 +3389,39 @@ func _stock_transaction(action: Callable) -> Dictionary:
 	changed.emit()
 	return result
 
+func _stock_preparation_transaction(action: Callable) -> Dictionary:
+	# Preparation is a multi-step state transition: pickup, contract staging, and
+	# saving the connected VM snapshot must succeed or roll back as one action.
+	var prior_state: Dictionary = state.duplicate(true)
+	var prior_assignments: Dictionary = _assignments.duplicate(true)
+	var prior_machine = _machine
+	var prior_machine_state: Dictionary = _machine.export_state() if _machine != null else {}
+	var prior_machine_key: String = str(_machine_key)
+	var result: Dictionary = action.call()
+	if not bool(result.get("ok", false)):
+		state = prior_state
+		_assignments = prior_assignments
+		_machine = prior_machine
+		_machine_key = prior_machine_key
+		if prior_machine != null: prior_machine.state = prior_machine_state.duplicate(true)
+		return result
+	if not save_game():
+		state = prior_state
+		_assignments = prior_assignments
+		_machine = prior_machine
+		_machine_key = prior_machine_key
+		if prior_machine != null: prior_machine.state = prior_machine_state.duplicate(true)
+		return {"ok":false,"error":"save"}
+	changed.emit()
+	return result
+
+func _stock_held_by_other_unit(id: String) -> bool:
+	for unit in customer_stock_units():
+		if str(unit.get("status", "")) == "carried" and str(unit.get("id", "")) != id: return true
+	for order in state.get("delivery_orders", []):
+		if order is Dictionary and str(order.get("status", "")) in ["carried", "placing"]: return true
+	return false
+
 func procurement_cart() -> Dictionary:
 	var cart := CUSTOMER_STOCK.empty_cart()
 	var saved: Variant = state.get("procurement_cart", {})
@@ -3449,6 +3482,29 @@ func stage_customer_stock(id: String) -> Dictionary:
 			_vm(); state.vm_states[_vm_key()] = _machine.export_state()
 		return result)
 
+func prepare_customer_stock(id: String) -> Dictionary:
+	if not state.accepted or current_done() or _customer_requirement().is_empty(): return {"ok":false,"error":"contract"}
+	var requirement: Dictionary = _customer_requirement()
+	var unit: Dictionary = customer_stock_for(id)
+	if unit.is_empty(): return {"ok":false,"error":"unknown"}
+	if str(unit.get("sku", "")) != str(requirement.get("sku", "")): return {"ok":false,"error":"sku"}
+	if not str(unit.get("contract_id", "")).is_empty() and (str(unit.get("contract_id", "")) != str(state.current_contract_id) or int(unit.get("target_index", -1)) != int(state.target_index)): return {"ok":false,"error":"contract"}
+	var status := str(unit.get("status", ""))
+	if status == "staged":
+		if str(unit.get("contract_id", "")) != str(state.current_contract_id) or int(unit.get("target_index", -1)) != int(state.target_index): return {"ok":false,"error":"contract"}
+		return {"ok":false,"error":"status"}
+	if status not in ["ready", "stored", "carried"]: return {"ok":false,"error":"status"}
+	if _stock_held_by_other_unit(id): return {"ok":false,"error":"held"}
+	return _stock_preparation_transaction(func() -> Dictionary:
+		if str(CUSTOMER_STOCK.unit(state, id).get("status", "")) != "carried":
+			var taken: Dictionary = CUSTOMER_STOCK.take(state, id)
+			if not bool(taken.get("ok", false)): return taken
+		var staged: Dictionary = CUSTOMER_STOCK.stage(state, id, str(state.current_contract_id), int(state.target_index))
+		if not bool(staged.get("ok", false)): return staged
+		_vm()
+		state.vm_states[_vm_key()] = _machine.export_state()
+		return staged)
+
 func dispatch_customer_stock(id: String) -> Dictionary:
 	var unit := customer_stock_for(id)
 	if not state.accepted or current_done() or _customer_requirement().is_empty() or str(unit.get("contract_id","")) != str(state.current_contract_id) or int(unit.get("target_index",-1)) != int(state.target_index): return {"ok":false,"error":"contract"}
@@ -3458,6 +3514,25 @@ func dispatch_customer_stock(id: String) -> Dictionary:
 	for check in _vm_checks():
 		if not bool(check.get("hardware",false)) and not bool(check.get("passed",false)): return {"ok":false,"error":"checks"}
 	return _stock_transaction(func(): return CUSTOMER_STOCK.dispatch(state,id))
+
+func ship_prepared_customer_stock(id: String) -> Dictionary:
+	var requirement: Dictionary = _customer_requirement()
+	var unit: Dictionary = customer_stock_for(id)
+	if not state.accepted or current_done() or requirement.is_empty() or unit.is_empty(): return {"ok":false,"error":"contract"}
+	if str(unit.get("sku", "")) != str(requirement.get("sku", "")): return {"ok":false,"error":"sku"}
+	if str(unit.get("contract_id", "")) != str(state.current_contract_id) or int(unit.get("target_index", -1)) != int(state.target_index): return {"ok":false,"error":"contract"}
+	if str(unit.get("status", "")) not in ["staged", "carried"]: return {"ok":false,"error":"status"}
+	if _stock_held_by_other_unit(id): return {"ok":false,"error":"held"}
+	if not state.inspected or int(state.validated_revision) != int(state.revision) or state.checks.is_empty(): return {"ok":false,"error":"checks"}
+	for job in _assignments.values():
+		if str(job.get("status", "")) == "working" and str(job.get("contract_id", "")) == str(state.current_contract_id): return {"ok":false,"error":"checks"}
+	for check in _vm_checks():
+		if not bool(check.get("hardware", false)) and not bool(check.get("passed", false)): return {"ok":false,"error":"checks"}
+	return _stock_preparation_transaction(func() -> Dictionary:
+		if str(CUSTOMER_STOCK.unit(state, id).get("status", "")) != "carried":
+			var taken: Dictionary = CUSTOMER_STOCK.take(state, id)
+			if not bool(taken.get("ok", false)): return taken
+		return CUSTOMER_STOCK.dispatch(state, id))
 
 func _stock_carried() -> bool:
 	return customer_stock_units().any(func(unit): return str(unit.status)=="carried")

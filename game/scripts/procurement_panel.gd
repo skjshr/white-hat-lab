@@ -2,6 +2,7 @@ const UI := preload("res://scripts/ui_theme.gd")
 const EQUIPMENT_ART := preload("res://scripts/equipment_art.gd")
 const THEME := preload("res://scripts/game_theme.gd")
 const M := preload("res://scripts/management_ui.gd")
+const PREPARATION := preload("res://scripts/stock_preparation_board.gd")
 
 const HEADER := THEME.HEADER
 const TAB_BAR := THEME.TAB_BAR
@@ -220,7 +221,7 @@ static func render(ui, parent: VBoxContainer, game) -> void:
 	if game == null:
 		_label(ui, parent, "Procurement unavailable", 16, UI.RED); return
 	var view := _meta(ui, "stock_view", "catalog")
-	if view not in ["catalog", "inventory"]: view = "catalog"
+	if view not in ["catalog", "inventory", "bench"]: view = "catalog"
 	var root := _panel(parent, M.CANVAS, 16); root.name = "CustomerStockProcurement"
 	root.get_parent().theme = UI.make_theme(ui.text_scale)
 	var appbar := PanelContainer.new(); appbar.name = "StockAppBar"; appbar.add_theme_stylebox_override("panel", M.surface(M.PAPER, 0, false)); root.add_child(appbar)
@@ -229,7 +230,10 @@ static func render(ui, parent: VBoxContainer, game) -> void:
 	var toolbar := HBoxContainer.new(); toolbar.name = "StockCommandToolbar"; toolbar.add_theme_constant_override("separation", 6); root.add_child(toolbar)
 	var equipment_tab := _button(ui, toolbar, _copy("stock_equipment_tab", "Equipment"), func(): ui.shop_view = "equipment"; ui.open_panel("shop"), "StockEquipmentTab"); equipment_tab.toggle_mode = true; equipment_tab.button_pressed = false
 	_catalog_tab(ui, toolbar, view == "catalog"); _inventory_tab(ui, toolbar, view == "inventory")
-	if view == "inventory": _inventory(ui, root, game)
+	var bench := _button(ui, toolbar, "準備台", func(): _set_meta(ui, "stock_view", "bench"); ui.open_panel("shop"), "StockPreparationTab")
+	bench.toggle_mode = true; bench.button_pressed = view == "bench"; M.button(bench, "tab", view == "bench")
+	if view == "bench": PREPARATION.render(ui, root, game)
+	elif view == "inventory": _inventory(ui, root, game)
 	else:
 		_catalog_view(ui, root, game)
 		_stock_footer(ui, game)
@@ -238,6 +242,7 @@ static func refresh_live(ui) -> void:
 	if ui == null or ui.current_kind != "shop" or ui.shop_view != "stock": return
 	var game = ui._game()
 	if game == null: return
+	PREPARATION.refresh(ui)
 	var review: Dictionary = _cart_review(ui, game)
 	var summary: Dictionary = _stock_summary(game)
 	var signature: String = JSON.stringify({

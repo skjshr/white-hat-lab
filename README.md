@@ -23,6 +23,8 @@ Windows x64を対象とした、オフラインのセキュリティ会社経営
 
 請求ポータルでは、[通常の請求業務](docs/living-invoice-service.md)と、操作記録を調べて封じ込め・復旧・再挑戦する[対応演習](docs/incident-response-exercise.md)を利用できます。
 
+機材納入案件では、[準備台](docs/stock-preparation.md)で実シリアルの入荷・接続・検証・発送・顧客受領を確認し、納品と請求確定まで進められます。
+
 ## 操作方法
 
 - **WASD**: 移動

@@ -591,11 +591,12 @@ static func delivery_blockers(g) -> Array:
 			var failed: Array = checks.filter(func(row): return not bool(row.get("passed", false)))
 			var non_hardware: Array = failed.filter(func(row): return not bool(row.get("hardware", false)))
 			if not failed.is_empty() and non_hardware.is_empty():
-				message = UI.copy("delivery_blocked_hardware") % name; kind = "hardware"; route = "office"
+				message = UI.copy("delivery_blocked_hardware") % name; kind = "hardware"
+				route = "preparation" if not s.get("contract", {}).get("supply_requirement", {}).is_empty() else "office"
 			elif not failed.is_empty(): message = UI.copy("delivery_blocked_failed") % [name, failed.size()]
 			elif g._vm_checks(index).any(func(row): return not bool(row.get("passed", false))):
 				message = UI.copy("delivery_blocked_changed") % name
-		if not message.is_empty(): out.append({"id":kind+"-"+str(index), "message":message, "action":UI.copy("delivery_open_office") if route == "office" else UI.copy("delivery_open_checks") % name, "route":route, "target_index":index})
+		if not message.is_empty(): out.append({"id":kind+"-"+str(index), "message":message, "action":UI.copy("delivery_open_office") if route in ["office", "preparation"] else UI.copy("delivery_open_checks") % name, "route":route, "target_index":index})
 	if out.is_empty(): out.append({"id":"refresh", "message":UI.copy("delivery_blocked_other"), "action":UI.copy("delivery_open_checks") % str(g.mission().get("title", "対象")), "route":"verify", "target_index":-1})
 	return out
 
@@ -605,6 +606,7 @@ static func _open_delivery_blocker(d, blocker: Dictionary) -> void:
 		if not d._select_target(index): return
 	var route := str(blocker.get("route", "verify"))
 	if route == "board": d._contracts()
+	elif route == "preparation": d._request_stock_preparation()
 	elif route == "office": d._close()
 	else: d._show_app(route)
 
@@ -657,10 +659,18 @@ static func refresh_receipt(d) -> void:
 			body.add_child(d._label("未検証",15,MUTED))
 		else:
 			var passed := 0
+			var displayed_checks: Array = g.state.checks.duplicate(true)
+			# Shipment arrival is a persisted physical event, separate from VM
+			# configuration revision. Read its current status without measuring
+			# or rerunning validation during rendering.
+			if not g.state.get("contract", {}).get("supply_requirement", {}).is_empty():
+				var hardware: Dictionary = g._customer_hardware()
+				for item in displayed_checks:
+					if bool(item.get("hardware", false)): item.passed = str(hardware.get("status", "")) == "delivered"
 			var measured_by_id := {}
 			if bool(g.state.get("diagnostics_required", false)) and not g.advanced_active():
 				for probe in g.diagnostic_probes(): measured_by_id[str(probe.get("id", ""))] = probe
-			for item in g.state.checks:
+			for item in displayed_checks:
 				if bool(item.passed): passed += 1
 			var stale: bool = int(g.state.get("validated_revision", -1)) != int(g.state.get("revision", 0))
 			if bool(g.state.get("diagnostics_required", false)):
@@ -670,7 +680,7 @@ static func refresh_receipt(d) -> void:
 			var details: VBoxContainer = d._disclosure(body, summary) if passed > 0 else d._box(body, 0)
 			if passed == 0: body.add_child(d._label(summary,15,ORANGE))
 			details.name = "DeliveryCheckDetails"
-			for item in g.state.checks:
+			for item in displayed_checks:
 				if bool(item.get("probe", false)) and measured_by_id.has(str(item.get("id", ""))):
 					var probe: Dictionary = measured_by_id[str(item.id)]
 					if not bool(probe.get("recorded", false)):

@@ -7,6 +7,7 @@ signal contracts_requested
 signal sales_requested
 signal next_task_requested
 signal equipment_requested
+signal stock_preparation_requested
 const WINDOW = preload("res://scripts/os_window.gd")
 const UI = preload("res://scripts/ui_theme.gd")
 const BUSINESS = preload("res://scripts/os_business_apps.gd")
@@ -331,6 +332,9 @@ func _rail_action(id: String) -> void:
 
 func _request_equipment() -> void:
 	if _save_session(): equipment_requested.emit()
+
+func _request_stock_preparation() -> void:
+	if _save_session(): stock_preparation_requested.emit()
 
 func _build_compact_nav() -> void:
 	compact_nav = PanelContainer.new()
@@ -1164,7 +1168,11 @@ func _run_command(text: String) -> void:
 	history_index = history.size()
 	if input == "clear": terminal_log = ""; widgets.terminal.output.text = ""
 	elif input.begins_with("edit ") or input.begins_with("nano "): _open_editor(input.substr(input.find(" ")+1).strip_edges())
-	else: _append("$ "+display_command+"\n"+game.vm_run(input))
+	else:
+		var response: String = game.vm_run(input)
+		if input.begins_with("ssh ") and response.contains("hardware_unavailable"):
+			response = "SSH: 機材が設定台に接続されていません。上の「準備台」から機材を接続してください。"
+		_append("$ "+display_command+"\n"+response)
 	widgets.terminal.command.clear(); _state_changed(); _save_session(false)
 	if current_app == "terminal": widgets.terminal.command.grab_focus()
 	if widgets.has("monitor"): _refresh_monitor()

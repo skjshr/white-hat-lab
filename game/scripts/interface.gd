@@ -612,6 +612,7 @@ func open_panel(kind: String) -> void:
 			sales_view = "inquiries"
 			open_panel("sales"))
 		desktop.equipment_requested.connect(func(): open_panel("shop"))
+		desktop.stock_preparation_requested.connect(_open_stock_preparation)
 		return
 	if controls.menu.visible: controls.menu.modulate.a = 0.0
 	modal_shade = ColorRect.new(); modal_shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); modal_shade.color = Color(0.10,0.19,0.23,0.42); root.add_child(modal_shade)
@@ -1510,6 +1511,11 @@ func _operating_attention_row(host: VBoxContainer, title: String, count: int, ac
 func _open_company_procurement() -> void:
 	shop_view = "stock"
 	set_meta("stock_view", "catalog")
+	open_panel("shop")
+
+func _open_stock_preparation() -> void:
+	shop_view = "stock"
+	set_meta("stock_view", "bench")
 	open_panel("shop")
 
 func _open_company_receiving() -> void:

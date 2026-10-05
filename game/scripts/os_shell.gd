@@ -24,6 +24,7 @@ static func build(os, parent: VBoxContainer) -> void:
 	session.add_child(session_tab)
 	var session_label = os._label(UI.copy("fidelity_terminal_local", "ローカル PC")+"  /  未接続", 13, TERMINAL_TEXT); session_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL; session_label.autowrap_mode = TextServer.AUTOWRAP_OFF; session_label.clip_text = true; session_tab.add_child(session_label)
 	var session_spacer := Control.new(); session_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL; session.add_child(session_spacer)
+	var preparation_button = os._button("準備台", os._request_stock_preparation); preparation_button.name = "TerminalPreparation"; preparation_button.custom_minimum_size.y = 28; session.add_child(preparation_button)
 	var connect_button = os._primary(UI.copy("fidelity_connect", "接続"), func(): os._run_command("ssh client")); connect_button.custom_minimum_size.y = 28; session.add_child(connect_button)
 	connect_button.name = "TerminalConnect"
 	var disconnect_button = os._button(UI.copy("fidelity_disconnect", "切断"), func(): os._run_command("exit")); disconnect_button.custom_minimum_size.y = 28; session.add_child(disconnect_button)
@@ -39,7 +40,7 @@ static func build(os, parent: VBoxContainer) -> void:
 	var prompt = os._label("自席PC $", 16, TERMINAL_TEXT); prompt.autowrap_mode = TextServer.AUTOWRAP_OFF; prompt.clip_text = true; prompt.custom_minimum_size.x = 88; prompt.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN; prompt.tooltip_text = local_name; input_row.add_child(prompt)
 	var input := LineEdit.new(); input.name = "CommandInput"; input.size_flags_horizontal = Control.SIZE_EXPAND_FILL; input.custom_minimum_size.y = 42; input.placeholder_text = "コマンドを入力…"; input.add_theme_font_override("font", os.mono); input.add_theme_font_size_override("font_size", int(16 * float(os.game.settings.get("text_scale",1.0)))); input.text_submitted.connect(os._run_command); input.gui_input.connect(os._terminal_input); input_row.add_child(input)
 	input.add_theme_stylebox_override("normal",UI.style(TERMINAL,Color.TRANSPARENT,2,3,0)); input.add_theme_stylebox_override("focus",UI.style(TERMINAL,Color("0078d4"),2,3,0)); input.add_theme_color_override("font_color",TERMINAL_TEXT); input.add_theme_color_override("caret_color",TERMINAL_TEXT); input.add_theme_color_override("font_placeholder_color",Color("9a9a9a"))
-	os.widgets.terminal = {"output": log, "command": input, "prompt": prompt, "session": session_label, "status": status, "connect": connect_button, "disconnect": disconnect_button, "config":config_button, "suggestions": null}
+	os.widgets.terminal = {"output": log, "command": input, "prompt": prompt, "session": session_label, "status": status, "connect": connect_button, "disconnect": disconnect_button, "preparation":preparation_button, "config":config_button, "suggestions": null}
 	os.output = log; os.command = input; os.prompt = prompt
 	var guide: Button
 	guide = os._button("入力補助", func():
@@ -109,6 +110,7 @@ static func refresh(os) -> void:
 	if is_instance_valid(w.get("connect")): w.connect.visible = not connected
 	if is_instance_valid(w.get("disconnect")): w.disconnect.visible = connected
 	if is_instance_valid(w.get("config")): w.config.disabled = not connected
+	if is_instance_valid(w.get("preparation")): w.preparation.visible = not os.game._customer_requirement().is_empty()
 	var next_log: String = os.terminal_log
 	if is_instance_valid(w.get("output")) and w.output.text != next_log: w.output.text = next_log
 
