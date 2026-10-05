@@ -20,7 +20,7 @@ func setup(d, filename: String, path: String, upload: Callable) -> void:
 	copy_present = present; copy_dirty = dirty
 	var state := "? コピーなし" if not present else "● 未保存の編集" if dirty else "✓ コピーを保存済み" if changed else "✓ 取得時と同じ"
 	_label("SmbCopyState", state, 12)
-	var preview := TextEdit.new(); preview.name = "SmbPreview"; preview.editable = false
+	var preview := TextEdit.new(); preview.name = "SmbPreview"; preview.editable = false; preview.tab_input_mode = false
 	preview.text = str(d.samba_ui.get("access_preview", ""))
 	preview.add_theme_font_override("font", UI.font(400)); preview.add_theme_font_size_override("font_size", roundi(13 * factor))
 	paper_height = maxf(106 * factor, preview.get_theme_font("font").get_height(preview.get_theme_font_size("font_size")) * 5 + 10 * factor)

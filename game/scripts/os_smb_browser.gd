@@ -22,15 +22,9 @@ static func field(d,parent: Node,title: String,id: String,key: String,fallback: 
 	label(d,parent,title,13,MUTED)
 	var node:=LineEdit.new();node.name=id;node.text=str(d.samba_ui.get(key,fallback));node.custom_minimum_size.y=34;parent.add_child(node)
 	node.text_changed.connect(func(value):d.samba_ui[key]=value;remember(d));return node
-static func panel(parent: Node) -> VBoxContainer:
-	var frame:=PanelContainer.new();frame.size_flags_horizontal=Control.SIZE_EXPAND_FILL;frame.add_theme_stylebox_override("panel",UI.style(Color.WHITE,LINE,16,14,0));parent.add_child(frame)
-	var body:=VBoxContainer.new();body.add_theme_constant_override("separation",10);frame.add_child(body);return body
 
 static func _preview_path(d) -> String:
 	return str(d.samba_ui.get("access_preview_path", d.samba_ui.get("access_destination", "")))
-
-static func _unsaved_source(d, path: String) -> bool:
-	return d.drafts.has(path) and str(d.drafts[path]) != str(d.game.vm_read(path))
 
 static func _upload_preview(d) -> void:
 	d.samba_ui.access_source = _preview_path(d)
@@ -47,18 +41,21 @@ static func render(d,parent: VBoxContainer) -> void:
 	button(d,toolbar,copy("upload"),"SmbUploadOpen",func():s.transfer_mode="upload";d._render_smb())
 	var download:=button(d,toolbar,copy("download"),"SmbDownloadOpen",func():s.transfer_mode="download";d._render_smb())
 	download.disabled=str(s.get("access_selected","")).is_empty()
+	if str(s.get("transfer_mode","")) in ["upload","download"]:
+		_transfer(d,parent,str(s.transfer_mode));return
 	if bool(s.get("access_stale",false)):
 		var stale:=label(d,parent,"前回取得した内容を表示中です。「更新」で一覧を再取得できます。",12,Color("8b5e10"))
 		stale.name="SmbStale";stale.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART
 	var output:=str(s.get("access_output",""))
-	if not output.is_empty():
+	var last: Dictionary = s.get("last_transfer",{})
+	if not last.is_empty() and str(s.get("access_operation","")) == "upload" and str(last.get("direction","")) == "upload" and str(last.get("response","")) == output and str(last.get("user","")) == str(s.get("access_user","staff")) and str(last.get("share","")) == str(s.get("access_share","share")):
+		var receipt := preload("res://scripts/smb_transfer_receipt.gd").new(); receipt.setup(d,last); parent.add_child(receipt)
+	elif not output.is_empty():
 		var failed:=output.begins_with("NT_STATUS_") or output.begins_with("{") or output.begins_with("put:") or output.begins_with("get:") or output.begins_with("smbclient:")
 		var result:=label(d,parent,output,13,Color("ba302e") if failed else MUTED);result.name="SmbOutput";result.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART
 		if failed:
 			var recovery:=label(d,parent,"転送先・ファイル名・接続ユーザーを確認して再試行してください。入力内容は保持されています。",13,MUTED)
 			recovery.name="SmbRecoveryHint";recovery.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART
-	if str(s.get("transfer_mode","")) in ["upload","download"]:
-		_transfer(d,parent,str(s.transfer_mode));return
 	var listing:=HFlowContainer.new();listing.add_theme_constant_override("h_separation",8);listing.add_theme_constant_override("v_separation",6);parent.add_child(listing)
 	var files: Array=s.get("access_files",[])
 	if files.is_empty():label(d,listing,copy("access_denied") if "ACCESS_DENIED" in output else copy("no_files"),14,MUTED)
@@ -77,46 +74,20 @@ static func render(d,parent: VBoxContainer) -> void:
 		label(d,details,"共有: //files01.client.test/"+str(s.get("access_share","share"))+" / 利用者: "+str(s.get("access_user","staff")),12,MUTED)
 
 static func _transfer(d,parent: VBoxContainer,mode: String) -> void:
-	var s: Dictionary=d.samba_ui;var body:=panel(parent)
-	label(d,body,copy(mode),18)
+	var s: Dictionary=d.samba_ui
+	var position := parent.get_child_count()
+	var details: VBoxContainer = d._disclosure(parent,"パス・応答の詳細")
+	var source: LineEdit
+	var destination: LineEdit
 	if mode=="upload":
-		var source:=field(d,body,copy("local_source"),"SmbSource","access_source","/srv/data/orders.csv")
-		var source_row:=HBoxContainer.new();source_row.add_theme_constant_override("separation",6);body.add_child(source_row)
-		source.reparent(source_row);source.size_flags_horizontal=Control.SIZE_EXPAND_FILL
-		var available:=OptionButton.new();available.name="SmbSourcePicker";source_row.add_child(available)
-		available.custom_minimum_size.x=86;available.tooltip_text="取得済みファイルから選択"
-		available.fit_to_longest_item=false
-		var sources: Array=[]
-		for folder in ["/srv/data", "/home/operator", source.text.get_base_dir()]:
-			for path in d.game.vm_list(folder):
-				if not str(path).ends_with("/") and path not in sources:sources.append(path)
-		sources.sort()
-		for path in sources:
-			available.add_item(str(path));available.set_item_metadata(available.item_count-1,str(path))
-			if str(path)==source.text:available.select(available.item_count-1)
-		available.disabled=sources.is_empty()
-		available.item_selected.connect(func(index):source.text=str(available.get_item_metadata(index));s.access_source=source.text;remember(d))
-		var remote:=field(d,body,copy("remote_filename"),"SmbRemoteName","access_remote","orders.csv")
-		var draft_hint:=label(d,body,"",13,Color("ba302e"));draft_hint.name="SmbSourceDraft";draft_hint.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART
-		var actions:=HFlowContainer.new();actions.add_theme_constant_override("h_separation",8);body.add_child(actions)
-		var send:=button(d,actions,copy("upload"),"SmbUpload",func():
-			if _unsaved_source(d,source.text):return
-			if d._smb_put(source.text,remote.text):s.transfer_mode=""
-			d._render_smb(),true)
-		var update_draft:=func():
-			var dirty:=_unsaved_source(d,source.text)
-			draft_hint.text="エディターに未保存の変更があります。保存してから送信してください。" if dirty else ""
-			draft_hint.visible=dirty;send.disabled=dirty or source.text.strip_edges().is_empty() or remote.text.strip_edges().is_empty()
-		source.text_changed.connect(func(_value):update_draft.call())
-		remote.text_changed.connect(func(_value):update_draft.call())
-		available.item_selected.connect(func(_index):update_draft.call())
-		update_draft.call()
-		button(d,actions,copy("cancel"),"SmbTransferCancel",func():s.transfer_mode="";d._render_smb())
+		source=field(d,details,copy("local_source"),"SmbSource","access_source","/srv/data/orders.csv")
+		destination=LineEdit.new();destination.name="SmbRemoteName";destination.text=str(s.get("access_remote","orders.csv"));details.add_child(destination)
+		destination.text_changed.connect(func(value):s.access_remote=value;remember(d))
 	else:
-		label(d,body,str(s.get("access_selected","")),14,MUTED)
-		var destination:=field(d,body,copy("download_destination"),"SmbDestination","access_destination","/home/operator/orders.csv")
-		var actions:=HFlowContainer.new();actions.add_theme_constant_override("h_separation",8);body.add_child(actions)
-		button(d,actions,copy("download"),"SmbDownload",func():
-			if d._smb_get(str(s.get("access_selected","")),destination.text):s.transfer_mode=""
-			d._render_smb(),true)
-		button(d,actions,copy("cancel"),"SmbTransferCancel",func():s.transfer_mode="";d._render_smb())
+		destination=field(d,details,copy("download_destination"),"SmbDestination","access_destination","/home/operator/orders.csv")
+		source=destination
+	var raw:=label(d,details,str(s.get("access_output","")),13,MUTED);raw.name="SmbOutput";raw.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART
+	var last: Dictionary=s.get("last_transfer",{})
+	if not last.is_empty():label(d,details,"前の転送 #"+str(last.get("attempt",0))+": "+str(last.get("filename",""))+" · "+str(last.get("response","")),12,MUTED).autowrap_mode=TextServer.AUTOWRAP_WORD_SMART
+	label(d,details,"共有: //files01.client.test/"+str(s.get("access_share","share")),12,MUTED)
+	var desk:=preload("res://scripts/smb_transfer_desk.gd").new();desk.setup(d,mode,source,destination);parent.add_child(desk);parent.move_child(desk,position)

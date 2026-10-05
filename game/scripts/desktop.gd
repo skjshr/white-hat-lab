@@ -1595,6 +1595,7 @@ func _invalidate_smb() -> void:
 		if widgets.has("files") and bool(samba_ui.get("network_open",false)): _render_smb()
 		return
 	samba_ui.access_files=[]; samba_ui.access_preview=""; samba_ui.access_output=""
+	samba_ui.access_operation=""
 	samba_ui.access_selected=""; samba_ui.access_preview_path=""; samba_ui.access_revision=_samba_signature(); samba_ui.access_security_signature=access_signature
 	if widgets.has("files") and bool(samba_ui.get("network_open",false)): _render_smb()
 
@@ -1632,6 +1633,7 @@ func _smb_finish(output_text: String, success: bool, clear_on_error := false) ->
 	return success
 
 func _smb_list() -> bool:
+	samba_ui.access_operation = "list"
 	var scope: String = str(samba_ui.get("access_share","share"))+"|"+str(samba_ui.get("access_user","staff"))
 	if scope != str(samba_ui.get("access_scope","")):
 		samba_ui.access_preview=""; samba_ui.access_selected=""; samba_ui.access_preview_path=""
@@ -1645,23 +1647,35 @@ func _smb_list() -> bool:
 	return _smb_finish(result,ok,true)
 
 func _smb_get(name: String, destination: String) -> bool:
-	if not _smb_argument(name) or not _smb_argument(destination): return _smb_finish("NT_STATUS_INVALID_PARAMETER",false)
-	var result:=_smb_command('get "'+name+'" "'+destination+'"')
+	var result: String = _smb_command('get "'+name+'" "'+destination+'"') if _smb_argument(name) and _smb_argument(destination) else "NT_STATUS_INVALID_PARAMETER"
 	var ok:=result.begins_with("getting file ") and result.ends_with(": OK")
 	if ok:
 		samba_ui.access_selected=name; samba_ui.access_preview=game.vm_read(destination); samba_ui.access_preview_path=game._vm()._path(destination)
 		smb_document_focus = true
+	_smb_record_transfer("download",destination,name,result,ok,str(game.vm_read(destination)) if ok else "")
 	return _smb_finish(result,ok)
 
 func _smb_put(source: String, name: String) -> bool:
-	if not _smb_argument(source) or not _smb_argument(name): return _smb_finish("NT_STATUS_INVALID_PARAMETER",false)
-	var result:=_smb_command('put "'+source+'" "'+name+'"')
+	var contents: String = str(game.vm_read(source))
+	var result: String = _smb_command('put "'+source+'" "'+name+'"') if _smb_argument(source) and _smb_argument(name) else "NT_STATUS_INVALID_PARAMETER"
 	var ok:=result.begins_with("putting file ") and result.ends_with(": OK")
 	if ok:
 		_smb_list()
 		_notify("転送保存済み")
+	_smb_record_transfer("upload",source,name,result,ok,contents)
 	get_node("/root/Soundscape").play_ui("work_success" if ok else "work_failure")
 	return _smb_finish(result,ok)
+
+func _smb_record_transfer(direction: String, local_path: String, filename: String, response: String, success: bool, contents: String) -> void:
+	# A client receipt of an explicit request, never an inferred permission.
+	var attempt := int(samba_ui.get("transfer_attempt",0)) + 1
+	samba_ui.transfer_attempt = attempt
+	samba_ui.access_operation = direction
+	samba_ui.last_transfer = {"attempt":attempt,"direction":direction,"local_path":local_path,"filename":filename,"user":str(samba_ui.get("access_user","staff")),"share":str(samba_ui.get("access_share","share")),"response":response,"success":success,"bytes":contents.to_utf8_buffer().size() if success else 0,"source_sha256":contents.sha256_text(),"security_signature":_smb_security_signature()}
+
+func _smb_security_signature() -> String:
+	var live: Dictionary = game._vm().state
+	return JSON.stringify([live.get("applied",{}),live.get("connected",false),live.get("active",false)])
 
 func _backup_console_url(value: String) -> bool:
 	return _backup_v2() and value.get_slice("#",0).get_slice("?",0).trim_suffix("/") == BACKUP_URL

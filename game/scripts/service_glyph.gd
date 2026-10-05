@@ -12,6 +12,10 @@ func _draw() -> void:
 	var offset := (size - Vector2.ONE * side) / 2.0
 	draw_set_transform(offset, 0, Vector2.ONE * side / 48.0)
 	match kind:
+		"blocked":
+			draw_circle(Vector2(24,24),20,Color("fffdf5"))
+			draw_arc(Vector2(24,24),20,0,TAU,40,tint,3,true)
+			for sign in [-1,1]: draw_line(Vector2(15,24-9*sign),Vector2(33,24+9*sign),tint,4,true)
 		"device":
 			draw_style_box(_box(), Rect2(5, 7, 38, 27))
 			draw_line(Vector2(24, 34), Vector2(24, 41), tint, 2, true)

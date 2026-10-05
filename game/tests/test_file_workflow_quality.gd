@@ -134,7 +134,7 @@ func run() -> void:
 	await maximize("editor");await press("EditorSave")
 	check(game.vm_read(COPY)==report,"downloaded copy saves exact edited bytes")
 	await maximize("files");pc._render_smb();await frames()
-	check(control("SmbStale") != null,"preserved SMB preview is identified as previously retrieved content")
+	check(control("SmbTransferRemoteCaption").is_visible_in_tree() and control("SmbTransferRemoteCaption").text == "取得時の内容" and control("SmbTransferRemotePreview").text == str(pc.samba_ui.access_preview) and control("SmbTransferRemotePreview").text != report,"transfer identifies the actual retrieved specimen separately from the saved edited copy")
 	enter("SmbRemoteName",REMOTE)
 	await press("SmbUpload")
 	check(str(pc.samba_ui.get("access_output","")).contains("ACCESS_DENIED"),"read-only staff transfer returns real denial")
