@@ -123,7 +123,7 @@ func _init() -> void:
 		var preserved_probe: Dictionary = {}
 		for measured_probe in game.diagnostic_probes():
 			if str(measured_probe.get("id", "")) == passing_probe_id: preserved_probe = measured_probe
-		_assert(save_failure != null and save_failure.text.contains("測定結果を保存できませんでした") and save_failure.text.contains("前回の結果"), "UI exposes the failed save and identifies the following row as the previous result")
+		_assert(save_failure != null and save_failure.text.contains("測定結果を保存できませんでした") and (save_failure.text.contains("前回の結果") or save_failure.text.contains("保存済みの観測")), "UI exposes failed persistence and identifies the displayed evidence as previously saved")
 		_assert(bool(preserved_probe.get("recorded", false)) and bool(preserved_probe.get("fresh", false)) and bool(preserved_probe.get("passed", false)), "failed UI remeasurement preserves the prior durable PASS")
 		game.save_path = durable_path; game.backup_path = durable_backup; game.previous_path = durable_previous
 		diagnostic_run = pc.widgets.verify.right.find_child("DiagnosticRun", true, false)

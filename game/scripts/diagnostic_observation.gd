@@ -1,8 +1,10 @@
 extends RefCounted
 ## Pure projection of one already-recorded public diagnostic probe.
 ## This module never reads Game/VM state and never infers a PASS from transport.
+const ShareObservation = preload("res://scripts/share_diagnostic_observation.gd")
 
 static func project(probe: Dictionary) -> Dictionary:
+	if _protocol(str(probe.get("command", ""))) in ["smb", "hash"]: return ShareObservation.project(probe)
 	var recorded := bool(probe.get("recorded", false))
 	var fresh := bool(probe.get("fresh", false))
 	var output := str(probe.get("result", "")) if recorded else ""

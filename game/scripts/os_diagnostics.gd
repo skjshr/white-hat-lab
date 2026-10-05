@@ -5,6 +5,8 @@ const UI = preload("res://scripts/ui_theme.gd")
 const Comparison = preload("res://scripts/text_comparison.gd")
 const Observation = preload("res://scripts/diagnostic_observation.gd")
 const Workbench = preload("res://scripts/diagnostic_workbench.gd")
+const ShareObservation = preload("res://scripts/share_diagnostic_observation.gd")
+const ShareWorkbench = preload("res://scripts/share_diagnostic_workbench.gd")
 const INK := UI.INK
 const MUTED := UI.MUTED
 const BLUE := UI.PRIMARY
@@ -85,6 +87,12 @@ static func _status_color(probe: Dictionary) -> Color:
 	if not probe.get("recorded", false): return MUTED
 	if not probe.get("fresh", false): return BLUE
 	return GREEN if probe.get("passed", false) else RED
+
+static func _probe_label(probe: Dictionary) -> String:
+	if str(probe.get("command", "")).begins_with("sha256sum "):
+		var args := ShareObservation.tokens(str(probe.command))
+		if args.size() == 2: return args[1].get_file()
+	return str(probe.get("label", ""))
 
 static func _expected_outcome(probe: Dictionary) -> String:
 	# Describe the public acceptance criterion, never hidden configuration values.
@@ -188,12 +196,12 @@ static func refresh(d) -> void:
 		row.add_child(icon)
 		var col = d._box(row, 0)
 		col.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		var label = d._label(str(probe.label), 13, INK)
+		var label = d._label(_probe_label(probe), 13, INK)
 		label.autowrap_mode = TextServer.AUTOWRAP_OFF
 		label.clip_text = true
 		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		col.add_child(label)
-		var note = d._label(_status(probe), 11, _status_color(probe))
+		var note = d._label(("原本 · " if str(probe.command).begins_with("sha256sum ") else "") + _status(probe), 11, _status_color(probe))
 		note.autowrap_mode = TextServer.AUTOWRAP_OFF
 		note.clip_text = true
 		note.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -219,7 +227,7 @@ static func refresh(d) -> void:
 	var command_row = d._row(right, 5)
 	var requires_login := bool(current.get("requires_login",false))
 	var command_text := UI.copy("identity_username")+": "+str(current.get("user","")) if requires_login else _copy("os_command", "コマンド")+"  $ " + str(current.command)
-	var graphical := str(current.command).begins_with("curl ")
+	var graphical := str(current.command).begins_with("curl ") or str(current.command).begins_with("smbclient ") or str(current.command).begins_with("sha256sum ")
 	if not graphical:
 		var command = d._label(command_text, 13, BLUE)
 		command.add_theme_font_override("font", d.mono)
@@ -309,7 +317,8 @@ static func _delivery_action(d, right: Control, probes: Array) -> void:
 
 static func _graphical_result(d, parent: Control, probe: Dictionary, command_row: Control) -> void:
 	var w: Dictionary = d.widgets.verify
-	var value := Observation.project(probe)
+	var shared := str(probe.command).begins_with("smbclient ") or str(probe.command).begins_with("sha256sum ")
+	var value: Dictionary = ShareObservation.project(probe) if shared else Observation.project(probe)
 	var content := VBoxContainer.new()
 	content.name = "DiagnosticResult"
 	content.add_theme_constant_override("separation", 6)
@@ -324,7 +333,7 @@ static func _graphical_result(d, parent: Control, probe: Dictionary, command_row
 	address.autowrap_mode = TextServer.AUTOWRAP_OFF
 	address.clip_text = true
 	content.add_child(address)
-	var bench = Workbench.new()
+	var bench = ShareWorkbench.new() if shared else Workbench.new()
 	content.add_child(bench)
 	bench.setup(d, value, str(w.get("object", "")))
 	bench.object_selected.connect(func(id: String):
@@ -351,10 +360,23 @@ static func _graphical_result(d, parent: Control, probe: Dictionary, command_row
 		if not str(w.object).is_empty(): _reveal_inspector.call_deferred(d)
 		else: _reveal_result.call_deferred(d))
 	details.name = "DiagnosticDetails"; tools.add_child(details)
+	if shared:
+		var order: Array = ["request", "seal", "specimen", "gate"] if str(value.protocol) == "hash" else ["request", "gate", "specimen", "seal"]
+		var first: Button = bench.objects[order[0]]
+		var last: Button = bench.objects[order.back()]
+		var probes: Array = w.left.find_children("DiagnosticProbe_*", "Button", true, false)
+		if not probes.is_empty():
+			var entry: Button = probes.back()
+			entry.focus_next = entry.get_path_to(first); first.focus_previous = first.get_path_to(entry)
+		var run: Button = tools.find_child("DiagnosticRun", true, false)
+		if run != null: last.focus_next = last.get_path_to(run); run.focus_previous = run.get_path_to(last)
 	if not str(w.get("object", "")).is_empty(): _inspect_object(d, content, probe, value, str(w.object))
 	if bool(w.raw_visible): _build_comparison(d, content, probe)
 
 static func _inspect_object(d, parent: Control, probe: Dictionary, value: Dictionary, id: String) -> void:
+	if str(value.protocol) in ["smb", "hash"]:
+		_inspect_share(d, parent, probe, value, id)
+		return
 	var body := VBoxContainer.new(); body.name = "DiagnosticInspector"; body.add_theme_constant_override("separation", 4); parent.add_child(body)
 	var title := str({"request":"送信要求", "gate":"通信経路", "server":"サーバー応答", "specimen":"取得した資料", "seal":"原本照合"}.get(id, "観測"))
 	var head = d._row(body, 6)
@@ -400,6 +422,41 @@ static func _inspect_object(d, parent: Control, probe: Dictionary, value: Dictio
 		var raw: Label = d._label(str(probe.get("result", "")).get_slice("\n", 0), 12, MUTED)
 		raw.name = "DiagnosticRawResponse"; raw.tooltip_text = str(probe.get("result", "")); raw.clip_text = true; raw.autowrap_mode = TextServer.AUTOWRAP_OFF; body.add_child(raw)
 	var state: Label = d._label(_status(probe), 13, _status_color(probe)); state.name = "DiagnosticResultStatus"; body.add_child(state)
+
+static func _inspect_share(d, parent: Control, probe: Dictionary, value: Dictionary, id: String) -> void:
+	var body := VBoxContainer.new(); body.name = "DiagnosticInspector"; body.add_theme_constant_override("separation", 4); parent.add_child(body)
+	var local := str(value.protocol) == "hash"
+	var title := str({"request":"保全した原本" if local else "要求と受入条件", "gate":"手元の検査" if local else "応答と停止した段階", "specimen":"手元のファイル" if local else "取得した資料", "seal":"原本照合" if local else "保存された受入判定"}.get(id, "観測"))
+	var head = d._row(body, 6)
+	var heading: Label = d._label(title, 16, DIAG_ACCENT); heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL; head.add_child(heading)
+	var close: Button = d._button("閉じる", func(): d.widgets.verify["object"] = ""; refresh(d); _reveal_result.call_deferred(d)); close.name = "DiagnosticInspectorClose"; head.add_child(close)
+	if id == "request":
+		var command: Label = d._label(str(probe.command), 13, INK); command.add_theme_font_override("font", d.mono); body.add_child(command)
+		if bool(d.game.vm_info().get("connected", false)): body.add_child(_tool(d, "code", "端末入力", d._type_command.bind(str(probe.command)), "端末入力"))
+		var expected: Label = d._label(_expected_outcome(probe), 14, INK); expected.name = "DiagnosticExpected"; expected.tooltip_text = str(probe.get("expectation", "")); body.add_child(expected)
+	elif id == "specimen":
+		if str(value.outcome) == "listed":
+			var table := Tree.new(); table.name = "DiagnosticShareFiles"; table.hide_root = true; table.custom_minimum_size.y = 100
+			for color in ["font_hovered_color", "font_hovered_dimmed_color", "font_hovered_selected_color"]: table.add_theme_color_override(color, INK)
+			body.add_child(table)
+			var root := table.create_item()
+			for file in value.files: var item := table.create_item(root); item.set_text(0, str(file))
+			body.add_child(d._label("一覧で取得したファイル名です。内容と原本の一致は別の検査で確認します。", 13, MUTED))
+		elif str(value.outcome) in ["written", "downloaded"]:
+			body.add_child(d._label(str(value.remote_name), 16, INK))
+			if not str(value.local_path).is_empty(): body.add_child(d._label("手元  " + str(value.local_path), 13, MUTED))
+			body.add_child(d._label("この応答にはファイル内容と照合値は含まれていません。", 13, MUTED))
+		elif local: body.add_child(d._label(str(value.path), 14, INK))
+		else: body.add_child(d._label("ファイル一覧・内容は未取得です。", 14, MUTED))
+	elif id == "gate":
+		body.add_child(d._label("手元のファイルだけを検査しています。共有接続の成否はこの結果から判断できません。" if local else "停止した段階  " + str({"identity":"利用者の認証", "share":"共有先への接続", "operation":"要求した操作", "specimen":"共有内の対象", "local_file":"手元のファイル", "request":"要求の形式"}.get(str(value.stop_at), "なし" if str(value.outcome) in ["listed", "written", "downloaded"] else "未特定")), 13, MUTED))
+	if local and id in ["seal", "request", "specimen"]:
+		for entry in [["原本", str(value.expected_hash)], ["手元", str(value.hash)]]:
+			var fingerprint: Label = d._label(str(entry[0]) + "  " + (str(entry[1]) if not str(entry[1]).is_empty() else "未取得"), 12, MUTED); fingerprint.add_theme_font_override("font", d.mono); fingerprint.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY; body.add_child(fingerprint)
+	var actual: Label = d._label(("変更前の記録 · " if bool(value.recorded) and not bool(value.fresh) else "") + ShareObservation.caption(value), 16, INK); actual.name = "DiagnosticActual"; actual.tooltip_text = str(probe.get("result", "")); body.add_child(actual)
+	if bool(value.recorded):
+		var raw: Label = d._label(str(probe.get("result", "")).get_slice("\n", 0), 12, MUTED); raw.name = "DiagnosticRawResponse"; raw.tooltip_text = str(probe.get("result", "")); raw.clip_text = true; raw.autowrap_mode = TextServer.AUTOWRAP_OFF; body.add_child(raw)
+	var state: Label = d._label("受入判定 · " + _status(probe), 13, _status_color(probe)); state.name = "DiagnosticResultStatus"; body.add_child(state)
 
 static func _reveal_inspector(d) -> void:
 	if not is_instance_valid(d): return

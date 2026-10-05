@@ -24,7 +24,7 @@ func control(id: String): return pc.widgets.browser.page.find_child(id, true, fa
 
 func visible_rect(node: Control) -> Rect2:
 	if not node.is_visible_in_tree(): return Rect2()
-	var rect := node.get_global_rect().intersection(Rect2(Vector2.ZERO, Vector2(root.size)))
+	var rect := node.get_global_rect().intersection(root.get_visible_rect())
 	var ancestor: Node = node.get_parent()
 	while ancestor != null:
 		if ancestor is Control and ancestor.clip_contents: rect = rect.intersection(ancestor.get_global_rect())
@@ -54,14 +54,18 @@ func click(id: String) -> void:
 	await reveal(node)
 	fully_visible(id)
 	if not visible_rect(node).grow(1).encloses(node.get_global_rect()): return
-	var point: Vector2 = node.get_global_rect().get_center()
+	var point: Vector2 = node.get_global_rect().get_center() * Vector2(root.size) / root.get_visible_rect().size
+	var count: Array[int] = [0]
+	node.pressed.connect(func(): count[0] += 1)
 	var motion := InputEventMouseMotion.new(); motion.position = point; motion.global_position = point
 	Input.parse_input_event(motion)
-	var down := InputEventMouseButton.new(); down.position = point; down.global_position = point
-	down.button_index = MOUSE_BUTTON_LEFT; down.pressed = true; Input.parse_input_event(down)
-	await frames(1)
-	var up := down.duplicate() as InputEventMouseButton; up.pressed = false; Input.parse_input_event(up)
+	Input.flush_buffered_events()
+	for down in [true, false]:
+		var event := InputEventMouseButton.new(); event.position = point; event.global_position = point
+		event.button_index = MOUSE_BUTTON_LEFT; event.pressed = down; Input.parse_input_event(event); Input.flush_buffered_events()
 	await frames(10)
+	check(count[0] == 1, "exactly one real input press " + id)
+	if count[0] != 1: quit(1)
 
 func press(id: String) -> void:
 	var node = control(id)
@@ -97,6 +101,7 @@ func capture(label: String) -> void:
 	check(root.get_texture().get_image().save_png(folder.path_join(label + "-" + variant + ".png")) == OK, "capture " + label)
 
 func run() -> void:
+	Input.use_accumulated_input = false
 	ui = load("res://scripts/interface.gd").new(); root.add_child(ui); await frames(1)
 	game = ui._game(); game.set_process(false)
 	if not game.save_path.begins_with("user://qa-"): quit(2); return
