@@ -1,8 +1,10 @@
 extends RefCounted
-## Compact Cockpit-like diagnostic view. Responses remain sourced from the guest VM.
+## Observation bench. Responses remain sourced from the guest VM.
 
 const UI = preload("res://scripts/ui_theme.gd")
 const Comparison = preload("res://scripts/text_comparison.gd")
+const Observation = preload("res://scripts/diagnostic_observation.gd")
+const Workbench = preload("res://scripts/diagnostic_workbench.gd")
 const INK := UI.INK
 const MUTED := UI.MUTED
 const BLUE := UI.PRIMARY
@@ -57,15 +59,14 @@ static func build(d, parent: VBoxContainer) -> void:
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right.size_flags_stretch_ratio = 3
 	var reflow := func() -> void:
-		var scale := float(d.game.settings.get("text_scale", 1.0))
-		var stacked := split.size.x < 880.0 * scale
+		var stacked := split.size.x < 700.0
 		split.vertical = stacked
 		rail.custom_minimum_size = Vector2(0, 54 if str(d.diagnostic_ui.get("mode", "checks")) == "http" else 115) if stacked else Vector2(220, 0)
 		left.size_flags_vertical = Control.SIZE_SHRINK_BEGIN if stacked else Control.SIZE_EXPAND_FILL
 		right.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	split.resized.connect(reflow)
 	reflow.call_deferred()
-	d.widgets.verify = {"left": left, "right": right, "body": right, "footer": null, "selected": "", "tally": tally, "signature": "", "raw_visible": false}
+	d.widgets.verify = {"left": left, "right": right, "body": right, "footer": null, "selected": "", "tally": tally, "signature": "", "raw_visible": false, "object": "", "replay": false}
 	d.widgets.verify.selected = str(d.diagnostic_ui.get("selected", ""))
 	d.widgets.verify.reflow = reflow
 	refresh(d)
@@ -125,7 +126,7 @@ static func refresh(d) -> void:
 	var probes: Array = d.game.diagnostic_probes()
 	var ready: bool = d.game.can_deliver()
 	var mode := str(d.diagnostic_ui.get("mode", "checks"))
-	var signature := str(probes) + str(ready) + str(d.game.vm_info().connected) + str(d.game.state.get("validated_revision", -1)) + str(w.selected) + str(w.raw_visible) + mode + str(d.diagnostic_ui.get("observations", [])) + str(w.get("operation_error", ""))
+	var signature := str(probes) + str(ready) + str(d.game.vm_info().connected) + str(d.game.state.get("validated_revision", -1)) + str(w.selected) + str(w.raw_visible) + mode + str(d.diagnostic_ui.get("observations", [])) + str(w.get("operation_error", "")) + str(w.get("object", ""))
 	if str(w.signature) == signature: return
 	w.signature = signature
 	if w.has("reflow"): w.reflow.call()
@@ -218,17 +219,21 @@ static func refresh(d) -> void:
 	var command_row = d._row(right, 5)
 	var requires_login := bool(current.get("requires_login",false))
 	var command_text := UI.copy("identity_username")+": "+str(current.get("user","")) if requires_login else _copy("os_command", "コマンド")+"  $ " + str(current.command)
-	var command = d._label(command_text, 13, BLUE)
-	command.add_theme_font_override("font", d.mono)
-	command.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	command_row.add_child(command)
+	var graphical := str(current.command).begins_with("curl ")
+	if not graphical:
+		var command = d._label(command_text, 13, BLUE)
+		command.add_theme_font_override("font", d.mono)
+		command.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		command_row.add_child(command)
 	var run = d._primary(UI.copy("identity_test_login") if requires_login else "検査実行", func():
 		d._trace("diagnostic", selected)
 		if requires_login: d._open_identity_login(str(current.get("user","current")))
 		else:
+			w["object"] = ""
 			var response: String = d.game.run_diagnostic(selected)
 			w["operation_error"] = response if response.contains("測定結果を保存できませんでした") else ""
 			w["operation_probe"] = selected
+			w["replay"] = str(w.operation_error).is_empty()
 			if not str(w.operation_error).is_empty(): d._notify(str(w.operation_error))
 			refresh(d)
 			_reveal_result.call_deferred(d))
@@ -239,7 +244,11 @@ static func refresh(d) -> void:
 	if not d.game.vm_info().connected:
 		command_row.add_child(_tool(d, "link", "顧客端末に接続", func(): d.game.vm_run("ssh client"); refresh(d), "接続"))
 	else:
-		if not requires_login: command_row.add_child(_tool(d, "code", "端末入力", d._type_command.bind(str(current.command)), "端末入力"))
+		if not requires_login and not graphical: command_row.add_child(_tool(d, "code", "端末入力", d._type_command.bind(str(current.command)), "端末入力"))
+	if graphical:
+		_graphical_result(d, right, current, command_row)
+		_delivery_action(d, right, probes)
+		return
 
 	var result_text := str(current.get("result", ""))
 	var summary := "未実行"
@@ -288,6 +297,9 @@ static func refresh(d) -> void:
 	if bool(w.raw_visible):
 		_build_comparison(d, result_content, current)
 
+	_delivery_action(d, right, probes)
+
+static func _delivery_action(d, right: Control, probes: Array) -> void:
 	var report = d._primary("納品条件確認", func(): d._trace("validate_delivery", ""); d.game.verify(); d._show_app("receipt"))
 	report.name = "DiagnosticValidate"
 	UI.os_primary(report, DIAG_ACCENT)
@@ -295,8 +307,114 @@ static func refresh(d) -> void:
 	report.size_flags_horizontal = Control.SIZE_SHRINK_END
 	right.add_child(report)
 
+static func _graphical_result(d, parent: Control, probe: Dictionary, command_row: Control) -> void:
+	var w: Dictionary = d.widgets.verify
+	var value := Observation.project(probe)
+	var content := VBoxContainer.new()
+	content.name = "DiagnosticResult"
+	content.add_theme_constant_override("separation", 6)
+	parent.add_child(content)
+	if str(w.get("operation_probe", "")) == str(probe.id) and not str(w.get("operation_error", "")).is_empty():
+		var failure: Label = d._label(str(w.operation_error) + "\n作業台は保存済みの観測を表示しています。", 13, RED)
+		failure.name = "DiagnosticOperationFailure"; content.add_child(failure)
+	var address: Label = d._label(str(value.method) + "  " + str(value.path), 14, MUTED)
+	address.name = "DiagnosticRequestPath"
+	address.tooltip_text = str(probe.command)
+	address.add_theme_font_override("font", d.mono)
+	address.autowrap_mode = TextServer.AUTOWRAP_OFF
+	address.clip_text = true
+	content.add_child(address)
+	var bench = Workbench.new()
+	content.add_child(bench)
+	bench.setup(d, value, str(w.get("object", "")))
+	bench.object_selected.connect(func(id: String):
+		w["object"] = id
+		refresh(d)
+		var object = w.right.find_child("DiagnosticObject_" + id, true, false)
+		if is_instance_valid(object): object.grab_focus()
+		_reveal_inspector.call_deferred(d))
+	if bool(w.get("replay", false)):
+		w["replay"] = false
+		bench.replay()
+	var tools := HFlowContainer.new(); tools.add_theme_constant_override("h_separation", 6); content.add_child(tools)
+	for action in command_row.get_children():
+		command_row.remove_child(action); tools.add_child(action)
+	parent.remove_child(command_row); command_row.queue_free()
+	var replay: Button = d._button("観測を再生", bench.replay)
+	replay.name = "DiagnosticReplayObservation"; replay.disabled = not bool(value.recorded) or str(value.transport) == "unknown"; tools.add_child(replay)
+	var compare_label := UI.copy("compare_close" if bool(w.raw_visible) else "compare_results")
+	var compare: Button = d._button(compare_label, func(): w.raw_visible = not bool(w.raw_visible); refresh(d))
+	compare.name = "DiagnosticCompare"; compare.disabled = not bool(value.recorded); tools.add_child(compare)
+	var details: Button = d._button("要求と受入条件", func():
+		w["object"] = "request" if str(w.get("object", "")) != "request" else ""
+		refresh(d)
+		if not str(w.object).is_empty(): _reveal_inspector.call_deferred(d)
+		else: _reveal_result.call_deferred(d))
+	details.name = "DiagnosticDetails"; tools.add_child(details)
+	if not str(w.get("object", "")).is_empty(): _inspect_object(d, content, probe, value, str(w.object))
+	if bool(w.raw_visible): _build_comparison(d, content, probe)
+
+static func _inspect_object(d, parent: Control, probe: Dictionary, value: Dictionary, id: String) -> void:
+	var body := VBoxContainer.new(); body.name = "DiagnosticInspector"; body.add_theme_constant_override("separation", 4); parent.add_child(body)
+	var title := str({"request":"送信要求", "gate":"通信経路", "server":"サーバー応答", "specimen":"取得した資料", "seal":"原本照合"}.get(id, "観測"))
+	var head = d._row(body, 6)
+	var heading: Label = d._label(title, 16, DIAG_ACCENT); heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL; head.add_child(heading)
+	var close: Button = d._button("閉じる", func(): d.widgets.verify["object"] = ""; refresh(d); _reveal_result.call_deferred(d)); close.name = "DiagnosticInspectorClose"; head.add_child(close)
+	if id == "request":
+		var command: Label = d._label(str(probe.command), 13, INK); command.add_theme_font_override("font", d.mono); body.add_child(command)
+		if bool(d.game.vm_info().get("connected", false)) and not bool(probe.get("requires_login", false)):
+			body.add_child(_tool(d, "code", "端末入力", d._type_command.bind(str(probe.command)), "端末入力"))
+		var expected: Label = d._label(("HTTP %d" % int(value.expected_status) if int(value.expected_status) > 0 else _expected_outcome(probe)) + (" · 原本と一致" if not str(value.expected_hash).is_empty() else ""), 14, INK)
+		expected.name = "DiagnosticExpected"; expected.tooltip_text = str(probe.get("expectation", "")); body.add_child(expected)
+	elif id == "gate":
+		var transport := str(value.transport)
+		body.add_child(d._label("応答未観測" if not bool(value.recorded) else "遮断ルール · " + str(value.rule) if transport == "firewall" else "名前解決で停止" if transport == "dns" else "接続できず" if transport == "unreachable" else "サーバー応答まで到達" if transport == "replied" else "経路を特定できません", 14, INK))
+		if transport == "firewall" and d._firewall_v2():
+			var open: Button = d._button("pfSenseのルールへ", func(): d._show_app("browser"); d._browse_url(d.FIREWALL_URL, true))
+			open.name = "DiagnosticOpenFirewall"; body.add_child(open)
+	elif id == "server":
+		body.add_child(d._label(str(value.host), 14, INK))
+		var actual: Label = d._label("HTTP %d" % int(value.status) if int(value.status) > 0 else "応答未取得", 16, INK)
+		actual.name = "DiagnosticActual"; actual.tooltip_text = str(probe.get("result", "")); body.add_child(actual)
+		if not str(value.error).is_empty(): body.add_child(d._label(str(value.error), 13, RED))
+	elif id == "specimen":
+		var source: Dictionary = value.source
+		if not source.is_empty():
+			body.add_child(d._label(str(source.get("host", "")) + "  " + str(source.get("path", "")), 13, MUTED))
+			if source.has("ok"): body.add_child(d._label("✓ 共有元を読み取り済み" if bool(source.ok) else "× 共有元から取得不可", 14, GREEN if bool(source.ok) else RED))
+		var rows: Array = value.rows
+		if rows.is_empty(): body.add_child(d._label(str(value.error) if not str(value.error).is_empty() else "資料は未取得です。" if not bool(value.recorded) or str(value.transport) != "replied" else "応答に業務レコードはありません。", 14, INK))
+		else:
+			var table := Tree.new(); table.name = "DiagnosticSpecimenRows"; table.columns = 3; table.hide_root = true; table.column_titles_visible = true; table.custom_minimum_size.y = 120
+			for column in 3: table.set_column_title(column, str(["注文", "顧客", "金額"][column] if str(value.specimen) == "orders" else ["ID", "氏名", ""][column]))
+			body.add_child(table); var root := table.create_item()
+			for row in rows:
+				if not row is Dictionary: continue
+				var item := table.create_item(root)
+				for column in 3: item.set_text(column, str(row.get(["order", "customer", "total"][column] if str(value.specimen) == "orders" else ["id", "name", ""][column], "")))
+	elif id == "seal":
+		body.add_child(d._label("原本と一致" if str(value.hash_match) == "match" else "原本と異なる" if str(value.hash_match) == "different" else "取得した応答に照合値がありません。", 16, GREEN if str(value.hash_match) == "match" else RED if str(value.hash_match) == "different" else MUTED))
+		for entry in [["原本", str(value.expected_hash)], ["取得", str(value.hash)]]:
+			var label: Label = d._label(str(entry[0]) + "  " + (str(entry[1]) if not str(entry[1]).is_empty() else "未取得"), 12, MUTED); label.add_theme_font_override("font", d.mono); label.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY; body.add_child(label)
+	if bool(value.recorded):
+		var raw: Label = d._label(str(probe.get("result", "")).get_slice("\n", 0), 12, MUTED)
+		raw.name = "DiagnosticRawResponse"; raw.tooltip_text = str(probe.get("result", "")); raw.clip_text = true; raw.autowrap_mode = TextServer.AUTOWRAP_OFF; body.add_child(raw)
+	var state: Label = d._label(_status(probe), 13, _status_color(probe)); state.name = "DiagnosticResultStatus"; body.add_child(state)
+
+static func _reveal_inspector(d) -> void:
+	if not is_instance_valid(d): return
+	# Container layout and follow_focus settle after the shape was selected.
+	# Scrolling before then can reveal only the inspector's empty header.
+	await d.get_tree().process_frame
+	await d.get_tree().process_frame
+	if not is_instance_valid(d) or not d.widgets.has("verify"): return
+	var inspector = d.widgets.verify.right.find_child("DiagnosticInspector", true, false)
+	var scroll = d.widgets.verify.right.get_parent()
+	if is_instance_valid(inspector) and scroll is ScrollContainer: scroll.ensure_control_visible(inspector)
+
 static func _select(d, id: String) -> void:
 	d.widgets.verify.selected = id
+	d.widgets.verify["object"] = ""
 	d.diagnostic_ui["selected"] = id
 	d._save_session(false)
 	refresh(d)

@@ -40,15 +40,17 @@ func press_control(target: Control, description: String) -> bool:
 	var is_button := target is BaseButton
 	if is_button: target.pressed.connect(func(): count[0] += 1)
 	var motion := InputEventMouseMotion.new(); motion.position = point; motion.global_position = point; Input.parse_input_event(motion)
-	await frames(2)
+	Input.flush_buffered_events()
 	var hovered: Control = root.gui_get_hovered_control()
 	if not expect(hovered == target or (hovered != null and target.is_ancestor_of(hovered)), description + " pointer reaches control"): return false
 	record("native_click", description)
 	for down in [true,false]:
-		var event := InputEventMouseButton.new(); event.position = point; event.global_position = point; event.button_index = MOUSE_BUTTON_LEFT; event.pressed = down; Input.parse_input_event(event); await frames(2)
+		# Keep one injected click together; a Windows pointer poll between its
+		# down/up events can replace the preceding injected motion position.
+		var event := InputEventMouseButton.new(); event.position = point; event.global_position = point; event.button_index = MOUSE_BUTTON_LEFT; event.pressed = down; Input.parse_input_event(event); Input.flush_buffered_events()
 	clicks += 1
 	await frames(8)
-	if is_button and not expect(count[0] == 1, description + " exactly one real press"): return false
+	if is_button and not expect(count[0] == 1, description + " exactly one real press (actual %d)" % count[0]): return false
 	return true
 
 func press(id: String) -> bool:

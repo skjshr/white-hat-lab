@@ -68,6 +68,7 @@ func run() -> void:
 	await capture("04-orders-from-recovered-source")
 	if not await connect_machine(2) or not await browse(ui.desktop.PORTAL_URL) or not await staff_read() or not await ensure_editor(): finish(); return
 	var original: String = game._vm().portal_storage_read(FILE)
+	if not await before_invalid_order(original): finish(); return
 	if not await edit("PortalCell_1_2", "broken") or not await press("PortalWrite"): finish(); return
 	if not expect(str(ui.desktop.portal_ui.response).begins_with("HTTP/1.1 200") and game._vm().portal_storage_read(FILE).contains("broken"), "real staff PUT saves parse-invalid business data as a new version"): finish(); return
 	if not await connect_machine(0) or not await refresh_sales(): finish(); return
@@ -116,6 +117,9 @@ func run() -> void:
 	await capture("10-branch-invoice-paid")
 	if not expect(FileAccess.get_file_as_string(source) == source_text, "original available career checkpoint stays byte identical"): finish(); return
 	journey_completed = true; finish()
+
+func before_invalid_order(_original: String) -> bool:
+	return true
 
 func connect_machine(index: int) -> bool:
 	if int(game.state.target_index) != index and not await select_option("NativeTargetSelector", index): return false
