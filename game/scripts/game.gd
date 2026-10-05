@@ -15,6 +15,7 @@ const BILLING = preload("res://scripts/company_billing.gd")
 const COMPANY_CYCLE = preload("res://scripts/company_cycle.gd")
 const CAREER_CLOSEOUT = preload("res://scripts/career_closeout.gd")
 const COMPANY_ROADMAP = preload("res://scripts/company_roadmap.gd")
+const SERVICE_MONITOR_VM = preload("res://scripts/virtual_machine.gd")
 const BUSINESS_TRANSACTIONS = preload("res://scripts/business_transactions.gd")
 const BUSINESS_DATA = preload("res://scripts/business_workspace.gd")
 const BUSINESS_START_MINUTE := 9 * 60
@@ -1352,6 +1353,110 @@ func vm_info() -> Dictionary:
 	var machine = _vm()
 	return {"connected":bool(machine.state.get("connected", false)) and _customer_hardware_connected(),"cwd":str(machine.state.get("cwd", "/")),"host":str(machine.state.get("host", "client")),"config_path":str(machine.state.get("config_path", "")),"service":str(machine.state.get("service", ""))}
 
+## Read-only monitor projection. Never initialize the game's VM while rendering:
+## only a matching live VM export or a saved VM snapshot is eligible for preview.
+func service_monitor_snapshot() -> Dictionary:
+	var chapter := _current_chapter()
+	var key := _vm_key()
+	var contract: Dictionary = state.get("contract", {}) if state.get("contract", {}) is Dictionary else {}
+	var snapshot: Dictionary = {
+		"initialized":false,"connected":false,"host":SERVICE_MONITOR_VM.HOSTS[chapter],
+		"service":SERVICE_MONITOR_VM.SERVICES[chapter],"config_path":SERVICE_MONITOR_VM.PATHS[chapter],
+		"active":null,"dirty":null,"error":"","applied":{},"pending":{},"models":{},"probes":[],
+		"observations":[],"events":[],"fingerprint":"","freshness_known":false,
+		"guest_state":{},"portal_files":[],"context":key,"current_revision":int(state.get("revision", 0)),
+		"client":str(contract.get("client", "")),"completed":current_done()
+	}
+	if not bool(state.get("accepted", false)):
+		return snapshot
+	var live := _machine != null and _machine_key == key
+	var saved_vm: Variant = _machine.export_state() if live else state.get("vm_states", {}).get(key, {})
+	if not saved_vm is Dictionary or int(saved_vm.get("schema", 0)) != 2 \
+		or not saved_vm.get("fs", null) is Dictionary or not saved_vm.get("applied", null) is Dictionary \
+		or not saved_vm.get("events", null) is Array or not saved_vm.get("dirs", null) is Array \
+		or not saved_vm.get("snapshots", null) is Array:
+		return snapshot
+	# VM.setup performs compatibility normalization on its input copy. All further
+	# bindings and fingerprint work stay on this preview, never on Game._machine.
+	var preview = SERVICE_MONITOR_VM.new()
+	preview.setup(chapter, saved_vm.duplicate(true), _scenario())
+	preview.set_identity(profile())
+	if live:
+		preview.set_linked_identity_provider(_machine._linked_identity_provider.duplicate(true))
+		preview.set_linked_business_provider(_machine._linked_business_provider.duplicate(true))
+	else:
+		_bind_linked_identity(preview)
+		_bind_linked_business(preview)
+	var hardware := _customer_hardware()
+	if not hardware.is_empty():
+		preview.state.customer_device = {"serial":str(hardware.get("serial", "")),"model":str(hardware.get("model", "")),"supplier":str(hardware.get("supplier", ""))}
+		preview.state.fs["/etc/hardware.json"] = JSON.stringify(preview.state.customer_device)
+	var providers_known := live or _service_monitor_providers_known(preview)
+	var portal_files: Array = preview.portal_snapshot().get("files", []).duplicate(true) if chapter == 5 and int(preview.state.get("portal_model_version", 1)) >= 2 else []
+	var probes: Array = preview.probes()
+	for item in probes:
+		item["freshness_known"] = providers_known
+		if not providers_known:
+			item["fresh"] = false
+			item["passed"] = false
+			item["freshness"] = "unknown"
+		else:
+			item["freshness"] = "fresh" if bool(item.get("fresh", false)) else ("stale" if bool(item.get("recorded", false)) else "unmeasured")
+	var pending: Dictionary = preview.state.get("applied", {}).duplicate(true)
+	var pending_error := ""
+	if int(preview.state.get("firewall_model_version", 1)) >= SERVICE_MONITOR_VM.FIREWALL_MODEL_VERSION:
+		var firewall_pending: Variant = preview.state.get("firewall_pending", {})
+		if firewall_pending is Dictionary: pending = firewall_pending.duplicate(true)
+	else:
+		var disk_values: Dictionary = preview._parse_config(str(preview.state.get("fs", {}).get(str(preview.state.get("config_path", "")), "")))
+		pending = disk_values.get("values", {}).duplicate(true)
+		pending_error = str(disk_values.get("error", ""))
+	snapshot.merge({
+		"initialized":true,"connected":bool(preview.state.get("connected", false)) and _customer_hardware_connected(),
+		"host":str(preview.state.get("host", SERVICE_MONITOR_VM.HOSTS[chapter])),
+		"service":str(preview.state.get("service", SERVICE_MONITOR_VM.SERVICES[chapter])),
+		"config_path":str(preview.state.get("config_path", SERVICE_MONITOR_VM.PATHS[chapter])),
+		"active":bool(preview.state.get("active", false)),"dirty":bool(preview.state.get("dirty", false)),
+		"error":str(preview.state.get("error", "")) if not str(preview.state.get("error", "")).is_empty() else pending_error,
+		"applied":preview.state.get("applied", {}).duplicate(true),
+		"pending":pending,
+		"models":_service_monitor_models(preview.state),"probes":probes,
+		"observations":preview.state.get("observations", []).duplicate(true),
+		"events":preview.state.get("events", []).duplicate(true),
+		"fingerprint":preview._fingerprint(),"freshness_known":providers_known,
+		"guest_state":preview.export_state(),"portal_files":portal_files
+	}, true)
+	return snapshot
+
+func _service_monitor_models(vm_state: Dictionary) -> Dictionary:
+	var result := {}
+	for key in ["access_model_version","samba_model_version","backup_model_version","firewall_model_version","identity_model_version","edr_model_version","portal_model_version"]:
+		if vm_state.has(key): result[key] = vm_state[key]
+	return result
+
+func _service_monitor_providers_known(preview) -> bool:
+	var required_chapters: Array[int] = []
+	if preview.has_linked_branch_storage(): required_chapters.append(0)
+	elif preview.has_linked_business(): required_chapters.append(1)
+	if preview.has_linked_identity(): required_chapters.append(3)
+	for provider_chapter in required_chapters:
+		var found := false
+		for index in state.get("targets", []).size():
+			if _current_chapter(index) != provider_chapter: continue
+			var provider_key := _vm_key(index)
+			if _machine != null and _machine_key == provider_key:
+				found = true
+				break
+			var provider_state: Variant = state.get("vm_states", {}).get(provider_key)
+			if provider_state is Dictionary and int(provider_state.get("schema", 0)) == 2 \
+				and provider_state.get("fs", null) is Dictionary and provider_state.get("applied", null) is Dictionary \
+				and provider_state.get("events", null) is Array and provider_state.get("dirs", null) is Array \
+				and provider_state.get("snapshots", null) is Array:
+				found = true
+				break
+		if not found: return false
+	return true
+
 func advanced_active() -> bool:
 	return bool(state.get("accepted", false)) and _advanced_case_id(str(state.get("contract", {}).get("case_id", ""))) and state.get("advanced", {}) is Dictionary and not state.advanced.is_empty()
 
@@ -1450,7 +1555,7 @@ func _store_vm(before: Array, previous_mutation: int) -> bool:
 		state.revision += 1; state.validated_revision = -1; state.checks = []
 	if bool(_vm().state.get("connected", false)): state.inspected = true
 	var saved := save_game()
-	changed.emit()
+	if saved: changed.emit()
 	return saved
 
 func _work_add(minutes: float, cost: int = 0, advance_clock := true) -> void:
@@ -1504,13 +1609,23 @@ func vm_run(command: String, work_kind: String = "") -> String:
 	if not state.accepted: return "先にメールで案件を受注してください"
 	if not _customer_hardware_connected(): return JSON.stringify({"ok":false,"code":409,"error":"hardware_unavailable","message":UI_COPY.copy("stock_error_hardware")})
 	if current_done(): return "報告済み案件。案件ボードから次の営業へ進行可能。"
+	var transaction_requested := work_kind == "measurement"
+	var transaction_state: Dictionary = state.duplicate(true) if transaction_requested else {}
+	var transaction_assignments: Dictionary = _assignments.duplicate(true) if transaction_requested else {}
+	var transaction_machine = _machine
+	var transaction_machine_key := _machine_key
+	var transaction_vm_state: Dictionary = _machine.export_state() if transaction_requested and _machine != null and _machine_key == _vm_key() else {}
+	var transaction_identity_provider: Dictionary = _machine._linked_identity_provider.duplicate(true) if transaction_requested and _machine != null and _machine_key == _vm_key() else {}
+	var transaction_business_provider: Dictionary = _machine._linked_business_provider.duplicate(true) if transaction_requested and _machine != null and _machine_key == _vm_key() else {}
 	var machine = _vm()
 	var operation := command.strip_edges().trim_prefix("sudo ")
 	var console_operation := operation.begins_with("cp ") or int(state.get("contract", {}).get("linked_identity_version", 0)) == 1 or operation.begins_with("identity ") or operation.begins_with("edr ") or operation.begins_with("portal ") or (_current_chapter()==0 and int(machine.state.get("samba_model_version",1))>=2) or (_current_chapter()==1 and int(machine.state.get("backup_model_version",1))>=2) or (operation.begins_with("curl ") and _current_chapter()==5 and int(machine.state.get("portal_model_version",1))>=2)
-	var previous_state: Dictionary = state.duplicate(true) if console_operation else {}
-	var previous_vm: Dictionary = machine.export_state() if console_operation else {}
+	var transactional := transaction_requested or console_operation
+	var previous_state: Dictionary = transaction_state if transaction_requested else (state.duplicate(true) if console_operation else {})
+	var previous_assignments: Dictionary = transaction_assignments if transaction_requested else (_assignments.duplicate(true) if console_operation else {})
+	var previous_vm: Dictionary = transaction_vm_state if transaction_requested and transaction_machine == machine else (machine.export_state() if console_operation else {})
 	var branch_portal: bool = _current_chapter() == 5 and machine.has_linked_branch_storage()
-	var previous_provider: Dictionary = machine.linked_business_provider_fs() if branch_portal else {}
+	var previous_provider: Dictionary = machine.linked_business_provider_fs() if branch_portal and transactional else {}
 	var config_path := str(machine.state.get("config_path", ""))
 	var before_config := str(machine.state.get("fs", {}).get(config_path, ""))
 	var before_applied: Dictionary = machine.state.get("applied", {}).duplicate(true)
@@ -1545,12 +1660,19 @@ func vm_run(command: String, work_kind: String = "") -> String:
 	if changed_config or changed_service: _lock_baseline_before_change()
 	if branch_portal: _sync_branch_provider(machine)
 	var stored := _store_vm(before, previous_mutation)
-	if console_operation and not stored:
+	if transactional and not stored:
 		state = previous_state
-		machine.state = previous_vm
-		if branch_portal: machine.restore_linked_business_provider_fs(previous_provider)
+		_assignments = previous_assignments
+		if transaction_machine == machine and not previous_vm.is_empty():
+			machine.state = previous_vm
+			if transaction_requested:
+				machine._linked_identity_provider = transaction_identity_provider
+				machine._linked_business_provider = transaction_business_provider
+		if branch_portal and transaction_machine == machine: machine.restore_linked_business_provider_fs(previous_provider)
+		_machine = transaction_machine
+		_machine_key = transaction_machine_key
 		changed.emit()
-		return JSON.stringify({"ok":false,"code":507,"error":"save_failed"})
+		return "測定結果を保存できませんでした。操作前の状態へ戻しました。" if work_kind == "measurement" else JSON.stringify({"ok":false,"code":507,"error":"save_failed"})
 	return output
 
 func firewall_action(action: String, payload: Dictionary = {}) -> Dictionary:

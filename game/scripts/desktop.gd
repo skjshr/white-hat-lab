@@ -31,7 +31,7 @@ const INK := UI.INK
 const MUTED := UI.MUTED
 const TEAL := UI.PRIMARY
 const ORANGE := UI.WARNING
-var APPS := {"mail":["Outwatch","M","508bcc"],"terminal":["ターミナル",">_","354d60"],"files":["ファイル","F","d5a04a"],"editor":["エディタ","</>","4b968e"],"browser":["ブラウザ","W","5d91be"],"monitor":["サービス管理","S","8980b5"],"verify":["診断ラボ","V","499276"],"team":["チーム","T","bd835c"],"manual":["リファレンス","?","728397"],"receipt":["納品・精算","¥","4b968e"]}
+var APPS := {"mail":["Outwatch","M","508bcc"],"terminal":["ターミナル",">_","354d60"],"files":["ファイル","F","d5a04a"],"editor":["エディタ","</>","4b968e"],"browser":["ブラウザ","W","5d91be"],"monitor":["サービス監視","S","315b91"],"verify":["診断ラボ","V","499276"],"team":["チーム","T","bd835c"],"manual":["リファレンス","?","728397"],"receipt":["納品・精算","¥","4b968e"]}
 var game: Node
 var workspace: Control
 var taskbar: HBoxContainer
@@ -83,6 +83,7 @@ var business_ui: Dictionary = {}
 var billing_ui: Dictionary = {}
 var advanced_ui: Dictionary = {}
 var diagnostic_ui: Dictionary = {}
+var monitor_ui: Dictionary = {}
 var pentest_ui: Dictionary = {}
 var billing_render_signature := ""
 var samba_render_signature := ""
@@ -447,7 +448,7 @@ func _app_tile(app: String, on_desktop: bool) -> Button:
 	button.add_theme_stylebox_override("hover",UI.style(Color(0.7,0.85,0.95,0.2) if on_desktop else UI.SELECTED,Color.TRANSPARENT,0,0,6))
 	var layout:=VBoxContainer.new(); layout.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); layout.offset_top=4; layout.offset_left=3; layout.offset_right=-3; layout.offset_bottom=-4; layout.add_theme_constant_override("separation",0); layout.mouse_filter=Control.MOUSE_FILTER_IGNORE; button.add_child(layout)
 	var image:=_icon(app,56); image.size_flags_horizontal=Control.SIZE_SHRINK_CENTER; image.size_flags_vertical=Control.SIZE_EXPAND_FILL; layout.add_child(image)
-	var label:=_label({"monitor":"サービス","verify":"診断","manual":"ヘルプ","receipt":"納品"}.get(app,APPS[app][0]),12,Color("f1f5f5") if on_desktop else INK); label.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER; label.autowrap_mode=TextServer.AUTOWRAP_ARBITRARY; label.clip_text=false; label.mouse_filter=Control.MOUSE_FILTER_IGNORE; layout.add_child(label)
+	var label:=_label({"monitor":"監視","verify":"診断","manual":"ヘルプ","receipt":"納品"}.get(app,APPS[app][0]),12,Color("f1f5f5") if on_desktop else INK); label.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER; label.autowrap_mode=TextServer.AUTOWRAP_ARBITRARY; label.clip_text=false; label.mouse_filter=Control.MOUSE_FILTER_IGNORE; layout.add_child(label)
 	label.custom_minimum_size.y=36*float(game.settings.get("text_scale",1.0)); label.vertical_alignment=VERTICAL_ALIGNMENT_TOP
 	return button
 
@@ -553,7 +554,7 @@ func _add_task_button(app: String) -> void:
 	_layout_task_button(app)
 
 func _app_task_label(app: String) -> String:
-	return {"terminal":"端末","editor":"編集","browser":"Web","monitor":"サービス","verify":"診断","manual":"ヘルプ","receipt":"納品"}.get(app, APPS.get(app,[app])[0])
+	return {"terminal":"端末","editor":"編集","browser":"Web","monitor":"監視","verify":"診断","manual":"ヘルプ","receipt":"納品"}.get(app, APPS.get(app,[app])[0])
 
 func _layout_task_button(app: String) -> void:
 	if not task_buttons.has(app): return
@@ -879,6 +880,7 @@ func _save_session(persist: bool = true) -> bool:
 	game.state.desktop_sessions[session_key]["advanced_ui"] = advanced_ui.duplicate(true)
 	game.state.desktop_sessions[session_key]["pentest_ui"] = pentest_ui.duplicate(true)
 	game.state.desktop_sessions[session_key]["diagnostic_ui"] = diagnostic_ui.duplicate(true)
+	game.state.desktop_sessions[session_key]["monitor_ui"] = monitor_ui.duplicate(true)
 	game.state.desktop_sessions[session_key]["file_selections"] = widgets.get("files",{}).get("selection_by_location",{}).duplicate(true)
 	if persist and not game.save_game():
 		if had_session: game.state.desktop_sessions[session_key] = previous_session
@@ -922,6 +924,7 @@ func _load_session() -> void:
 	advanced_ui = saved.get("advanced_ui", {}).duplicate(true) if saved.get("advanced_ui", {}) is Dictionary else {}
 	pentest_ui = saved.get("pentest_ui", {}).duplicate(true) if saved.get("pentest_ui", {}) is Dictionary else {}
 	diagnostic_ui = saved.get("diagnostic_ui", {}).duplicate(true) if saved.get("diagnostic_ui", {}) is Dictionary else {}
+	monitor_ui = saved.get("monitor_ui", {}).duplicate(true) if saved.get("monitor_ui", {}) is Dictionary else {}
 	mail_ui = saved.get("mail_ui", {}).duplicate(true) if saved.get("mail_ui", {}) is Dictionary else {}
 	if not browser_identities().any(func(identity): return str(identity.get("id", "")) == browser_identity): browser_identity = ""
 	if not game.state.has("os_files"):

@@ -122,7 +122,7 @@ static func _desktop_theme(t: Theme) -> void:
 		t.set_stylebox("grabber_highlight",kind,style(Color("8cabb4"),Color.TRANSPARENT,3,3,3))
 
 static func app_accent(id: String) -> Color:
-	return Color({"mail":"0f6cbd", "files":"0067c0", "editor":"007acc", "terminal":"cccccc", "browser":"357bb8", "monitor":"22745f", "verify":"7556ad", "team":"b46675", "receipt":"386f91", "manual":"607086"}.get(id,"246b72"))
+	return Color({"mail":"0f6cbd", "files":"0067c0", "editor":"007acc", "terminal":"cccccc", "browser":"357bb8", "monitor":"315b91", "verify":"7556ad", "team":"b46675", "receipt":"386f91", "manual":"607086"}.get(id,"246b72"))
 
 static func app_tint(id: String) -> Color:
 	return app_accent(id).lerp(Color.WHITE, 0.90)

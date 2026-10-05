@@ -80,6 +80,53 @@ func _init() -> void:
 		_assert(search.has_focus(), "log search retains focus while filtering")
 		_assert(int(pc.widgets.monitor.log_query.length()) == 7, "log search query is retained")
 		_assert(pc.widgets.monitor.log_view.get_child_count() > 0, "log search filters a live log view")
+	# Save-failed diagnostics must show the failed attempt even when rollback
+	# preserves an older durable PASS for the same probe.
+	pc._show_app("verify")
+	await process_frame
+	var diagnostic_probes: Array = game.diagnostic_probes()
+	var passing_probe_id := ""
+	for probe in diagnostic_probes:
+		var probe_id := str(probe.get("id", ""))
+		var probe_button: Button = pc.widgets.verify.left.find_child("DiagnosticProbe_" + probe_id, true, false)
+		if probe_button == null: continue
+		probe_button.pressed.emit()
+		await process_frame
+		var diagnostic_run: Button = pc.widgets.verify.right.find_child("DiagnosticRun", true, false)
+		if diagnostic_run == null or diagnostic_run.disabled: continue
+		diagnostic_run.pressed.emit()
+		await process_frame
+		for measured_probe in game.diagnostic_probes():
+			if str(measured_probe.get("id", "")) == probe_id and bool(measured_probe.get("recorded", false)) and bool(measured_probe.get("fresh", false)) and bool(measured_probe.get("passed", false)):
+				passing_probe_id = probe_id
+				break
+		if not passing_probe_id.is_empty(): break
+	_assert(not passing_probe_id.is_empty(), "a real diagnostic probe can be measured to a durable PASS through its UI action")
+	if not passing_probe_id.is_empty():
+		var durable_path: String = game.save_path
+		var durable_backup: String = game.backup_path
+		var durable_previous: String = game.previous_path
+		var probe_button: Button = pc.widgets.verify.left.find_child("DiagnosticProbe_" + passing_probe_id, true, false)
+		if probe_button != null: probe_button.pressed.emit()
+		await process_frame
+		game.save_path = "user://missing-diagnostic-" + str(OS.get_process_id()) + "/save.json"
+		game.backup_path = game.save_path + ".bak"; game.previous_path = game.save_path + ".previous"
+		var diagnostic_run: Button = pc.widgets.verify.right.find_child("DiagnosticRun", true, false)
+		if diagnostic_run != null: diagnostic_run.pressed.emit()
+		await process_frame
+		await process_frame
+		var save_failure: Label = pc.widgets.verify.right.find_child("DiagnosticOperationFailure", true, false)
+		var preserved_probe: Dictionary = {}
+		for measured_probe in game.diagnostic_probes():
+			if str(measured_probe.get("id", "")) == passing_probe_id: preserved_probe = measured_probe
+		_assert(save_failure != null and save_failure.text.contains("測定結果を保存できませんでした") and save_failure.text.contains("前回の結果"), "UI exposes the failed save and identifies the following row as the previous result")
+		_assert(bool(preserved_probe.get("recorded", false)) and bool(preserved_probe.get("fresh", false)) and bool(preserved_probe.get("passed", false)), "failed UI remeasurement preserves the prior durable PASS")
+		game.save_path = durable_path; game.backup_path = durable_backup; game.previous_path = durable_previous
+		diagnostic_run = pc.widgets.verify.right.find_child("DiagnosticRun", true, false)
+		if diagnostic_run != null: diagnostic_run.pressed.emit()
+		await process_frame
+		await process_frame
+		_assert(pc.widgets.verify.right.find_child("DiagnosticOperationFailure", true, false) == null, "successful UI retry clears the prior save-failure message")
 	for failure in failures: push_error(failure)
 	print("PASS: service tree, tabs, restart event, and focused log search" if failures.is_empty() else "FAIL count=%d" % failures.size())
 	ui.queue_free()

@@ -1,8 +1,8 @@
 extends RefCounted
 ## A conventional service console backed by the same guest VM as the shell.
 const UI = preload("res://scripts/ui_theme.gd")
-const SERVICE_ACCENT := Color("22745f")
-const SERVICE_PANEL := Color("f7fbf9")
+const DASHBOARD = preload("res://scripts/os_monitor_dashboard.gd")
+const SERVICE_ACCENT := Color("315b91")
 
 static func build(d, parent: VBoxContainer) -> void:
 	var p = d._pad(parent, 0)
@@ -30,7 +30,7 @@ static func build(d, parent: VBoxContainer) -> void:
 	split.add_child(rail)
 	var services = d._box(rail, 6)
 	services.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var service_button = d._button("サービス", func(): d.widgets.monitor.tab="overview"; refresh(d))
+	var service_button = d._button("サービス", func(): d.widgets.monitor.tab="overview"; d.monitor_ui["tab"]="overview"; d._save_session(false); refresh(d))
 	service_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	service_button.icon = UI.symbol("settings")
 	service_button.expand_icon = true
@@ -44,9 +44,11 @@ static func build(d, parent: VBoxContainer) -> void:
 	service_tree.set_column_custom_minimum_width(0,80)
 	service_tree.size_flags_vertical=Control.SIZE_EXPAND_FILL
 	services.add_child(service_tree)
-	d.widgets.monitor = {"body":null, "tab":"overview", "tabs":{}, "host":host, "badge":status_badge, "service_button":service_button, "log_search":null, "log_query":"", "log_view":null}
+	var initial_tab := str(d.monitor_ui.get("tab", "monitor"))
+	if initial_tab not in ["monitor", "overview", "config", "logs"]: initial_tab = "monitor"
+	d.widgets.monitor = {"body":null, "tab":initial_tab, "selected_probe":str(d.monitor_ui.get("selected_probe", "")), "tabs":{}, "host":host, "badge":status_badge, "service_button":service_button, "log_search":null, "log_query":"", "log_view":null}
 	d.widgets.monitor.service_tree=service_tree
-	service_tree.item_selected.connect(func(): d.widgets.monitor.tab="overview"; refresh(d))
+	service_tree.item_selected.connect(func(): d.widgets.monitor.tab="overview"; d.monitor_ui["tab"]="overview"; d._save_session(false); refresh(d))
 	var right := PanelContainer.new()
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right.add_theme_stylebox_override("panel", UI.style(Color.WHITE, Color.TRANSPARENT, 20, 18, 0))
@@ -85,7 +87,7 @@ static func _refresh_log_view(d) -> void:
 		var view = w.get("log_view")
 		if not is_instance_valid(view): return
 		d._clear(view)
-		var events: Array = d.game._vm().state.events
+		var events: Array = d.game.service_monitor_snapshot().get("events", [])
 		var query := str(w.get("log_query", "")).to_lower()
 		var filtered: Array = []
 		for event in events:
@@ -98,14 +100,14 @@ static func refresh(d) -> void:
 	var box: VBoxContainer = w.body
 	d._clear(box)
 	var tabbar: HBoxContainer = d._row(box, 3)
-	for entry in [["overview","詳細"],["config","構成"],["logs","ログ"]]:
+	for entry in [["monitor","監視"],["overview","詳細"],["config","構成"],["logs","ログ"]]:
 		var tab_id: String = entry[0]
-		var tab_button = d._button(entry[1], func(): d.widgets.monitor.tab=tab_id; refresh(d))
+		var tab_button = d._button(entry[1], func(): d.widgets.monitor.tab=tab_id; d.monitor_ui["tab"]=tab_id; d._save_session(false); refresh(d))
 		UI.os_navigation(tab_button, tab_id == w.tab, SERVICE_ACCENT)
 		tabbar.add_child(tab_button)
 	var content: VBoxContainer = d._box(box, 8)
 	box = content
-	var info: Dictionary = d.game.vm_info()
+	var info: Dictionary = d.game.service_monitor_snapshot()
 	w.host.text = str(info.host)
 	w.service_button.text = str(info.service)
 	w.service_tree.set_block_signals(true); w.service_tree.clear()
@@ -122,11 +124,14 @@ static func refresh(d) -> void:
 		connect_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 		box.add_child(connect_button)
 		return
-	var live: Dictionary = d.game._vm().state
-	w.badge.text="●  "+("稼働中" if live.active else "停止中")
+	var live: Dictionary = info.get("guest_state", {})
+	w.badge.text=("▶ プロセス稼働" if live.active else "■ プロセス停止")
 	w.badge.add_theme_color_override("font_color",UI.GREEN if live.active else UI.RED)
+	if w.tab == "monitor":
+		DASHBOARD.render(d, box, info)
+		return
 	if w.tab == "config":
-		if _console_configuration(d, box): return
+		if _console_configuration(d, box, info): return
 		box.add_child(d._label("適用中の設定", 21))
 		box.add_child(d._label(str(info.service)+".service", 12, UI.MUTED))
 		box.add_child(HSeparator.new())
@@ -154,7 +159,7 @@ static func refresh(d) -> void:
 		return
 	box.add_child(d._label(str(info.service)+".service", 24, SERVICE_ACCENT))
 	var state_color := UI.GREEN if bool(live.active) else UI.RED
-	w.badge.text = "●  "+("稼働中" if live.active else "停止中"); w.badge.add_theme_color_override("font_color",state_color)
+	w.badge.text = "▶ プロセス稼働" if live.active else "■ プロセス停止"; w.badge.add_theme_color_override("font_color",state_color)
 	var actions := HFlowContainer.new()
 	actions.add_theme_constant_override("h_separation", 6)
 	actions.add_theme_constant_override("v_separation", 6)
@@ -175,7 +180,7 @@ static func refresh(d) -> void:
 	var edit_action = d._button("設定を編集", d._open_config)
 	edit_action.custom_minimum_size.y = restart.custom_minimum_size.y
 	actions.add_child(edit_action)
-	var workspace := _workspace(d)
+	var workspace := _workspace(d, info)
 	if not workspace.is_empty():
 		var open: Button = d._button(str(workspace.title) + "を開く", func(): d._show_app("browser"); d._browse_url(str(workspace.url), true))
 		open.name = "ServiceOpenWorkspace"
@@ -208,42 +213,47 @@ static func refresh(d) -> void:
 	rollback.disabled = not d.game.case_review().get("current_recorded",false)
 	recovery.add_child(rollback)
 
-static func _workspace(d) -> Dictionary:
-	if d._samba_v2(): return {"url":d.SAMBA_URL, "title":"Samba"}
-	if d._backup_v2(): return {"url":d.BACKUP_URL, "title":"Backrest"}
-	if d._identity_v2(): return {"url":d.IDENTITY_URL, "title":"ID管理"}
-	if d._edr_v2(): return {"url":d.EDR_URL, "title":"端末管理"}
-	if d._portal_v2(): return {"url":d.PORTAL_URL, "title":"社外共有"}
-	if d._firewall_v2(): return {"url":d.FIREWALL_URL, "title":"通信ルール"}
+static func _workspace(d, info: Dictionary) -> Dictionary:
+	var service := str(info.get("service", ""))
+	var models: Dictionary = info.get("models", {})
+	if service == "samba" and int(models.get("samba_model_version", 1)) >= 2: return {"url":d.SAMBA_URL, "title":"Samba"}
+	if service == "restic" and int(models.get("backup_model_version", 1)) >= 2: return {"url":d.BACKUP_URL, "title":"Backrest"}
+	if service == "identity" and int(models.get("identity_model_version", 1)) >= 2: return {"url":d.IDENTITY_URL, "title":"ID管理"}
+	if service == "edr" and int(models.get("edr_model_version", 1)) >= 2: return {"url":d.EDR_URL, "title":"端末管理"}
+	if service == "portal" and int(models.get("portal_model_version", 1)) >= 2: return {"url":d.PORTAL_URL, "title":"社外共有"}
+	if service == "firewall" and int(models.get("firewall_model_version", 1)) >= 2: return {"url":d.FIREWALL_URL, "title":"通信ルール"}
 	return {}
 
-static func _console_configuration(d, box: VBoxContainer) -> bool:
+static func _console_configuration(d, box: VBoxContainer, info: Dictionary) -> bool:
 	var url := ""
 	var title := ""
 	var rows: Array = []
-	if d._samba_v2():
+	var live: Dictionary = info.get("guest_state", {})
+	var workspace := _workspace(d, info)
+	if workspace.is_empty(): return false
+	if str(info.service) == "samba":
 		url=d.SAMBA_URL;title=UI.copy("samba_title")
-		for name in d.game._vm().state.applied.get("shares",{}):
-			rows.append([str(name),str(d.game._vm().state.applied.shares[name].get("path",""))])
-	elif d._backup_v2():
+		for name in live.applied.get("shares",{}):
+			rows.append([str(name),str(live.applied.shares[name].get("path",""))])
+	elif str(info.service) == "restic":
 		url=d.BACKUP_URL;title="Backrest"
-		for snapshot in d.game._vm().state.get("snapshots",[]):
+		for snapshot in live.get("snapshots",[]):
 			rows.append([str(snapshot.get("id","")),str(snapshot.get("repository",""))+" · "+str(snapshot.get("files",{}).size())+" "+UI.copy("backup_files")])
-	elif d._identity_v2():
+	elif str(info.service) == "identity":
 		url=d.IDENTITY_URL;title=UI.copy("identity_title")
-		for user in d.game._vm().identity_snapshot().get("users",[]):
-			rows.append([str(user.user),UI.copy("identity_enabled" if user.enabled else "identity_disabled")])
-	elif d._edr_v2():
+		for user in live.get("identity_users", {}):
+			rows.append([str(user),UI.copy("identity_enabled" if live.identity_users[user].get("enabled", false) else "identity_disabled")])
+	elif str(info.service) == "edr":
 		url=d.EDR_URL;title=UI.copy("edr_title")
-		for device in d.game._vm().edr_snapshot().get("devices",[]):
+		for device in live.get("edr_devices",[]):
 			rows.append([str(device.id).to_upper().replace("_","-"),UI.copy("edr_isolated" if device.isolated else "edr_connected")])
-	elif d._portal_v2():
+	elif str(info.service) == "portal":
 		url=d.PORTAL_URL;title=UI.copy("portal_title")
-		for file in d.game._vm().portal_snapshot().get("files",[]):
-			rows.append([str(file.name),str(file.size)+" B"])
-	elif d._firewall_v2():
+		for file in info.get("portal_files", []):
+			rows.append([str(file.get("name", "")),str(file.get("size", 0))+" B"])
+	elif str(info.service) == "firewall":
 		url=d.FIREWALL_URL;title=UI.copy("fw_rules")
-		for rule in d.game._vm().firewall_snapshot().get("rules",[]):
+		for rule in live.applied.get("rules",[]):
 			rows.append([str(rule.get("interface","")).to_upper()+" · "+str(rule.get("description","")),str(rule.get("action",""))])
 	if url.is_empty():return false
 	var open: Button=d._primary(title,func():d._show_app("browser");d._browse_url(url,true))

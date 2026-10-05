@@ -125,7 +125,7 @@ static func refresh(d) -> void:
 	var probes: Array = d.game.diagnostic_probes()
 	var ready: bool = d.game.can_deliver()
 	var mode := str(d.diagnostic_ui.get("mode", "checks"))
-	var signature := str(probes) + str(ready) + str(d.game.vm_info().connected) + str(d.game.state.get("validated_revision", -1)) + str(w.selected) + str(w.raw_visible) + mode + str(d.diagnostic_ui.get("observations", []))
+	var signature := str(probes) + str(ready) + str(d.game.vm_info().connected) + str(d.game.state.get("validated_revision", -1)) + str(w.selected) + str(w.raw_visible) + mode + str(d.diagnostic_ui.get("observations", [])) + str(w.get("operation_error", ""))
 	if str(w.signature) == signature: return
 	w.signature = signature
 	if w.has("reflow"): w.reflow.call()
@@ -226,7 +226,11 @@ static func refresh(d) -> void:
 		d._trace("diagnostic", selected)
 		if requires_login: d._open_identity_login(str(current.get("user","current")))
 		else:
-			d.game.run_diagnostic(selected); refresh(d)
+			var response: String = d.game.run_diagnostic(selected)
+			w["operation_error"] = response if response.contains("測定結果を保存できませんでした") else ""
+			w["operation_probe"] = selected
+			if not str(w.operation_error).is_empty(): d._notify(str(w.operation_error))
+			refresh(d)
 			_reveal_result.call_deferred(d))
 	run.name = "DiagnosticRun"
 	UI.os_primary(run, DIAG_ACCENT)
@@ -245,6 +249,9 @@ static func refresh(d) -> void:
 	result_panel.add_theme_stylebox_override("panel", d._style(DIAG_PANEL, DIAG_ACCENT, 5, 6))
 	right.add_child(result_panel)
 	var result_content = d._box(result_panel, 5)
+	if str(w.get("operation_probe", "")) == selected and not str(w.get("operation_error", "")).is_empty():
+		var failure: Label = d._label(str(w.operation_error) + "\n以下は保存された前回の結果です。", 13, RED)
+		failure.name = "DiagnosticOperationFailure"; result_content.add_child(failure)
 	var result_header = d._row(result_content, 6)
 	result_header.add_child(d._label("期待する結果", 12, MUTED))
 	var expected = d._label(_expected_outcome(current), 13, INK)

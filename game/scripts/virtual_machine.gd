@@ -1079,15 +1079,19 @@ func _identity_actual_probe_user(command: String, output: String) -> String:
 
 func _record_command(command: String, output: String, before: String, after: String) -> void:
 	if not state.has("observations") or not state.observations is Array: state.observations = []
-	state.observations.append({"command":_identity_redact_command(command),"output":output,"before":before,"fingerprint":after,"changed":before != after})
+	var observation: Dictionary = {"command":_identity_redact_command(command),"output":output,"before":before,"fingerprint":after,"changed":before != after}
+	state.observations.append(observation)
 	if state.observations.size() > 120: state.observations.pop_front()
 	var normalized := _normalize_command(command)
 	var matched_probe: String = ""
+	var matched_expectation := ""
+	var matched_passed := false
 	for probe in _active_probes():
 		if _normalize_command(str(probe.get("command", ""))) == normalized:
 			matched_probe = str(probe.get("id", ""))
 			if not bool(probe.get("recorded", false)): probe.initial_result = output
 			probe.result = output; probe.recorded = true; probe.fingerprint = after; probe.fresh = true; probe.passed = _probe_passes(output, str(probe.get("expectation", "")))
+			matched_expectation = str(probe.get("expectation", "")); matched_passed = bool(probe.passed)
 	# A real credential-bearing login or password-update command is evidence for
 	# the corresponding user probe even though its secret-bearing command cannot
 	# equal the public fixture command. The output remains authoritative.
@@ -1101,7 +1105,12 @@ func _record_command(command: String, output: String, before: String, after: Str
 				matched_probe = probe_id
 				if not bool(probe.get("recorded", false)): probe.initial_result = output
 				probe.result = output; probe.recorded = true; probe.fingerprint = after; probe.fresh = true; probe.passed = _probe_passes(output, str(probe.get("expectation", "")))
+				matched_expectation = str(probe.get("expectation", "")); matched_passed = bool(probe.passed)
 				break
+	if not matched_probe.is_empty():
+		observation["probe_id"] = matched_probe
+		observation["probe_passed"] = matched_passed
+		observation["probe_expectation"] = matched_expectation
 	if before != after:
 		for probe in _active_probes():
 			if str(probe.get("id", "")) != matched_probe: probe.fresh = false
