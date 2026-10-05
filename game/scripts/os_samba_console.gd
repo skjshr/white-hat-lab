@@ -4,6 +4,7 @@ class_name OSSambaConsole
 const UI = preload("res://scripts/ui_theme.gd")
 const Glyph = preload("res://scripts/service_glyph.gd")
 const SambaConfig = preload("res://scripts/samba_config.gd")
+const SambaAccessBoard = preload("res://scripts/samba_access_board.gd")
 const NAV := Color("24282b")
 const PAGE := Color("eef0f2")
 const PANEL := Color("ffffff")
@@ -115,7 +116,7 @@ static func render(d, parent: VBoxContainer) -> void:
 	var live: Dictionary = d.game._vm().state
 	_pending(d, parent)
 	var nav: HBoxContainer = HBoxContainer.new(); nav.add_theme_constant_override("separation", 6); parent.add_child(nav)
-	var shares_button: Button = _button(d, nav, "Samba", "SambaTabShares", func(): s["tab"] = "shares"; d._render_samba(), s.get("tab") == "shares")
+	var shares_button: Button = _button(d, nav, "Samba", "SambaTabShares", func(): s["tab"] = "shares"; s["selected_share"] = ""; d._render_samba(), s.get("tab") == "shares")
 	var global_button: Button = _button(d, nav, copy("global_settings", "Global settings"), "SambaGlobal", func(): s["tab"] = "global"; d._render_samba())
 	var refresh: Button = _button(d, nav, copy("refresh", "Refresh"), "SambaRefresh", func(): d._render_samba())
 	var status := _label(d, nav, UI.copy("os_status", "Status") + ": " + ("active" if bool(live.get("active", false)) else "failed"), 13, MUTED)
@@ -137,6 +138,12 @@ static func _shares(d, parent: VBoxContainer, parsed: Dictionary) -> void:
 	var shares: Dictionary = parsed.get("values", {}).get("shares", {})
 	var s: Dictionary = _state(d)
 	var selected: String = str(s.get("selected_share", ""))
+	var probes: Array = d.game.diagnostic_probes() if d.game.has_method("diagnostic_probes") else []
+	if SambaAccessBoard.should_render_home(d, parsed, probes):
+		var live: Dictionary = d.game._vm().state
+		var applied_path := str(live.get("applied", {}).get("shares", {}).get("share", {}).get("path", "/srv/share"))
+		SambaAccessBoard.build(d, parent, probes, applied_path)
+		return
 	var has_selection := not selected.is_empty() and shares.has(selected)
 	var is_compact := compact(d)
 	var workspace := BoxContainer.new(); workspace.vertical = is_compact; workspace.name="SambaSharesWorkspace";workspace.add_theme_constant_override("separation",12);workspace.size_flags_horizontal=Control.SIZE_EXPAND_FILL;parent.add_child(workspace)
