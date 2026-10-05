@@ -40,6 +40,7 @@ func run() -> void:
 	ui = INTERFACE.new(); root.add_child(ui); await frames(12)
 	game.set_settings({"resolution":"960x600" if narrow else "1920x1080", "window_mode":"windowed", "text_scale":1.3 if narrow else 1.0, "volume":0}, false)
 	root.size = Vector2i(960,600) if narrow else Vector2i(1920,1080)
+	root.get_node("Graphics").apply_settings(game.settings); await frames(6)
 	ui._set_text_scale(1.3 if narrow else 1.0); ui.controls.menu.hide(); ui.next_task_guide.set_enabled(false); ui.open_panel("sales"); await frames(10)
 	if not await press("SalesOffer_" + str(hardware_offer.id).validate_node_name()): finish(); return
 	if not await press("AcceptContract"): finish(); return

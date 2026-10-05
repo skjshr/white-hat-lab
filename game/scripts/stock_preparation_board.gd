@@ -53,7 +53,7 @@ static func render(ui, parent: Node, game) -> void:
 	var heading := _label(ui, parent, "", 17); heading.name = "PreparationContext"
 	var flow = FLOW.new(); parent.add_child(flow); flow.setup(ui, data)
 	flow.unit_selected.connect(func(id: String):
-		ui.set_meta("stock_prep_selection", id); ui.set_meta("stock_prep_feedback", ""); refresh(ui))
+		ui.set_meta("stock_prep_selection", id); ui.set_meta("stock_prep_feedback", ""); refresh(ui); _reveal_selected(ui))
 	var facts := _label(ui, parent, "", 13); facts.name = "PreparationFacts"
 	var actions := VBoxContainer.new(); actions.name = "PreparationActions"; actions.size_flags_horizontal = Control.SIZE_EXPAND_FILL; actions.add_theme_constant_override("separation", 6); ui.modal_footer.add_child(actions)
 	var feedback := _label(ui, actions, "", 13); feedback.name = "PreparationFeedback"
@@ -64,6 +64,7 @@ static func render(ui, parent: Node, game) -> void:
 	var ship := _button(ui, row, "顧客へ発送", "PreparationShip", func(): _act(ui, game, "ship_prepared_customer_stock", "→ 発送しました。顧客の受領を待っています。", "PreparationShip")); M.button(ship, "primary")
 	_button(ui, row, "完了・請求", "PreparationReceipt", func(): _desktop(ui, "receipt"))
 	refresh(ui)
+	_reveal_selected(ui)
 
 static func _desktop(ui, app: String) -> void:
 	ui.open_panel("terminal")
@@ -79,9 +80,22 @@ static func _act(ui, game, method: String, success: String, focus_id: String) ->
 	ui.set_meta("stock_prep_feedback", success if bool(result.get("ok", false)) else "! " + _error(str(result.get("error", "unknown"))))
 	ui.set_meta("stock_prep_feedback_signature", _feedback_signature(project(game, str(data.selected))))
 	refresh(ui)
+	_reveal_selected(ui)
 	var focus: Control = ui.modal_footer.find_child(focus_id, true, false)
 	if is_instance_valid(focus) and focus is BaseButton and focus.disabled: focus = ui.modal_footer.find_child("PreparationTerminal" if method == "prepare_customer_stock" else "PreparationReceipt", true, false)
 	if is_instance_valid(focus): focus.grab_focus()
+
+static func _reveal_selected(ui) -> void:
+	# Footer feedback can shorten the canvas. Reveal the complete physical
+	# object after layout settles, without changing business state or focus.
+	var tree: SceneTree = ui.get_tree()
+	await tree.process_frame; await tree.process_frame
+	if not is_instance_valid(ui) or not is_instance_valid(ui.modal): return
+	var flow = ui.modal.find_child("StockPreparationFlow", true, false)
+	if not is_instance_valid(flow): return
+	var selected := str(flow.view.get("selected", ""))
+	var object: Control = ui.modal.find_child("PreparationUnit_" + selected.validate_node_name(), true, false)
+	if is_instance_valid(object): ui.modal_scroll.ensure_control_visible(object)
 
 static func _feedback_signature(data: Dictionary) -> String:
 	return JSON.stringify([data.selected, data.chosen.get("status", ""), data.revision, data.current, data.passed, data.total])
