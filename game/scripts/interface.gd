@@ -964,11 +964,23 @@ func _contract_detail(offer: Dictionary) -> void:
 	elif share_quote:
 		var scene := SHARE_INTAKE_BOARD.new(); scene.setup(intake, text_scale); body.add_child(scene)
 	else: body.add_child(_label(UI.copy("board_facts") % [int(offer.targets),int(quote.budget),int(quote.costs)],14,INK))
-	var endpoint_quote: bool = str(offer.get("case_id",""))=="endpoint-recovery" and offer.get("target_specs",[]).any(func(item):return int(item.get("scenario",{}).get("endpoint_engagement",0))==1)
+	var endpoint_quote: bool = offer.get("target_specs",[]).any(func(item):return int(item.get("scenario",{}).get("endpoint_engagement",0)) in [1,2])
+	var business_quote:bool=offer.get("target_specs",[]).any(func(item):return int(item.get("scenario",{}).get("endpoint_engagement",0))==2)
+	var endpoint_terms:Dictionary=offer.target_specs[0].get("scenario",{}) if endpoint_quote else {}
+	if business_quote:
+		var jobs:=HFlowContainer.new();jobs.name="QuoteEndpointBusiness";jobs.add_theme_constant_override("h_separation",28);body.add_child(jobs)
+		var scenario:Dictionary=offer.target_specs[0].get("scenario",{})
+		for id in scenario.get("endpoint_business",{}):
+			var job:=HBoxContainer.new();job.add_theme_constant_override("separation",8);jobs.add_child(job)
+			var role:=str(scenario.endpoint_business[id])
+			preload("res://scripts/service_glyph.gd").add_to(job,"receipt" if "精算" in role or "請求" in role else "ledger",28*text_scale,UI.MUTED)
+			var title:=_label(role+"  /  "+str(id).to_upper().replace("_","-"),14,INK)
+			title.autowrap_mode=TextServer.AUTOWRAP_OFF
+			job.add_child(title)
 	if endpoint_quote:
 		var rates:=HFlowContainer.new();rates.name="QuoteEndpointCompensation";rates.add_theme_constant_override("h_separation",16);body.add_child(rates)
-		for text in ["不審送信 ¥%d / 分" % ENDPOINT_ENGAGEMENT.SEND_RATE, "制作・入稿の停止 ¥%d / 分" % ENDPOINT_ENGAGEMENT.STOP_RATE]:
-			var rate:=_label(text,13,INK);rate.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART;rates.add_child(rate)
+		for text in (["未封じ込め ¥%d / 分" % int(endpoint_terms.get("endpoint_uncontained_rate",100)), "業務誤停止 ¥%d / 分" % int(endpoint_terms.get("endpoint_stop_rate",50))] if business_quote else ["不審送信 ¥%d / 分" % ENDPOINT_ENGAGEMENT.SEND_RATE, "制作・入稿の停止 ¥%d / 分" % ENDPOINT_ENGAGEMENT.STOP_RATE]):
+			var rate:=_label(text,13,INK);rate.autowrap_mode=TextServer.AUTOWRAP_OFF;rates.add_child(rate)
 	if not offer.unlocked:
 		var eligibility := _label(" / ".join(PackedStringArray(reasons)),14,WARNING)
 		eligibility.name = "ContractEligibility"
@@ -1012,11 +1024,17 @@ func _contract_detail(offer: Dictionary) -> void:
 	var price_preview := _label("",14,INK); price_preview.name="QuotePreview"; price_preview.size_flags_horizontal=Control.SIZE_EXPAND_FILL; price_preview.horizontal_alignment=HORIZONTAL_ALIGNMENT_RIGHT; quote_totals.add_child(price_preview)
 	var price_scale: Control
 	var send_state: Label
+	var business_margin:VBoxContainer
+	if business_quote:
+		business_margin=VBoxContainer.new();business_margin.name="QuoteBusinessMargin";body.add_child(business_margin)
 	if graphical_quote:
 		price_scale = QUOTE_PRICE_SCALE.new(); price_scale.setup(quote, text_scale); body.add_child(price_scale)
 		send_state = _label("", 12, INK); send_state.name = "QuoteSendState"; send_state.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var update_preview := func(_amount: float) -> void:
 		var proposed: Dictionary = g.contract_quote(offer,roundi(price.value))
+		if is_instance_valid(business_margin):
+			for child in business_margin.get_children():business_margin.remove_child(child);child.queue_free()
+			preload("res://scripts/endpoint_business_strip.gd").add_to(business_margin,text_scale,int(proposed.quoted_fee),int(proposed.costs),0)
 		if graphical_quote: _management_feedback("")
 		if is_instance_valid(price_scale): price_scale.set_quote(proposed)
 		if is_instance_valid(send_state):
@@ -1040,6 +1058,7 @@ func _contract_detail(offer: Dictionary) -> void:
 	brief.add_child(_label(str(offer.brief),14,INK))
 	var conditions := _sales_disclosure(body, UI.copy("board_conditions"), disclosures)
 	conditions.add_child(_label(UI.copy("billing_terms") + "  " + str(g.invoice_terms(offer).label),14,INK))
+	if business_quote:conditions.add_child(_label("正常業務の誤停止は6分単位で顧客満足−1（端数切上げ、上限15）。対象端末の封じ込めに必要な隔離は誤停止に含みません。",13,INK))
 	conditions.add_child(_label("%s · 会社Lv.%d / 専門Lv.%d / 難度%d" % [str(offer.service),offer.required_level,offer.required_rank,offer.grade],14,INK))
 	if graphical_quote or (int(operating_preview.get("required", 0)) == 0 and int(operating_preview.get("shortage", 0)) == 0):
 		_contract_operations_preview(conditions, offer, g, true)
@@ -1163,8 +1182,8 @@ func _preview_fact(host: Container, label_text: String, value: Variant) -> void:
 	item.custom_minimum_size.x = 72
 	item.add_theme_constant_override("separation", 1)
 	host.add_child(item)
-	item.add_child(_label(label_text, 10, GAME_THEME.FILTER))
-	var value_label := _label(str(value), 12, GAME_THEME.WHITE)
+	item.add_child(_label(label_text, 10, M.MUTED))
+	var value_label := _label(str(value), 12, M.INK)
 	value_label.name = "Value"
 	value_label.add_theme_font_override("font", UI.font(700))
 	item.add_child(value_label)

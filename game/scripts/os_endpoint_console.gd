@@ -7,6 +7,7 @@ const WorkflowLinks = preload("res://scripts/endpoint_workflow_links.gd")
 const Workstation = preload("res://assets/ui/endpoint/workstation-v1.png")
 const Impact = preload("res://scripts/endpoint_engagement.gd")
 const InvestigationMap = preload("res://scripts/endpoint_investigation_map.gd")
+const BusinessStrip = preload("res://scripts/endpoint_business_strip.gd")
 const NAV := Color("f3f2f1")
 const INK := Color("323130")
 const MUTED := Color("605e5c")
@@ -245,7 +246,20 @@ static func inventory(d, parent: VBoxContainer, snap: Dictionary, state: Diction
 	var open_record := func(id: String,index: int):
 		_open_device(d,state,id,index)
 		_scroll_selected_event_details(d,d.widgets.browser.page,true)
-	InvestigationMap.render(d,parent,snap,open_device,open_record,query)
+	var business: Dictionary={}
+	var scenario: Dictionary=d.game._scenario()
+	if int(scenario.get("endpoint_engagement",0))==2:
+		var observations:Dictionary={}
+		for id in scenario.get("endpoint_business",{}):
+			var observed:Dictionary=state.get("business_observations",{}).get(id,{})
+			var response:=str(observed.get("response",""))
+			var caption:="? 未測定"
+			if not observed.is_empty():
+				caption="✓ 200" if response.begins_with("HTTP/1.1 200") else "× 403" if response.begins_with("HTTP/1.1 403") else "! 測定結果を確認"
+				if str(observed.get("state",""))!=_business_state(snap,id):caption="↻ 再確認"
+			observations[id]={"label":caption,"response":response.get_slice("\n",0)}
+		business={"names":scenario.get("endpoint_business",{}),"observations":observations,"on_probe":func(id:String):_business_probe(d,id)}
+	InvestigationMap.render(d,parent,snap,open_device,open_record,query,business)
 
 static func recovery_device_record(snap: Dictionary, device_id: String) -> Dictionary:
 	for raw in snap.get("devices",[]):
@@ -562,6 +576,13 @@ static func recovery_actions(d, body: VBoxContainer, snap: Dictionary) -> void:
 static func devices(d, body: VBoxContainer, state: Dictionary, snap: Dictionary) -> void:
 	var selected := str(state.get("device", ""))
 	var rows: Array = snap.get("devices", [])
+	var scenario:Dictionary=d.game._scenario()
+	if int(scenario.get("endpoint_engagement",0))==2:
+		var impact:Dictionary=d.game.state.work.get("endpoint_impact",{})
+		var work_summary:Dictionary=d.game.work_status()
+		var compensation:=Impact.total_cost(impact)
+		BusinessStrip.add_to(body,scale(d),int(work_summary.estimated_fee),maxi(0,int(work_summary.costs)-compensation),compensation)
+		label(d,body,Impact.summary(impact,2),12,MUTED).name="EdrImpactSummary"
 	if selected.is_empty():
 		if bool(snap.get("recovery_enabled",false)) and str(state.get("inventory_view","business"))!="records":
 			recovery_inventory(d,body,rows,state,snap)
@@ -595,9 +616,11 @@ static func devices(d, body: VBoxContainer, state: Dictionary, snap: Dictionary)
 	chip(d,status,copy("edr_management")+" · "+copy("edr_connected" if current.management_connected else "edr_blocked"),current.management_connected)
 	var controls := HFlowContainer.new();controls.add_theme_constant_override("h_separation",8);controls.add_theme_constant_override("v_separation",6);body.add_child(controls)
 	var isolated := bool(current.isolated)
+	if int(scenario.get("endpoint_engagement",0))==2:
+		label(d,body,str(scenario.get("endpoint_business",{}).get(selected,"")),14,MUTED).name="EdrDeviceBusiness"
 	var action := button(d,controls,copy("edr_release" if isolated else "edr_isolate"),("EdrRelease_" if isolated else "EdrIsolate_")+selected,func():run(d,("release " if isolated else "isolate ")+selected))
 	action.disabled = not current.management_connected
-	button(d,controls,copy("edr_collect"),"EdrCollect",func():run(d,"collect"))
+	button(d,controls,("✓  " if bool(snap.get("evidence",{}).get("valid",false)) else "")+copy("edr_collect"),"EdrCollect",func():run(d,"collect"))
 	_normal_use(d, body, state, snap, selected)
 	tabline(d,body,copy("edr_timeline"),"EdrTab_timeline")
 	var toolbar := HBoxContainer.new();body.add_child(toolbar)

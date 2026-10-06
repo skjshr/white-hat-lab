@@ -232,7 +232,7 @@ static func _finance(d, host: VBoxContainer, receipt: Dictionary) -> void:
 	var operating := int(receipt.get("cost", 0)) - material
 	var compensation := preload("res://scripts/endpoint_engagement.gd").total_cost(receipt.get("endpoint_impact",{}))
 	_row(d, costs, "ReceiptOperatingCost", UI.copy("receipt_operating_cost"), operating-compensation)
-	if compensation > 0: _row(d, costs, "ReceiptCompensationCost", "業務停止・不審送信の補償", compensation)
+	if compensation > 0: _row(d, costs, "ReceiptCompensationCost", "未封じ込め・業務誤停止の補償" if receipt.get("endpoint_impact",{}).values().any(func(item):return item.has("uncontained_minutes")) else "業務停止・不審送信の補償", compensation)
 	if material > 0: _row(d, costs, "ReceiptMaterialCost", UI.copy("stock_material_cost"), material)
 	if not str(receipt.get("hardware_serial", "")).is_empty():
 		var serial := _text(d, UI.copy("stock_serial") + "  " + str(receipt.get("hardware_serial")), 12, UI.MUTED)
@@ -257,6 +257,7 @@ static func _evaluation(d, host: VBoxContainer, receipt: Dictionary) -> void:
 		_pair(d, result, UI.copy("receipt_satisfaction"), "%d → %d" % [int(receipt.satisfaction_before), int(receipt.satisfaction_after)])
 	if receipt.has("quality_satisfaction_delta"): _pair(d, growth, UI.copy("receipt_quality_delta"), "%+d" % int(receipt.quality_satisfaction_delta))
 	if receipt.has("price_satisfaction_delta"): _pair(d, growth, UI.copy("receipt_price_delta"), "%+d" % int(receipt.price_satisfaction_delta))
+	if receipt.has("endpoint_satisfaction_delta"): _pair(d, growth, "業務誤停止による評価", "%+d" % int(receipt.endpoint_satisfaction_delta))
 	if receipt.has("level_before") and receipt.has("level_after"):
 		_pair(d, growth, UI.copy("receipt_level"), "%d → %d" % [int(receipt.level_before), int(receipt.level_after)])
 	if receipt.has("xp_gain"): _pair(d, growth, UI.copy("receipt_xp"), "+%d" % int(receipt.xp_gain))

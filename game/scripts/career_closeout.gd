@@ -126,6 +126,8 @@ static func cancel(game) -> bool:
 	var credit_after := int(view.credit_after)
 	var lost_credit := credit_before - credit_after
 	var record := {"kind":"cancellation","id":id,"case_id":str(state.contract.get("case_id", "")),"title":str(view.title),"client":client,"day":day,"plan":str(state.contract_plan),"fee_forgone":int(view.fee_forgone),"costs":costs,"cash_cost":costs,"cash_before":int(view.cash_before),"cash_after":int(view.cash_after),"expense":costs,"material_cost":0,"profit":-costs,"cash_delta":-costs,"late":bool(view.late),"satisfaction_before":satisfaction_before,"satisfaction_after":satisfaction_after,"credit_before":credit_before,"credit_after":credit_after,"rating":"cancelled","archived_context":id}
+	var endpoint_impact: Dictionary = saved_context.get("work", {}).get("endpoint_impact", {})
+	if not endpoint_impact.is_empty(): record.endpoint_impact = endpoint_impact.duplicate(true)
 	state.contract_closeouts[id] = {"kind":"cancellation","id":id,"day":day,"context":saved_context,"vm_states":archive_vm,"record":record.duplicate(true)}
 	state.cash = int(state.get("cash", 0)) - costs
 	state.profit = int(state.get("profit", 0)) - costs

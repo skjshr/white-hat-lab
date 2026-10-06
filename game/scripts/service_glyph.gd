@@ -12,6 +12,16 @@ func _draw() -> void:
 	var offset := (size - Vector2.ONE * side) / 2.0
 	draw_set_transform(offset, 0, Vector2.ONE * side / 48.0)
 	match kind:
+		"ledger":
+			draw_style_box(_box(),Rect2(7,5,34,38))
+			draw_line(Vector2(15,5),Vector2(15,43),tint,3,true)
+			for y in [15,23,31]:draw_line(Vector2(21,y),Vector2(35,y),tint,2,true)
+		"receipt":
+			draw_style_box(_box(),Rect2(11,4,27,37))
+			for y in [13,21,29]:draw_line(Vector2(17,y),Vector2(32,y),tint,2,true)
+			for x in [11,20,29]:
+				draw_line(Vector2(x,41),Vector2(x+4.5,45),tint,2,true)
+				draw_line(Vector2(x+4.5,45),Vector2(x+9,41),tint,2,true)
 		"blocked":
 			draw_circle(Vector2(24,24),20,Color("fffdf5"))
 			draw_arc(Vector2(24,24),20,0,TAU,40,tint,3,true)

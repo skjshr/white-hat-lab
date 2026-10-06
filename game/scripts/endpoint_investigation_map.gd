@@ -46,7 +46,21 @@ class RecordLinks extends Control:
 					draw_dashed_line(segment[0], segment[1], Color("a19f9d"), 1.5, 4, true)
 			draw_circle(finish, 2.0, Color("8a8886"))
 
-static func render(d, parent: VBoxContainer, snap: Dictionary, on_device: Callable, on_record: Callable, query: String = "") -> void:
+class BusinessLink extends Control:
+	var isolated := false
+	func _ready() -> void:
+		mouse_filter=Control.MOUSE_FILTER_IGNORE
+		resized.connect(queue_redraw)
+	func _draw() -> void:
+		var center:=size*0.5
+		var ink:=Color("8a8886") if isolated else Color("0078d4")
+		if isolated:
+			draw_line(Vector2(center.x,0),Vector2(center.x,center.y-6),ink,2,true)
+			draw_line(Vector2(center.x,center.y+6),Vector2(center.x,size.y),ink,2,true)
+			for sign in [-1,1]:draw_line(center+Vector2(-4,-4*sign),center+Vector2(4,4*sign),ink,2,true)
+		else:draw_line(Vector2(center.x,0),Vector2(center.x,size.y),ink,2,true)
+
+static func render(d, parent: VBoxContainer, snap: Dictionary, on_device: Callable, on_record: Callable, query: String = "", business: Dictionary = {}) -> void:
 	var factor := float(d.game.settings.get("text_scale", 1.0))
 	var root := VBoxContainer.new()
 	root.name = "EdrInvestigationMap"
@@ -56,7 +70,7 @@ static func render(d, parent: VBoxContainer, snap: Dictionary, on_device: Callab
 	var headings := HBoxContainer.new()
 	headings.add_theme_constant_override("separation", roundi(24 * factor))
 	root.add_child(headings)
-	var endpoint_heading := _text(headings, "端末", factor, 12, MUTED)
+	var endpoint_heading := _text(headings, "業務 / 端末" if not business.is_empty() else "端末", factor, 12, MUTED)
 	endpoint_heading.custom_minimum_size.x = 112 * factor
 	endpoint_heading.size_flags_horizontal = Control.SIZE_FILL
 	var record_headings := HBoxContainer.new()
@@ -75,11 +89,11 @@ static func render(d, parent: VBoxContainer, snap: Dictionary, on_device: Callab
 		if shown > 0:
 			var rule := HSeparator.new()
 			root.add_child(rule)
-		_lane(root, device, groups, factor, on_device, on_record)
+		_lane(root, device, groups, factor, on_device, on_record, business)
 		shown += 1
 	if shown == 0:
 		_text(root, "一致する記録はありません", factor, 13, MUTED)
-	_text(root, "点線: 過去の記録の関係   ○ 接続許可 / × 隔離: 現在の端末設定", factor, 11, MUTED)
+	_text(root, "点線: 過去の記録   実線 / ×: 現在の接続設定   業務の図を押して実測" if not business.is_empty() else "点線: 過去の記録の関係   ○ 接続許可 / × 隔離: 現在の端末設定", factor, 11, MUTED)
 
 static func _record_groups(device: Dictionary, query: String) -> Array:
 	var result: Array = []
@@ -100,7 +114,7 @@ static func _record_groups(device: Dictionary, query: String) -> Array:
 		result[int(by_name[key])].events.append({"index":index, "record":event})
 	return result
 
-static func _lane(parent: VBoxContainer, device: Dictionary, groups: Array, factor: float, on_device: Callable, on_record: Callable) -> void:
+static func _lane(parent: VBoxContainer, device: Dictionary, groups: Array, factor: float, on_device: Callable, on_record: Callable, business: Dictionary) -> void:
 	var id := str(device.get("id", ""))
 	var lane := MarginContainer.new()
 	lane.name = "EdrInvestigationLane_" + id
@@ -111,7 +125,25 @@ static func _lane(parent: VBoxContainer, device: Dictionary, groups: Array, fact
 	var columns := HBoxContainer.new()
 	columns.add_theme_constant_override("separation", roundi(24 * factor))
 	lane.add_child(columns)
-	var endpoint := _object(columns, "EdrDevice_" + id, 126 * factor, func(): on_device.call(id))
+	var endpoint_column:=VBoxContainer.new()
+	endpoint_column.custom_minimum_size.x=112*factor
+	endpoint_column.size_flags_vertical=Control.SIZE_SHRINK_CENTER
+	endpoint_column.add_theme_constant_override("separation",0)
+	columns.add_child(endpoint_column)
+	if business.get("names",{}).has(id):
+		var job:=_object(endpoint_column,"EdrBusinessProbe_"+id,94*factor,func():business.on_probe.call(id))
+		var job_box:=_contents(job,factor)
+		var job_name:=str(business.names[id])
+		var glyph:=Glyph.add_to(job_box,"receipt" if job_name.contains("精算") or job_name.contains("請求") else "ledger",32*factor,MUTED)
+		glyph.size_flags_horizontal=Control.SIZE_SHRINK_CENTER
+		_text(job_box,job_name,factor,12,INK,600).horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
+		var observation:Dictionary=business.get("observations",{}).get(id,{})
+		var result:=str(observation.get("label","? 未測定"))
+		_text(job_box,result,factor,11,MUTED).horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
+		job.tooltip_text=job_name+"の接続を実測\n"+str(observation.get("response",""))
+		_ignore_children(job_box)
+		var stem:=BusinessLink.new();stem.isolated=bool(device.get("isolated",false));stem.custom_minimum_size.y=22*factor;endpoint_column.add_child(stem)
+	var endpoint := _object(endpoint_column, "EdrDevice_" + id, 126 * factor, func(): on_device.call(id))
 	endpoint.custom_minimum_size.x = 112 * factor
 	endpoint.size_flags_horizontal = Control.SIZE_FILL
 	endpoint.size_flags_vertical = Control.SIZE_SHRINK_CENTER

@@ -30,6 +30,11 @@ static func project(state: Dictionary, record: Dictionary) -> Dictionary:
 		if str(reply.rating) == "late": reply.body += "\nただ、予定していた時刻を超えてしまいました。"
 		elif str(reply.rating) == "rework": reply.body += "\n手戻りがあり、次回は事前の確認をお願いします。"
 		elif str(reply.rating) == "on_time": reply.body += "\n予定に間に合いました。ありがとうございました。"
+		var stop_minutes:=0.0
+		for impact in own.get("endpoint_impact",{}).values():
+			if impact is Dictionary and impact.has("uncontained_minutes"):stop_minutes+=float(impact.get("stop_minutes",0))
+		if stop_minutes>0:
+			reply.body+="\nただ、調査中に正常な業務が%d分止まりました。次回は必要な端末だけを止めてください。" % roundi(stop_minutes)
 	for event in state.get("company_cycle",{}).get("events",[]):
 		if completed and event is Dictionary and str(event.get("contract_id","")) == id and str(event.get("client","")) == str(reply.client): reply.event = event.duplicate(true)
 	return reply

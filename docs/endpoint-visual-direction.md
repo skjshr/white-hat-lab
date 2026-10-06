@@ -10,6 +10,7 @@
 - [Fluent 2 color](https://fluent2.microsoft.design/color): 中立色・操作色・状態色の使い分け。
 - [Defender incident investigation](https://learn.microsoft.com/en-us/defender-endpoint/investigate-incidents): 端末と証拠を関係から調べる構造。
 - [Defender device actions](https://learn.microsoft.com/en-us/defender-endpoint/respond-machine-alerts): 隔離・解除・調査と操作履歴。
+- [Critical asset management](https://learn.microsoft.com/en-us/security-exposure-management/critical-asset-management): 端末の業務上の重要性を調査の文脈に含める考え方。ゲームの補償単価・顧客評価ルールは独自の架空契約であり、実サービスの機能や料金として扱わない。
 - [Kenney Furniture Kit](https://kenney.nl/assets/furniture-kit): 無料モデルの公式 CC0 表記を確認。既存のオフィス素材と整合を検討するための参照。今回、新しいモデル一式は追加していない。
 
 ## 保存記録の調査マップ
