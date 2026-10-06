@@ -74,6 +74,35 @@ func comparison_boundaries() -> void:
 	check((host.find_child("PortalVersionDiffGrid", true, false) as GridContainer).columns == 33, "large comparison limits instantiated columns without changing complete model counts")
 	host.free()
 	check(game._vm().export_state() == before and game.business_clock() == clock and int(game.state.cash) == cash, "boundary rendering is read-only for actual VM, clock and funds")
+func access_workflow() -> void:
+	# The existing VM fixture supplies real commands and observations; the map
+	# must not award a pass from its policy arrows or silently run every probe.
+	var before: Dictionary = game._vm().export_state()
+	var clock: String = game.business_clock(); var cash := int(game.state.cash)
+	press("PortalAccessMap"); await frames(6)
+	var board = control("PortalAccessDiagram")
+	check(board != null and str(board.model.file.get("path", "")) == FILE, "sharing map is bound to the real selected file")
+	check(game._vm().export_state() == before and game.business_clock() == clock and int(game.state.cash) == cash, "drawing the map does not repair, measure or transact")
+	for id in ["PortalAccessPolicy_staff", "PortalAccessPolicy_partner", "PortalAccessObserved_partner", "PortalAccessFile", "PortalAccessExpiry"]:
+		var field: Label = control(id)
+		check(field != null and field.get_minimum_size().y <= field.size.y + 1, "access label fits at current text scale " + id)
+	press("PortalAccessMeasure_partner"); await frames()
+	var probes: Array = game.diagnostic_probes()
+	check(probes.filter(func(p): return str(p.id) in ["partner-read", "partner-write"]).all(func(p):return bool(p.recorded) and bool(p.fresh) and bool(p.passed)), "targeted partner test records actual allowed reading and denied writing")
+	check(probes.filter(func(p):return str(p.id)=="staff-read").all(func(p):return not bool(p.recorded)), "testing partner does not silently measure staff")
+	check(str(control("PortalAccessObserved_partner").text).contains("200"), "map displays the actual recorded response")
+	var saved_path: String = game.save_path
+	var retained: Dictionary = game._vm().export_state(); var minutes: float = float(game.state.work.minutes)
+	game.save_path = "user://missing-access-map-"+str(OS.get_process_id())+"/save.json"
+	press("PortalAccessMeasure_links"); game.save_path = saved_path; await frames()
+	check(game._vm().export_state() == retained and float(game.state.work.minutes) == minutes, "failed measurement save preserves work and actual VM observations")
+	check(str(pc.portal_ui.get("access_error", "")).contains("測定結果を保存できませんでした"), "failed measurement is visible without granting a fresh result")
+	press("PortalAccessMeasure_links"); await frames()
+	check(str(pc.portal_ui.get("access_error", "")).is_empty(), "measurement retry clears only the operation failure")
+	press("PortalAccessActor_staff"); await frames()
+	check(control("PortalPermission_staff") != null and control("PortalPermission_partner") == null, "graphical actor opens that target's own policy editor")
+	press("PortalAccessBack"); press("PortalShareFile_0"); await frames()
+
 func run() -> void:
 	legacy()
 	ui=load("res://scripts/interface.gd").new();root.add_child(ui);await frames(1);game=ui._game();game.set_process(false)
@@ -109,6 +138,7 @@ func run() -> void:
 	check(parsed.size()==3 and parsed[1][0]=="one, two" and parsed[1][1]=="three \"four\"" and parsed[2][0]=="multi\nline","preview handles quoted commas, escaped quotes and multiline cells")
 	var original: String=game.vm_read(FILE);var policy: Dictionary=game._vm().state.applied.duplicate(true)
 	share("partner",1,1);check(game._vm().state.applied.partner=="read","sharing changes actual grant")
+	await access_workflow()
 	for key in ["mfa","tls","audit"]:check(game._vm().state.applied[key]==policy[key],"sharing preserves "+key)
 	await capture("portal-sharing")
 	press("PortalPreview");select("PortalIdentity",2);press("PortalRead")
@@ -142,7 +172,7 @@ func run() -> void:
 	press("PortalDetailActivity");await frames();await capture("portal-activity")
 	press("PortalDetailVersions");press("PortalVersionPreview_"+str(undo_version.id));press("PortalVersionRestore_"+str(undo_version.id))
 	check(game._vm().portal_storage_read(FILE)==updated,"restore retains the replaced file for undo")
-	press("PortalDetailSharing");press("PortalPreview");select("PortalIdentity",2);press("PortalRead")
+	press("PortalDetailSharing");press("PortalPreview");press("PortalRole_partner");select("PortalIdentity",2);press("PortalRead")
 	var valid_path: String=game.save_path;var clock_before:=int(game.clock_minutes());var cash_before:=int(game.state.cash)
 	game.save_path="user://missing-portal-"+str(OS.get_process_id())+"/save.json";edit(updated+"PENDING\n");press("PortalWrite");game.save_path=valid_path
 	check(response().contains("507") and game.vm_read(FILE)==updated and int(game.clock_minutes())==clock_before and int(game.state.cash)==cash_before,"failed PUT save restores data and time")

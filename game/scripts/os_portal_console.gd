@@ -3,6 +3,7 @@ extends RefCounted
 const UI = preload("res://scripts/ui_theme.gd")
 const Glyph = preload("res://scripts/service_glyph.gd")
 const VERSION_DIFF = preload("res://scripts/os_portal_diff.gd")
+const ACCESS_MAP = preload("res://scripts/portal_access_map.gd")
 const BLUE := Color("006a9e")
 const INK := Color("252525")
 const MUTED := Color("676767")
@@ -106,7 +107,9 @@ static func _apply_live_layout(d, page: Control) -> void:
 	if shell != null:
 		shell.vertical = compact
 		shell.custom_minimum_size.y = maxf(460, float(d.windows.browser.size.y) - 153)
-	if nav_frame != null: nav_frame.custom_minimum_size = Vector2(0, 100) if compact else Vector2(260, 0)
+	if nav_frame != null:
+		nav_frame.visible = str(d.portal_ui.get("view", "files")) != "access"
+		nav_frame.custom_minimum_size = Vector2(0, 100) if compact else Vector2(260, 0)
 	if nav_primary != null: nav_primary.vertical = not compact
 	if nav_fill != null: nav_fill.visible = not compact
 	if nav_status != null: nav_status.vertical = not compact
@@ -145,6 +148,13 @@ static func reset_response(d) -> void:
 static func show_files(d,shared: bool=false) -> void:
 	d.portal_ui["view"]="files";d.portal_ui["filter"]="shared" if shared else "all";d.portal_ui["details"]=false;d.portal_ui.erase("sharing");d._browse_url(d.PORTAL_URL,true)
 
+static func show_access(d) -> void:
+	d.portal_ui["view"] = "access"
+	if str(d.portal_ui.get("selected_path", "")).is_empty():
+		var files: Array = d.game._vm().portal_snapshot().get("files", [])
+		if not files.is_empty(): d.portal_ui["selected_path"] = str(files[0].path)
+	rerender(d)
+
 static func app_button(d, parent: Node, icon: String, name: String, action: Callable, tooltip: String = "") -> Button:
 	var node := button(d, parent, "", name, action)
 	node.custom_minimum_size = Vector2(34, 34)
@@ -174,7 +184,7 @@ static func render(d,parent: VBoxContainer) -> void:
 	Glyph.add_to(top_row,"network",34,Color.WHITE)
 	var home:=button(d,top_row,"Nextcloud","PortalHome",func():show_files(d));home.add_theme_color_override("font_color",Color.WHITE)
 	app_button(d,top_row,"file","PortalAppFiles",func():show_files(d),copy("all_files"))
-	app_button(d,top_row,"network","PortalAppShared",func():show_files(d,true),copy("shared"))
+	app_button(d,top_row,"network","PortalAppShared",func():show_access(d),"共有範囲とリンクの期限")
 	var app_spacer:=Control.new();app_spacer.custom_minimum_size.x=4;top_row.add_child(app_spacer)
 	var spacer:=Control.new();spacer.size_flags_horizontal=Control.SIZE_EXPAND_FILL;top_row.add_child(spacer)
 	var account:=fixed_label(d,top_row,"OP",14,Color.WHITE);account.size_flags_horizontal=Control.SIZE_SHRINK_END;account.tooltip_text=d._player_display_name()
@@ -201,8 +211,10 @@ static func render(d,parent: VBoxContainer) -> void:
 	var workspace:=PanelContainer.new();workspace.name="PortalWorkspace";workspace.size_flags_horizontal=Control.SIZE_EXPAND_FILL;workspace.add_theme_stylebox_override("panel",UI.style(Color.WHITE,Color.TRANSPARENT,12,8,0));shell.add_child(workspace)
 	var workspace_style: StyleBoxFlat=workspace.get_theme_stylebox("panel");workspace_style.corner_radius_top_right=16;workspace_style.corner_radius_bottom_right=16
 	var body:=VBoxContainer.new();body.size_flags_horizontal=Control.SIZE_EXPAND_FILL;body.add_theme_constant_override("separation",0);workspace.add_child(body)
-	if str(state.get("view","files"))=="preview":preview(d,body,state)
-	else:files(d,body,state,snap,compact)
+	match str(state.get("view", "files")):
+		"preview": preview(d,body,state)
+		"access": access_workspace(d,body,state,snap)
+		_: files(d,body,state,snap,compact)
 	if not page.has_meta("portal_resize_callback"):
 		var resize_callback := func(): _apply_live_layout(d,page)
 		page.set_meta("portal_resize_callback",resize_callback)
@@ -214,6 +226,7 @@ static func files(d,parent: VBoxContainer,state: Dictionary,snap: Dictionary,com
 	if not compact: split.size_flags_vertical=Control.SIZE_EXPAND_FILL
 	var list:=VBoxContainer.new();list.name="PortalFileList";list.size_flags_horizontal=Control.SIZE_EXPAND_FILL;list.add_theme_constant_override("separation",0);split.add_child(list)
 	var viewbar:=HBoxContainer.new();viewbar.custom_minimum_size.y=48;viewbar.add_theme_constant_override("separation",4);list.add_child(viewbar)
+	button(d,viewbar,"共有範囲", "PortalAccessMap",func():show_access(d))
 	label(d,viewbar,copy("shared" if str(state.get("filter","all"))=="shared" else "all_files"),16)
 	var toolbar_space:=Control.new();toolbar_space.size_flags_horizontal=Control.SIZE_EXPAND_FILL;viewbar.add_child(toolbar_space)
 	var list_view:=button(d,viewbar,"☰","PortalView_list",func():state["file_view"]="list";rerender(d));list_view.tooltip_text=experience_copy("list_view","List");list_view.disabled=str(state.get("file_view","list"))=="list"
@@ -321,7 +334,7 @@ static func detail_sidebar(d, split: BoxContainer, state: Dictionary, snap: Dict
 	tabs.add_theme_constant_override("separation", 2)
 	sidebar.add_child(tabs)
 	var tab_name := str(state.get("detail_tab", "sharing"))
-	_detail_tab_button(d, tabs, storage_copy("portal_sharing", "Sharing"), "PortalDetailSharing", tab_name == "sharing", func(): state["detail_tab"] = "sharing"; state["sharing"] = true; rerender(d))
+	_detail_tab_button(d, tabs, storage_copy("portal_sharing", "Sharing"), "PortalDetailSharing", tab_name == "sharing", func(): show_access(d))
 	_detail_tab_button(d, tabs, storage_copy("portal_activity", "Activity"), "PortalDetailActivity", tab_name == "activity", func(): state["detail_tab"] = "activity"; state["sharing"] = true; rerender(d))
 	_detail_tab_button(d, tabs, storage_copy("portal_versions", "Versions"), "PortalDetailVersions", tab_name == "versions", func(): state["detail_tab"] = "versions"; state["sharing"] = true; rerender(d))
 	sidebar.add_child(HSeparator.new())
@@ -398,6 +411,52 @@ static func _version_preview(d, parent: VBoxContainer, state: Dictionary, select
 	restore.disabled=saved==current
 	if saved==current:label(d,parent,copy("version_identical"),13,MUTED)
 	VERSION_DIFF.render(d, parent, saved, current)
+
+static func access_workspace(d, parent: VBoxContainer, state: Dictionary, snap: Dictionary) -> void:
+	var path := str(state.get("selected_path", ""))
+	var value: Dictionary = ACCESS_MAP.project(snap, d.game.diagnostic_probes(), path)
+	var head := HBoxContainer.new(); parent.add_child(head)
+	label(d,head,"共有範囲",20,BLUE)
+	button(d,head,"ファイルへ", "PortalAccessBack",func():show_files(d)).size_flags_horizontal = Control.SIZE_SHRINK_END
+	_storage_status(d,parent,_external_storage(snap))
+	if value.file.is_empty():
+		label(d,parent,"対象資料がありません。ファイルを選んでください。",14,MUTED); return
+	var role := str(state.get("access_role", "partner"))
+	if role not in ["staff", "partner", "public"]: role = "partner"
+	var board := ACCESS_MAP.new(); parent.add_child(board)
+	board.setup(value,float(d.game.settings.get("text_scale",1.0)),role)
+	board.role_selected.connect(func(chosen): state["access_role"] = chosen; state["editing_role"] = chosen; rerender(d))
+	var pulse := str(state.get("access_replay", "")); state.erase("access_replay")
+	if not pulse.is_empty(): board.play_observation(pulse)
+	var controls := HFlowContainer.new(); controls.name = "PortalAccessMeasurements"; controls.add_theme_constant_override("h_separation",5); controls.add_theme_constant_override("v_separation",5); parent.add_child(controls)
+	for entry in [["staff","社員の業務"],["partner","取引先の業務"],["links","古いリンク"],["public","公開・認証"],["audit","監査記録"]]:
+		var group := str(entry[0])
+		var test := button(d,controls,str(entry[1])+" · "+ACCESS_MAP.group_status(value,group),"PortalAccessMeasure_"+group,_measure_access.bind(d,group))
+		test.tooltip_text = "この経路だけを実際に検査します。検査時間を消費します。"
+		test.disabled = d.game.current_done() or not bool(d.game.vm_info().connected)
+	var errors := str(state.get("access_error", ""))
+	if not errors.is_empty(): label(d,parent,errors,13,UI.RED).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var actions := HFlowContainer.new(); parent.add_child(actions)
+	button(d,actions,"受取側の操作", "PortalPreview",func():d._portal_stash_draft();state["view"]="preview";state["role"]=role;state["age"]="current";reset_response(d);rerender(d))
+	button(d,actions,"納品条件を確認", "PortalAccessDelivery",func():d._verify();d._show_app("receipt"))
+	button(d,actions,"通信の詳細", "PortalAccessDiagnostics",func():d._show_app("verify"))
+	var editor := VBoxContainer.new(); editor.name = "PortalAccessEditor"; editor.add_theme_constant_override("separation",8); parent.add_child(editor)
+	share_row(d,editor,state,snap,path,role)
+	var guard: VBoxContainer = d._disclosure(parent,"TLS・MFA・監査の設定")
+	for key in ["tls", "mfa", "audit"]: label(d,guard,key.to_upper()+" · "+str(snap.get("config",{}).get(key,"不明")),12,MUTED)
+	button(d,guard,copy("service_config"),"PortalAccessServiceConfig",func():d._show_app("editor");d._open_editor(str(d.game.vm_info().config_path)))
+
+static func _measure_access(d, group: String) -> void:
+	var failures: Array[String] = []
+	for id in ACCESS_MAP.GROUPS.get(group, []):
+		var response: String = d.game.run_diagnostic(str(id))
+		if response.contains("測定結果を保存できませんでした"):
+			failures.append(response); break
+	d.portal_ui["access_error"] = "\n".join(failures)
+	if failures.is_empty(): d.portal_ui["access_replay"] = group
+	rerender(d)
+	if d.widgets.has("verify"): d._refresh_checks()
+	if d.widgets.has("monitor"): d._refresh_monitor()
 
 static func share_row(d,parent: VBoxContainer,state: Dictionary,snap: Dictionary,path: String,role: String) -> void:
 	var share: Dictionary={}
