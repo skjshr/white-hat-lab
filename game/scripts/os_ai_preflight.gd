@@ -2,6 +2,7 @@ extends RefCounted
 const U = preload("res://scripts/investigation_ui.gd")
 const UI = preload("res://scripts/ui_theme.gd")
 const Diagram = preload("res://scripts/ai_gate_canvas.gd")
+const Timeline = preload("res://scripts/ai_event_timeline.gd")
 const KIND := "advanced-saas-ai-preflight"
 const INK = Color("243b40")
 const MUTED = Color("61797c")
@@ -113,11 +114,14 @@ static func _measurement(d, parent: Node, n: Dictionary, action: String, title: 
 	button.disabled = record.is_empty()
 
 static func _wiring(d, parent: Node, n: Dictionary) -> void:
-	_band(parent, "AI-07   /   TOOL ACCESS ROUTER")
-	_clock(parent, n)
+	_timeline(d, parent, n)
 	var actions := U.row(parent)
-	_button(actions, "範囲外要求を試験 · 2分", "AiBoundaryProbe", _send.bind(d, "probe_boundaries"))
-	_button(actions, "入力を3分待つ", "AiWait", _send.bind(d, "wait"))
+	var event_id := str(U.state(d, KIND).get("flow_event", ""))
+	var current := _button(actions, "● 現在の設定" if event_id.is_empty() else "現在の設定に戻る", "AiCurrentPolicy", _show_event.bind("", d))
+	current.disabled = event_id.is_empty()
+	var probe := _button(actions, "範囲外要求を試験 · 2分", "AiBoundaryProbe", _send.bind(d, "probe_boundaries"))
+	var wait := _button(actions, "入力を3分待つ", "AiWait", _send.bind(d, "wait"))
+	probe.disabled = not event_id.is_empty(); wait.disabled = not event_id.is_empty()
 	_button(actions, "AI-301 承認票", "AiOpenApproval", U.choose.bind(d, KIND, "approval_open", not bool(U.state(d, KIND).get("approval_open", false))))
 	if bool(U.state(d, KIND).get("approval_open", false)):
 		_label(parent, "承認 AI-301  /  FAQ・配送進捗 → 要約6件 → 社内問い合わせ受付", 14, TEAL)
@@ -129,21 +133,29 @@ static func _wiring(d, parent: Node, n: Dictionary) -> void:
 			_button(approval_row, "前回 " + str(original.get("data", {}).get("approved_change", "")) + " / 委託先送付", "AiPriorApproval", _open.bind(d, str(prior.get("id", ""))))
 		_label(approval_row, "→", 18, MUTED)
 		_button(approval_row, "今回 AI-301 / 社内要約", "AiCurrentApproval", _open.bind(d, "AI-301"))
-	var observations := U.row(parent)
-	_measurement(d, observations, n, "boundary_read", "顧客連絡先")
-	_measurement(d, observations, n, "boundary_write", "外部送付")
-	_measurement(d, observations, n, "run_business", "問い合わせ")
 	_raw(d, parent, n)
 	var graph := Diagram.new(); parent.add_child(graph)
-	graph.configure(n, float(d.game.settings.get("text_scale", 1.0)), _policy.bind(d))
-	var events := U.row(parent)
-	for event in n.get("schedule", []):
-		var status := str(event.get("status", "scheduled"))
-		_label(events, "%s %d分 · %s" % ["◇" if status == "scheduled" else "↑" if int(event.get("row_count", 0)) > 0 else "×", int(event.get("due_minute", 0)), "入力待ち" if status == "scheduled" else "%d行 送出" % int(event.get("row_count", 0)) if int(event.get("row_count", 0)) > 0 else "範囲外要求を拒否"], 13, MUTED)
+	graph.configure(n, float(d.game.settings.get("text_scale", 1.0)), _policy.bind(d), _diagram_record.bind(d), event_id)
+	var observations := U.row(parent)
+	_measurement(d, observations, n, "boundary_read", "参照試験")
+	_measurement(d, observations, n, "boundary_write", "送付試験")
+	_measurement(d, observations, n, "run_business", "業務実行")
+
+static func _show_event(id: String, d) -> void:
+	var state := U.state(d, KIND)
+	state.tab = "wiring"; state.open_record = ""
+	d.widgets.advanced.next_scroll = 0
+	U.choose(d, KIND, "flow_event", id)
+
+static func _diagram_record(id: String, d) -> void:
+	_open(d, id)
+
+static func _timeline(d, parent: Node, n: Dictionary) -> void:
+	var timeline := Timeline.new(); parent.add_child(timeline)
+	timeline.configure(n.get("flow", {}), float(d.game.settings.get("text_scale", 1.0)), str(U.state(d, KIND).get("flow_event", "")), _show_event.bind(d), U.choose.bind(d, KIND, "tab", "desk"))
 
 static func _desk(d, parent: Node, n: Dictionary) -> void:
-	_band(parent, "HOKUTO / 問い合わせ受付", Color("3c6276"))
-	_clock(parent, n)
+	_timeline(d, parent, n)
 	var business: Dictionary = n.get("business", {})
 	var row := U.row(parent)
 	var receipt := str(business.get("receipt_id", ""))
