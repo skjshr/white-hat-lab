@@ -84,7 +84,7 @@ static func _candidate(state: Dictionary, client: String, family: String, source
 	var choices: Array = []
 	for item in CATALOG.all():
 		if not item is Dictionary: continue
-		if str(item.get("client", "")) != client or bool(item.get("retired_from_new_offers", false)) or bool(item.get("hotel_recovery_only", false)): continue
+		if str(item.get("client", "")) != client or bool(item.get("retired_from_new_offers", false)) or bool(item.get("hotel_recovery_only", false)) or bool(item.get("saas_watch_only", false)): continue
 		var id := str(item.get("id", ""))
 		if id.is_empty() or id == source_id or completed.has(id): continue
 		if str(item.get("work_family", "")) == family: continue

@@ -191,4 +191,4 @@ func _invoice() -> void:
 	var stamp:=Rect2(Vector2(maxf(24*factor,size.x-224*factor),208*factor),Vector2(minf(196*factor,size.x-48*factor),52*factor))
 	draw_rect(stamp,GREEN if accepted else RED if int(model.get("status",0))>=400 else LINE,false,2*factor)
 	_text(self,"✓ 顧客受付" if accepted else "× %d 未受付" % int(model.get("status",0)) if int(model.get("status",0))>=400 else "未送信",stamp.position+Vector2(10,21)*factor,14,GREEN if accepted else RED if int(model.get("status",0))>=400 else MUTED)
-	_text(self,receipt if accepted else "BILL-001",stamp.position+Vector2(10,42)*factor,11,INK,stamp.size.x-20*factor)
+	_text(self,receipt if accepted else str(model.get("id","")),stamp.position+Vector2(10,42)*factor,11,INK,stamp.size.x-20*factor)

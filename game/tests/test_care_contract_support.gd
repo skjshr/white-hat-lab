@@ -47,7 +47,18 @@ func run() -> void:
 		var offer: Dictionary = {}
 		for candidate in g.state.offers:
 			if str(candidate.get("case_id", ""))==id: offer=candidate;break
-		check(not offer.is_empty() and not str(g.contract_quote(offer).reason).is_empty(), id + " quote explains exclusion")
+		if bool(definition.get("saas_watch_only", false)):
+			check(offer.is_empty(), id + " requires a previous delivery and is absent from the initial market")
+			# Quote the catalog scope without fabricating an earned alert or
+			# inserting an offer. Catalog targets are specs, quote targets a count.
+			var scope: Dictionary = definition.duplicate(true)
+			scope.case_id = id
+			scope.target_specs = definition.get("targets", []).duplicate(true)
+			scope.targets = scope.target_specs.size()
+			var quote: Dictionary = g.contract_quote(scope, 0)
+			check(str(quote.selected_plan) == "care" and str(quote.reason) == SUPPORT.REASON, id + " quote explicitly rejects unsupported care even within budget")
+		else:
+			check(not offer.is_empty() and not str(g.contract_quote(offer).reason).is_empty(), id + " quote explains exclusion")
 	var before := JSON.stringify(g.state)
 	check(not g.choose_contract(str(portal_offer(g).id)), "new unsupported care rejected")
 	check(JSON.stringify(g.state)==before, "rejected care creates no reservation or decline")

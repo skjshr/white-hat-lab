@@ -1314,8 +1314,8 @@ func _company() -> void:
 	_maintenance_ui_signature = _maintenance_signature(g)
 	_operating_ui_signature = _operating_signature(g)
 	var view := str(get_meta("company_view", "overview"))
-	var nav := HBoxContainer.new(); nav.name = "CompanyViews"; nav.add_theme_constant_override("separation", 12); modal_body.add_child(nav)
-	for spec in [["overview", UI.copy("rmd_overview")], ["growth", UI.copy("v220_growth")], ["care", "顧客保守"]]:
+	var nav := HFlowContainer.new(); nav.name = "CompanyViews"; nav.add_theme_constant_override("h_separation", 12); nav.add_theme_constant_override("v_separation", 4); modal_body.add_child(nav)
+	for spec in [["overview", UI.copy("rmd_overview")], ["growth", UI.copy("v220_growth")], ["care", "顧客保守"], ["saas_watch", "SaaS監視"]]:
 		var tab := _button(str(spec[1]), _select_company_view.bind(str(spec[0])))
 		tab.name = "CompanyView_" + str(spec[0]); M.button(tab, "tab", view == str(spec[0])); nav.add_child(tab)
 	var spacer := Control.new(); spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL; nav.add_child(spacer)
@@ -1326,6 +1326,7 @@ func _company() -> void:
 	match view:
 		"growth": _company_growth(g)
 		"care": _company_care(g)
+		"saas_watch": preload("res://scripts/company_saas_watch_panel.gd").build(self, g)
 		_:
 			preload("res://scripts/company_cycle_panel.gd").build(self, g)
 			_company_operating_desk(g, g.company_operating_summary())

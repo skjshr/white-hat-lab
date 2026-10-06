@@ -371,7 +371,7 @@
     "saas_check_report": "両連携の申請と監査原本を報告する",
     "saas_check_controls": "対象連携の同意と発行済み接続を取り消す",
     "saas_check_denial": "現在の設定で対象接続の取得拒否を実測する",
-    "saas_check_invoice": "現在の設定で請求BILL-001の受付を確認する",
+    "saas_check_invoice": "現在の設定で対象請求の受付を確認する",
     "saas_check_audit": "同期と持出しの監査記録を保全する"
   }
 }

@@ -53,7 +53,7 @@ static func _unsupported_reason(game) -> String:
 	var case_id := str(contract.get("case_id", ""))
 	var definition := CASES.by_id(case_id)
 	if case_id.is_empty() or definition.is_empty(): return "通常案件として確認できないため中止できません。"
-	if case_id != "advanced-saas-response" and (bool(definition.get("advanced_work_minutes", 0)) or case_id.begins_with("advanced-") or case_id.begins_with("composite-")):
+	if case_id not in ["advanced-saas-response", "advanced-saas-watch"] and (bool(definition.get("advanced_work_minutes", 0)) or case_id.begins_with("advanced-") or case_id.begins_with("composite-")):
 		return "専門・複合案件はこの中止手順の対象外です。"
 	var requirement: Variant = contract.get("supply_requirement", definition.get("supply_requirement", {}))
 	if requirement is Dictionary and not requirement.is_empty(): return "設備・資材を伴う案件は専用の注文手順で処理してください。"
@@ -130,6 +130,8 @@ static func cancel(game) -> bool:
 	if not endpoint_impact.is_empty(): record.endpoint_impact = endpoint_impact.duplicate(true)
 	var saas_outcome: Dictionary = game._saas_outcome()
 	if not saas_outcome.is_empty(): record.saas_outcome = saas_outcome.duplicate(true)
+	if str(state.contract.get("case_id", "")) == "advanced-saas-watch":
+		preload("res://scripts/company_saas_watch.gd").finish(state, str(state.contract.get("saas_watch_source_contract_id", "")), id, true)
 	state.contract_closeouts[id] = {"kind":"cancellation","id":id,"day":day,"context":saved_context,"vm_states":archive_vm,"record":record.duplicate(true)}
 	state.cash = int(state.get("cash", 0)) - costs
 	state.profit = int(state.get("profit", 0)) - costs

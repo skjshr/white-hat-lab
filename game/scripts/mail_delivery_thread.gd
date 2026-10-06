@@ -27,7 +27,7 @@ static func project(state: Dictionary, record: Dictionary) -> Dictionary:
 	if confirmed:
 		reply.body = "対応内容の受取を確認しました。"
 		var saas: Dictionary = own.get("saas_outcome", {})
-		if str(reply.case_id) == "advanced-saas-response" and not saas.is_empty():
+		if str(reply.case_id) in ["advanced-saas-response", "advanced-saas-watch"] and not saas.is_empty():
 			var lost: int = saas.get("egress", {}).get("exported_rows", []).size()
 			var invoice: Dictionary = saas.get("invoice", {})
 			reply.body = "連携の同意と発行済み接続の取消、既存接続からの取得拒否を確認しました。"

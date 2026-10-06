@@ -103,3 +103,10 @@ Godot --path game --script res://tests/test_service_monitor_ui.gd -- --qa-profil
 **実装済み：記録整理の模擬AI。** Lv3かつ調査復旧Lv1の会社が任意購入できる。購入は架空の会社資金¥3,000、助手の1回実行は¥300・2分。手動整理は無料・5分。同じ記録IDの組み合わせを再表示しても追加費用・時間は発生しない。助手は画面で選んだ取得済み記録だけを時系列整理し、未取得情報や新しい証拠を生成せず、設定変更・請求受付・自律対応も行わない。外部AIやネットワークサービスを呼ばず、学習・追加課金もない。金額・技能条件・結果はシミュレーション上の会社運営用である。
 
 **今後の調査：AIの実行権限。** [MandiantのAI特別報告](https://cloud.google.com/security/resources/ai-risk-and-resilience-2026)（2026年9月公開、2026年の現場事例を含む）と[Security Copilotの能力・制約](https://learn.microsoft.com/en-us/copilot/security/security-copilot-application-card-agents)（2026-08-09更新）を参考に、将来の対応助手に読取範囲・実行権限・消費上限を持たせ、停止時に履歴を保全して限定再試行できる構成を調査する。[公式の容量課金方式](https://learn.microsoft.com/en-us/copilot/security/faq-security-copilot)は経営上の比較の参考にとどめる。自律的な設定変更・封じ込め・顧客対応や実サービス連携は未実装。
+
+
+## 2026-10-06 SaaS監視の次営業日への接続
+
+**実装済み：納品後のSaaS監視から翌日の緊急案件まで。** 前回納品の承認原本とDAY2の新しい未承認連携を比較し、通常請求を復旧しながらアクセスを封じ込める。2,400円の一回限りの設備投資で同期前に警報を出す経路と、未導入で顧客通報が9分遅れ、調査中に3コピーが流出する経路を通常見積・受注から実プレイした。導入側は同じ請求を再確認して5/5受入、流出0で納品。設備導入・警報・完了/中止は保存されるが、継続保守契約や無限の毎日案件・収入は作らない。費用、時間、顧客、外部連携、データコピーはゲーム内の架空値・模擬データで、実サービスへ接続しない。詳細な操作・経営結果と検証限界は [`gameplay-cycle.md`](gameplay-cycle.md) の本サイクル記録を参照。
+
+**今後の調査：認証と実データ取得の相関。** [MicrosoftのOAuth連携悪用報告](https://www.microsoft.com/en-us/security/blog/2026/07/13/defending-saas-based-applications-against-shinyhunters-oauth-abuse/)（2026-07-13公開、2025年半ば〜2026年半ばの観測）と[クラウド侵入報告](https://www.microsoft.com/en-us/security/blog/2026/09/09/passkey-themed-social-engineering-leads-identity-cloud-compromise/)（2026-09-09公開、同年5月以降の活動）を参考に、承認変更だけを侵害の証明とせず、認証成功と実際のデータ取得を結び付けて調査する題材を検討する。MFA登録や複数クラウドの相関調査は未実装であり、次の優先候補とする。

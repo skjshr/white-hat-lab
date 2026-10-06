@@ -7,6 +7,39 @@ const INK=Color("242a30")
 const MUTED=Color("68747e")
 const PURPLE=Color("714b67")
 
+class WatchSourceLink extends Control:
+	var factor := 1.0
+	var day := 0
+	var threat := ""
+	var archive: Button
+	var current: Button
+
+	func setup(scale: float, source_day: int, threat_id: String, open_source: Callable, select_app: Callable) -> void:
+		name = "SaasWatchSourceLink"; factor = scale; day = source_day; threat = threat_id
+		custom_minimum_size.y = 45 * factor; size_flags_horizontal = Control.SIZE_EXPAND_FILL; mouse_filter = Control.MOUSE_FILTER_IGNORE
+		archive = Button.new(); archive.name = "SaasOpenWatchSource"; archive.text = "▤ DAY %02d · 前回の申請原本" % day; archive.pressed.connect(open_source)
+		current = Button.new(); current.name = "SaasSelectWatchApp"; current.text = "◇ 今回 " + threat; current.pressed.connect(select_app)
+		for button in [archive, current]:
+			for state in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]: button.add_theme_color_override(state, MUTED)
+			for state in ["normal", "hover", "pressed"]: button.add_theme_stylebox_override(state, UI.style(Color("f4f1e8") if button == archive else Color("edf3f6"), Color.TRANSPARENT, 7, 5, 2))
+			button.add_theme_stylebox_override("focus", UI.style(Color.TRANSPARENT, Color("176dae"), 0, 0, 2))
+			button.add_theme_font_size_override("font_size", int(13 * factor)); add_child(button)
+		resized.connect(_layout); _layout.call_deferred()
+
+	func _layout() -> void:
+		if size.x <= 0: return
+		var archive_width := minf(255 * factor, size.x * .57)
+		archive.position = Vector2.ZERO; archive.size = Vector2(archive_width, 36 * factor)
+		current.position = Vector2(archive_width + 26 * factor, 0); current.size = Vector2(maxf(0, size.x - current.position.x), 36 * factor)
+		queue_redraw()
+
+	func _draw() -> void:
+		if archive == null or current == null: return
+		var start := Vector2(archive.position.x + archive.size.x + 3 * factor, 18 * factor)
+		var end := Vector2(current.position.x - 4 * factor, start.y)
+		draw_dashed_line(start, end, MUTED, factor, 3 * factor)
+		draw_polyline(PackedVector2Array([end - Vector2(4, 3) * factor, end, end - Vector2(4, -3) * factor]), MUTED, factor)
+
 static func build(d,parent:VBoxContainer) -> void:
 	U.mount(d,parent,KIND,"SaaS Response / 連携アクセス対応")
 	refresh(d)
@@ -80,6 +113,7 @@ static func _clock(parent:Node,n:Dictionary) -> void:
 static func _identity(d,parent:Node,n:Dictionary) -> void:
 	var body:=_surface(parent,"IDENTITY / 連携アクセス",Color("252a2e"));var s:=U.state(d,KIND)
 	_clock(body,n)
+	_watch_source(d,body,n)
 	var selected_id:=str(s.get("selected_app",""));var app:=_app(n,selected_id)
 	var global:=U.row(body)
 	_button(global,"監査記録を取得 · 2分","SaasCollectAudit",_send.bind(d,"collect_audit"))
@@ -124,6 +158,15 @@ static func _identity(d,parent:Node,n:Dictionary) -> void:
 		var button:=_button(sync,"%s %d分 · %s" % [marker,int(item.get("due_minute",0)),"予定" if state=="scheduled" else "拒否" if state=="blocked" else "%d行" % int(item.get("row_count",0))],"SaasSync_"+str(item.get("id","")),_open.bind(d,str(item.get("record_id",""))))
 		button.disabled=str(item.get("record_id","")).is_empty()
 
+static func _watch_source(d,parent:Node,n:Dictionary) -> void:
+	var source: Dictionary = n.get("watch_source", {})
+	if source.is_empty(): return
+	var s := U.state(d, KIND); var threat := str(n.get("threat_app_id", ""))
+	var link := WatchSourceLink.new(); parent.add_child(link)
+	link.setup(float(d.game.settings.get("text_scale", 1.0)), int(source.get("source_day", 0)), threat, U.choose.bind(d, KIND, "show_watch_source", not bool(s.get("show_watch_source", false))), _select.bind(threat, "app", d))
+	if not bool(s.get("show_watch_source", false)): return
+	preload("res://scripts/company_saas_watch_panel.gd").render_originals(parent, source.get("approved_originals", []), int(source.get("source_day", 0)), float(d.game.settings.get("text_scale", 1.0)), "SaasWatchSource")
+
 static func _response(parent:Node,d,n:Dictionary,record:Dictionary) -> void:
 	var row:=U.row(parent);var fresh:=int(record.get("world_revision",-1))==int(n.get("world_revision",0));var code:=int(record.get("status",0))
 	_label(row,("" if fresh else "過去 ")+("✓ " if code==200 else "× ")+str(code)+" · "+str(record.get("id","")),15,MUTED if not fresh else UI.GREEN if code==200 else UI.RED)
@@ -136,7 +179,9 @@ static func _open(d,id:String) -> void:
 static func _raw(d,parent:Node,n:Dictionary) -> void:
 	var found:=_record(n,str(U.state(d,KIND).get("open_record","")))
 	if found.is_empty():return
-	var heading:=U.row(parent);_label(heading,"原記録 "+str(found.get("id",""))+" · %d分 / %d" % [int(found.get("minute",0)),int(found.get("status",0))],14)
+	var reference := str(found.get("action", "")) == "baseline_reference"
+	var location := "過去 · DAY %02d" % int(found.get("data", {}).get("source_day", 0)) if reference else "%d分 / %d" % [int(found.get("minute",0)),int(found.get("status",0))]
+	var heading:=U.row(parent);_label(heading,"原記録 "+str(found.get("id",""))+" · "+location,14)
 	_button(heading,"閉じる","SaasCloseRecord",U.choose.bind(d,KIND,"open_record",""))
 	var raw:=TextEdit.new();raw.name="SaasRawRecord";raw.editable=false;raw.text=JSON.stringify(found,"\t")
 	raw.custom_minimum_size.y=150*float(d.game.settings.get("text_scale",1.0));raw.wrap_mode=TextEdit.LINE_WRAPPING_BOUNDARY;U.text_style(raw);parent.add_child(raw)
@@ -150,7 +195,7 @@ static func _billing(d,parent:Node,n:Dictionary) -> void:
 	_button(actions,"連携アクセスへ","SaasBillingOpenIdentity",_billing_identity.bind(d))
 	_raw(d,body,n)
 	var app:=_app(n,"app-19");var route:=U.row(body)
-	_label(route,"BILL-001 → app-19 → 顧客受付",13,PURPLE)
+	_label(route,str(invoice.get("id",""))+" → app-19 → 顧客受付",13,PURPLE)
 	_label(route,"同意 "+("✓" if bool(app.get("consent",{}).get("enabled",false)) else "×")+"  接続 "+("✓" if bool(app.get("session",{}).get("active",false)) else "×"),12,MUTED)
 	if not last.is_empty():_response(body,d,n,last)
 	var canvas:=Canvas.new();body.add_child(canvas)
@@ -162,7 +207,7 @@ static func _billing_identity(d) -> void:
 
 static func _record_label(record:Dictionary) -> String:
 	var action:=str(record.get("action",""))
-	return str({"consent_review":"申請原本","inspect_app":"アプリ調査","collect_audit":"監査取得","probe_session":"接続実測","change_consent":"同意変更","change_session":"接続変更","session_reissued_by_sync":"同期で再発行","scheduled_export":"外部同期","password_reset":"パスワード更新","submit_invoice":"顧客請求","organize_manual":"手動整理","organize_assistant":"助手による整理","submit_report":"報告提出"}.get(action,action))
+	return str({"baseline_reference":"前回の申請原本","consent_review":"申請原本","inspect_app":"アプリ調査","collect_audit":"監査取得","probe_session":"接続実測","change_consent":"同意変更","change_session":"接続変更","session_reissued_by_sync":"同期で再発行","scheduled_export":"外部同期","password_reset":"パスワード更新","submit_invoice":"顧客請求","organize_manual":"手動整理","organize_assistant":"助手による整理","submit_report":"報告提出"}.get(action,action))
 
 static func _records(d,parent:Node,n:Dictionary,checks:Array) -> void:
 	var body:=_surface(parent,"調査ノート / 原記録と時系列",Color("3d5655"));var s:=U.state(d,KIND)
@@ -219,10 +264,17 @@ static func _source_records(records:Array) -> Array:
 
 static func _organized_rails(d,parent:Node,n:Dictionary,sources:Array,ids:Array) -> void:
 	var lanes:Array=[]
+	var prior: HFlowContainer
+	for record in sources:
+		if str(record.get("id", "")) not in ids or str(record.get("action", "")) != "baseline_reference": continue
+		if prior == null:
+			prior = U.row(parent); _label(prior, "▤ 過去の申請原本 · DAY %02d" % int(record.get("data", {}).get("source_day", 0)), 13, MUTED)
+		_button(prior, str(record.get("app", ""))+" · "+str(record.get("data", {}).get("source_record_id", "")), "SaasOrganized_"+str(record.get("id", "")), _open.bind(d, str(record.get("id", ""))))
 	for app in n.get("apps",[]):lanes.append({"id":str(app.get("id","")),"label":str(app.get("id",""))+" / "+str(app.get("label","")),"events":[]})
 	lanes.append({"id":"","label":"共通 / 利用者と監査原本","events":[]})
 	for record in sources:
 		if not str(record.get("id","")) in ids:continue
+		if str(record.get("action", "")) == "baseline_reference": continue
 		for lane in lanes:
 			if str(lane.id)!=str(record.get("app","")):continue
 			var label:=_record_label(record)
@@ -239,6 +291,7 @@ static func _open_organized(id:String,_part:String,d) -> void:
 	_open(d,id)
 static func _timeline_row(d,parent:Node,record:Dictionary,selectable:bool,ids:Array) -> void:
 	var row:=U.row(parent);var id:=str(record.get("id",""));var code:=int(record.get("status",0))
+	var reference := str(record.get("action", "")) == "baseline_reference"
 	if selectable:
 		var check:=CheckBox.new();check.name="SaasRecordSelect_"+id;check.text="";check.tooltip_text="整理・報告に含める / "+id;check.button_pressed=id in ids;check.disabled=ids.size()>=32 and not id in ids;_light(check);row.add_child(check)
 		check.toggled.connect(func(value):
@@ -246,16 +299,16 @@ static func _timeline_row(d,parent:Node,record:Dictionary,selectable:bool,ids:Ar
 			if value and not id in chosen:chosen.append(id)
 			elif not value:chosen.erase(id)
 			s.record_ids=chosen;d._save_session(false);d._refresh_advanced.call_deferred())
-	_label(row,"│ %02d分" % int(record.get("minute",0)),12,MUTED)
+	_label(row,"▤ 過去 DAY %02d" % int(record.get("data", {}).get("source_day", 0)) if reference else "│ %02d分" % int(record.get("minute",0)),12,MUTED)
 	_button(row,_record_label(record)+" · "+id,("SaasRecord_" if selectable else "SaasOrganized_")+id,_open.bind(d,id))
-	_label(row,str(record.get("app",""))+" "+("✓ " if code==200 else "× ")+str(code),12,UI.RED if code>=400 else MUTED)
+	_label(row,str(record.get("app",""))+ (" · 保存原本" if reference else " "+("✓ " if code==200 else "× ")+str(code)),12,UI.RED if code>=400 and not reference else MUTED)
 	if str(record.get("action",""))=="scheduled_export":_label(row,"%d行" % record.get("data",{}).get("row_ids",[]).size(),12,UI.RED if code==200 else MUTED)
 
 static func _select_records(d,records:Array) -> void:
 	var chosen:Array=[];var audit:=""
 	for record in records:
 		var id:=str(record.get("id",""))
-		if id in ["audit-1","audit-2"]:chosen.append(id)
+		if id in ["audit-1","audit-2"] or str(record.get("action", "")) == "baseline_reference":chosen.append(id)
 		if str(record.get("action",""))=="collect_audit":audit=id
 	if not audit.is_empty() and not audit in chosen:chosen.append(audit)
 	for index in range(records.size()-1,-1,-1):

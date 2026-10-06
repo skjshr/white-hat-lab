@@ -23,6 +23,7 @@ const BUSINESS_DATA = preload("res://scripts/business_workspace.gd")
 const HOTEL_FRONTDESK = preload("res://scripts/hotel_frontdesk_model.gd")
 const HOTEL_RECOVERY = preload("res://scripts/hotel_recovery.gd")
 const HOTEL_HANDOFF = preload("res://scripts/hotel_handoff.gd")
+const SAAS_WATCH = preload("res://scripts/company_saas_watch.gd")
 const BUSINESS_START_MINUTE := 9 * 60
 const BUSINESS_END_MINUTE := 18 * 60
 const DELIVERY_WAIT_SECONDS := 30.0
@@ -545,6 +546,7 @@ func _valid_state(candidate: Dictionary) -> bool:
 			if not order is Dictionary or str(order.get("id", "")).is_empty(): return false
 	if candidate.has("customer_stock") and not CUSTOMER_STOCK.validate(candidate.customer_stock): return false
 	if candidate.has("company_cycle") and not COMPANY_CYCLE.validate(candidate.company_cycle): return false
+	if candidate.has("saas_watch") and not SAAS_WATCH.validate(candidate.saas_watch): return false
 	if candidate.has("contract_closeouts") and not CAREER_CLOSEOUT.validate(candidate.contract_closeouts): return false
 	if candidate.has("credit_loss") and (typeof(candidate.credit_loss) not in [TYPE_INT, TYPE_FLOAT] or not is_finite(float(candidate.credit_loss)) or float(candidate.credit_loss) < 0.0 or float(candidate.credit_loss) != floorf(float(candidate.credit_loss))): return false
 	if candidate.has("pricing_policy") and not _valid_pricing_policy(candidate.pricing_policy): return false
@@ -1124,7 +1126,7 @@ func rollback_configuration() -> bool:
 func case_review() -> Dictionary:
 	if str(state.get("contract", {}).get("case_id", "")) == "advanced-portal" and advanced_active():
 		return _portal_case_review()
-	if str(state.get("contract", {}).get("case_id", "")) == "advanced-saas-response" and advanced_active():
+	if str(state.get("contract", {}).get("case_id", "")) in ["advanced-saas-response", "advanced-saas-watch"] and advanced_active():
 		return _saas_case_review()
 	var total := maxi(1, state.get("targets", []).size())
 	var recorded_sites := 0
@@ -1534,16 +1536,28 @@ func record_assistant_status() -> Dictionary:
 func buy_record_assistant() -> bool:
 	return preload("res://scripts/company_record_assistant.gd").purchase(self)
 
+func saas_watch_status() -> Dictionary:
+	return SAAS_WATCH.status(self)
+
+func enroll_saas_watch() -> bool:
+	return SAAS_WATCH.enroll(self)
+
+func saas_watch_offer() -> Dictionary:
+	for offer in state.get("offers", []):
+		if str(offer.get("case_id", "")) == "advanced-saas-watch" and bool(offer.get("market_available", false)):
+			return offer.duplicate(true)
+	return {}
+
 func incident_active() -> bool:
 	return advanced_active() and str(state.advanced.get("kind", "")) == "advanced-portal" and bool(state.advanced.get("exercise", {}).get("active", false))
 
 func _advanced_case_id(case_id: String) -> bool:
-	return case_id in ["advanced-hunt","advanced-pentest","advanced-pentest-relay","advanced-recovery","advanced-ddos","advanced-api","advanced-supplychain","advanced-cloud","advanced-saas-response","advanced-malware","advanced-detection","advanced-portal"]
+	return case_id in ["advanced-hunt","advanced-pentest","advanced-pentest-relay","advanced-recovery","advanced-ddos","advanced-api","advanced-supplychain","advanced-cloud","advanced-saas-response","advanced-saas-watch","advanced-malware","advanced-detection","advanced-portal"]
 
 func _advanced_engine(case_id: String = ""):
 	var id := case_id if not case_id.is_empty() else str(state.get("contract", {}).get("case_id", ""))
 	if id == "advanced-portal": return load("res://scripts/pentest_portal.gd")
-	if id == "advanced-saas-response": return load("res://scripts/saas_response.gd")
+	if id in ["advanced-saas-response", "advanced-saas-watch"]: return load("res://scripts/saas_response.gd")
 	if id in ["advanced-cloud","advanced-malware","advanced-detection"]: return load("res://scripts/advanced_threats.gd")
 	if id in ["advanced-ddos","advanced-api","advanced-supplychain"]: return load("res://scripts/advanced_assurance.gd")
 	return load("res://scripts/advanced_operations.gd")
@@ -1652,7 +1666,7 @@ func _saas_outcome() -> Dictionary:
 	var model: Dictionary = state.get("advanced", {})
 	if str(model.get("kind", "")) != "advanced-saas-response": return {}
 	var outcome := {"costs":state.work.get("saas_costs", {}).duplicate(true)}
-	for key in ["model_version", "elapsed_minutes", "egress", "invoice", "report", "records", "organization"]:
+	for key in ["model_version", "elapsed_minutes", "egress", "invoice", "report", "records", "organization", "watch_source", "threat_app_id"]:
 		if model.has(key): outcome[key] = model[key].duplicate(true) if model[key] is Dictionary or model[key] is Array else model[key]
 	return outcome
 
@@ -2448,6 +2462,8 @@ func continue_business() -> bool:
 func _make_offers(previous_skills: Dictionary = {}) -> void:
 	var new_market_day := int(state.get("market_day", -1)) != int(state.day)
 	if new_market_day: COMPANY_CYCLE.refresh_hotel_recoveries(state, int(state.day))
+	if new_market_day: SAAS_WATCH.refresh(state, int(state.day))
+	var saas_incidents: Array = SAAS_WATCH.available(state, int(state.day))
 	var hotel_recoveries: Array = COMPANY_CYCLE.hotel_recovery_available(state, int(state.day))
 	# Refreshing the same day's board must not replace previously offered terms.
 	# Only a new offer ID receives a newly authored containment scenario.
@@ -2458,6 +2474,7 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 	state.offers = []
 	var level := int(company_level().level)
 	for selected in CASES.all():
+		if str(selected.id) == "advanced-saas-watch" and saas_incidents.is_empty(): continue
 		if str(selected.id) == BRANCH_HANDOFF.CASE_ID and not BRANCH_HANDOFF.available(state): continue
 		if HOTEL_HANDOFF.is_case(str(selected.id)) and hotel_recoveries.is_empty(): continue
 		var tier := int(selected.tier)
@@ -2480,6 +2497,11 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 		var supply_cost := int(CUSTOMER_STOCK.product(str(supply_requirement.get("sku",CUSTOMER_STOCK.SKU))).get("unit_cost",CUSTOMER_STOCK.UNIT_COST)) if not supply_requirement.is_empty() else 0
 		state.offers.append({"id":"career-%d-%s" % [state.day,selected.id],"case_id":selected.id,"chapter":selected.chapter,"title":selected.title,"client":selected.client,"brief":selected.brief,"service":selected.service,"category":category,"grade":tier,"targets":sites,"target_specs":target_specs.duplicate(true),"reward":reward,"base_reward":reward,"required_credit":0,"required_level":needed_level,"required_rank":required_rank,"required_skills":required_skills,"work_family":str(selected.get("work_family","chapter-"+str(selected.chapter))),"supply_requirement":supply_requirement,"estimated_cost":700+supply_cost,"estimated_budget":estimated_budget,"deadline_text":_clock_text(BUSINESS_START_MINUTE+estimated_budget),"unlocked":_case_skills_met(selected,state.skills) and level>=needed_level,"market_available":false,"market_day":int(state.day),"retired_from_new_offers":bool(selected.get("retired_from_new_offers",false))})
 		state.offers[-1].advanced_work_minutes = int(selected.get("advanced_work_minutes", 0))
+		if str(selected.id) == "advanced-saas-watch":
+			var incident: Dictionary = saas_incidents[0]
+			state.offers[-1].saas_watch_source_contract_id = str(incident.source_contract_id)
+			state.offers[-1].saas_watch_payload = incident.payload.duplicate(true)
+			state.offers[-1].retired_from_new_offers = false
 		if HOTEL_HANDOFF.is_case(str(selected.id)):
 			var recovery: Dictionary = hotel_recoveries[0]
 			state.offers[-1].hotel_recovery_source_contract_id = str(recovery.source_contract_id)
@@ -2630,6 +2652,7 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 	protected_leads.append_array(carried_cases)
 	var relationship_priorities: Array = COMPANY_CYCLE.priority_case_ids(self); relationship_priorities.append_array(recovery_cases)
 	if not hotel_recoveries.is_empty(): relationship_priorities.push_front(HOTEL_HANDOFF.CASE_ID)
+	if not saas_incidents.is_empty(): relationship_priorities.push_front("advanced-saas-watch")
 	state.market_leads = MARKET_DEMAND.prioritize_relationships(candidate_offers, state.market_leads, relationship_priorities, protected_leads, int(state.day))
 	state.market_day=int(state.day)
 	var lead_set: Dictionary = {}
@@ -2819,6 +2842,8 @@ func choose_contract(id: String) -> bool:
 			if HOTEL_HANDOFF.is_case(str(offer.get("case_id", ""))) and not COMPANY_CYCLE.mark_hotel_recovery_working(state, str(offer.get("hotel_recovery_source_contract_id", "")), id, int(state.day)):
 				state = previous_state; _assignments = previous_assignments; _machine = previous_machine; _machine_key = previous_machine_key; return false
 			state.chapter = int(offer.chapter); state.current_contract_id = id; state.awaiting_contract = false
+			if str(offer.get("case_id", "")) == "advanced-saas-watch" and not SAAS_WATCH.accept(state, str(offer.get("saas_watch_source_contract_id", "")), id):
+				state = previous_state; _assignments = previous_assignments; _machine = previous_machine; _machine_key = previous_machine_key; return false
 			state.contract = offer.duplicate(true); state.contract.agreed_fee = quoted_fee; state.contract.agreed_budget = float(quote.budget); state.contract.reference_fee = int(quote.reference_fee); state.contract.budget_limit = int(quote.budget_limit); state.contract.market_label = str(quote.market_label); state.contract.price_reaction = str(quote.price_reaction); state.targets = []; state.target_index = 0
 			state.contract.billing_version = 1; state.contract.payment_days = int(BILLING.terms(offer).days)
 			var specs: Array = offer.get("target_specs", [])
@@ -2833,6 +2858,10 @@ func choose_contract(id: String) -> bool:
 				state.targets[0].scenario = handoff_scenario
 				if handoff_scenario.has("handoff"): state.contract.handoff = handoff_scenario.handoff.duplicate(true)
 			state.advanced = _advanced_engine(selected_case_id).create(selected_case_id) if _advanced_case_id(selected_case_id) else {}
+			if selected_case_id == "advanced-saas-watch":
+				state.advanced = _advanced_engine(selected_case_id).create_followup(offer.get("saas_watch_payload", {}))
+				if state.advanced.is_empty():
+					state = previous_state; _assignments = previous_assignments; _machine = previous_machine; _machine_key = previous_machine_key; return false
 			if not state.advanced.is_empty(): state.targets[0].advanced = state.advanced.duplicate(true)
 			_prepare_linked_identity_contract()
 			_prepare_linked_business_contract()
@@ -3010,6 +3039,8 @@ func deliver() -> bool:
 	state.history[-1].request_mail = preload("res://scripts/mail_request_record.gd").capture(mission(),str(state.contract.get("case_id","")),str(mission().get("id","" )).begins_with("service-4-case-") and int(_vm().state.get("edr_model_version",1))>=2)
 	state.clients[id] = {"title":mission().title,"debrief":mission().debrief,"config":_vm().state.get("applied", {}).duplicate(true),"evidence":mission().evidence.duplicate(true),"checks":state.checks.duplicate(true)}
 	COMPANY_CYCLE.record_delivery(self, id, state.last_receipt)
+	if str(state.contract.get("case_id", "")) == "advanced-saas-watch":
+		SAAS_WATCH.finish(state, str(state.contract.get("saas_watch_source_contract_id", "")), id, false)
 	if state.get("career_mode", false): _sync_contract_context(); state.contract_contexts[id].completed = true; _make_offers()
 	if state.contract_plan == "care" and not captured_targets.is_empty():
 		MAINTENANCE_SCOPE.retain_delivery(self,client,captured_targets)

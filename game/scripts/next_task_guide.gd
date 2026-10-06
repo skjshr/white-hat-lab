@@ -181,6 +181,10 @@ static func _advanced(game) -> Dictionary:
 	if str(game.state.get("contract", {}).get("case_id", "")) == "advanced-portal":
 		return _portal(game)
 	var checks: Array = _array_call(game, "diagnostic_probes")
+	if str(game.state.get("advanced", {}).get("kind", "")) == "advanced-saas-response":
+		# Urgent containment and live business checks precede final paperwork.
+		var priority := ["controls", "denial", "invoice", "audit", "report"]
+		checks.sort_custom(func(a, b): return priority.find(str(a.get("id", ""))) < priority.find(str(b.get("id", ""))))
 	var failed: Dictionary = {}
 	for check in checks:
 		if not bool(check.get("passed", false)):

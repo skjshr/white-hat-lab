@@ -242,7 +242,7 @@ static func _finance(d, host: VBoxContainer, receipt: Dictionary) -> void:
 	var baseline := int(receipt.get("baseline_bonus", 0))
 	if baseline != 0:
 		var label := "証拠付き報告・再検証評価" if str(receipt.get("case_id", "")) == "advanced-portal" else UI.copy("billing_baseline_bonus")
-		if str(receipt.get("case_id", "")) == "advanced-saas-response": label = "流出予防ボーナス"
+		if str(receipt.get("case_id", "")) in ["advanced-saas-response", "advanced-saas-watch"]: label = "流出予防ボーナス"
 		_row(d, income, "ReceiptEvidenceBonus", label, baseline)
 	var material := int(receipt.get("material_cost", 0))
 	if bool(receipt.get("material_billable", false)) and material > 0: _row(d, income, "ReceiptMaterialBillable", UI.copy("receipt_hardware_sales"), material)
