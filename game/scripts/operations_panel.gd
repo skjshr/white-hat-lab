@@ -543,12 +543,13 @@ static func _ledger_int(ledger: Dictionary, keys: Array, fallback: int = 0) -> i
 static func _closeout_group(ui, host: Node, title: String, rows: Array, open: bool, name: String) -> void:
 	var group := VBoxContainer.new(); group.name = name; group.add_theme_constant_override("separation", 4); host.add_child(group)
 	var disclosure := Button.new(); disclosure.name = name + "Disclosure"; disclosure.text = ("▾  " if open else "▸  ") + title; disclosure.toggle_mode = true; disclosure.button_pressed = open; disclosure.alignment = HORIZONTAL_ALIGNMENT_LEFT; disclosure.custom_minimum_size.y = 32; group.add_child(disclosure); M.button(disclosure,"quiet")
-	var body := VBoxContainer.new(); body.name = name + "Rows"; body.visible = open; body.add_theme_constant_override("separation", 2); group.add_child(body)
+	var body := VBoxContainer.new(); body.name = name + "Rows"; body.visible = open; body.add_theme_constant_override("separation", 4); group.add_child(body)
 	for spec in rows:
 		if spec.size() > 1 and int(spec[1]) == 0: continue
-		var row := HBoxContainer.new(); row.add_theme_constant_override("separation", 8); body.add_child(row)
-		var key := label(ui, row, str(spec[0]), 14, M.MUTED); key.size_flags_horizontal = Control.SIZE_EXPAND_FILL; key.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		var amount := label(ui, row, "¥%d" % int(spec[1]), 15, M.INK); amount.name = name + "Value" + str(row.get_index()); amount.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT; amount.size_flags_horizontal = Control.SIZE_SHRINK_END; amount.autowrap_mode = TextServer.AUTOWRAP_OFF
+		var row := HFlowContainer.new(); row.add_theme_constant_override("h_separation", 12); row.add_theme_constant_override("v_separation", 2); body.add_child(row)
+		var key := label(ui, row, str(spec[0]), 14, M.MUTED); key.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN; key.autowrap_mode = TextServer.AUTOWRAP_OFF
+		var value: int = int(spec[1])
+		var amount := label(ui, row, preload("res://scripts/day_closeout_canvas.gd")._money(value), 15, M.WARNING if value < 0 else M.INK); amount.name = name + "Value" + str(row.get_index()); amount.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN; amount.autowrap_mode = TextServer.AUTOWRAP_OFF
 	disclosure.pressed.connect(func():
 		body.visible = disclosure.button_pressed
 		disclosure.text = ("▾  " if body.visible else "▸  ") + title
@@ -557,55 +558,45 @@ static func _closeout_group(ui, host: Node, title: String, rows: Array, open: bo
 static func closeout(ui, settled: bool) -> void:
 	var g=ui._game();var ledger: Dictionary=g.last_day_ledger() if settled else g.day_preview()
 	if ledger.is_empty():label(ui,ui.modal_body,COPY.copy("ops_no_receipt"));return
-	var cash_complete := bool(ledger.get("cash_flow_complete", false))
-	var cash_change := _ledger_int(ledger,["cash_change"], int(ledger.get("cash_after",0))-int(ledger.get("cash_open",ledger.get("cash_after",0))))
-	label(ui,ui.modal_body,COPY.copy("ops_settled_day" if settled else "ops_closing_day") % int(ledger.day),23,M.ACCENT)
-	var summary:=HBoxContainer.new();summary.name="CloseoutSummary";summary.size_flags_horizontal=Control.SIZE_EXPAND_FILL;summary.add_theme_constant_override("separation",18);ui.modal_body.add_child(summary)
-	var columns: Container=summary
-	var operating:=VBoxContainer.new();operating.name="CloseoutOperatingColumn";operating.size_flags_horizontal=Control.SIZE_EXPAND_FILL;columns.add_child(operating)
-	label(ui,operating,COPY.copy("ops_profit"),14,M.MUTED)
-	var profit:=label(ui,operating,"¥%d" % int(ledger.get("total_profit",0)),30,M.INK);profit.name="CloseoutProfit";profit.add_theme_font_override("font",COPY.font(600));profit.autowrap_mode=TextServer.AUTOWRAP_OFF
-	var operating_rows: Array = [[COPY.copy("ops_contract_net"),_ledger_int(ledger,["contract_net"])],[COPY.copy("ops_care_earned"),_ledger_int(ledger,["care_gross"])],[COPY.copy("ops_care_cost"),_ledger_int(ledger,["care_cost"])],[COPY.copy("ops_payroll"),_ledger_int(ledger,["payroll_due"])],[COPY.copy("ops_hiring"),_ledger_int(ledger,["hiring_cost"])]]
-	var cash:=VBoxContainer.new();cash.name="CloseoutCashColumn";cash.size_flags_horizontal=Control.SIZE_EXPAND_FILL;columns.add_child(cash)
-	label(ui,cash,COPY.copy("v220_cash_change" if cash_complete else "ops_cash"),14,M.MUTED)
-	var change_color := M.DANGER if cash_complete and cash_change < 0 else M.ACCENT
-	var change:=label(ui,cash,"¥%d" % (cash_change if cash_complete else int(ledger.get("cash_current",ledger.get("cash_after",0)))),28,change_color);change.name="CloseoutCashChange";change.autowrap_mode=TextServer.AUTOWRAP_OFF
-	label(ui,cash,COPY.copy("ops_cash_after"),14,M.MUTED)
-	var cash_after:=label(ui,cash,"¥%d" % int(ledger.get("cash_after",0)),22,M.INK);cash_after.name="CloseoutCashAfter";cash_after.autowrap_mode=TextServer.AUTOWRAP_OFF
-	var details := VBoxContainer.new(); details.name = "CloseoutLedgerDetails"; details.add_theme_constant_override("separation", 6); ui.modal_body.add_child(details)
-	_closeout_group(ui, details, COPY.copy("v220_profit_detail"), operating_rows, false, "CloseoutOperating")
+	ui.modal_body.add_theme_constant_override("separation", 8)
+	var cash_complete: bool = bool(ledger.get("cash_flow_complete", false))
+	var preview: bool = bool(ledger.get("preview", not settled))
+	var cash_change: int = _ledger_int(ledger,["cash_change"], int(ledger.get("cash_after",0))-int(ledger.get("cash_open",ledger.get("cash_after",0))))
+	label(ui,ui.modal_body,COPY.copy("ops_settled_day" if settled else "ops_closing_day") % int(ledger.day),20,M.ACCENT)
+	var summary = preload("res://scripts/day_closeout_canvas.gd").new(); ui.modal_body.add_child(summary)
+	summary.configure(ledger, float(ui.text_scale), settled)
+	var details := VBoxContainer.new(); details.name = "CloseoutLedgerDetails"; details.add_theme_constant_override("separation", 4); ui.modal_body.add_child(details)
+	var operating_rows: Array = [[COPY.copy("ops_contract_net"),_ledger_int(ledger,["contract_net"])],[COPY.copy("ops_care_earned"),_ledger_int(ledger,["care_gross"])],[COPY.copy("ops_care_cost"),-_ledger_int(ledger,["care_cost"])],[COPY.copy("ops_payroll"),-_ledger_int(ledger,["payroll_due"])],[COPY.copy("ops_hiring"),-_ledger_int(ledger,["hiring_cost"])],[COPY.copy("ops_profit"),_ledger_int(ledger,["total_profit"])]]
+	_closeout_group(ui, details, COPY.copy("v220_profit_detail") + (" · 精算見込み" if preview else " · 確定"), operating_rows, false, "CloseoutOperating")
 	var cash_rows: Array = []
 	if cash_complete:
 		cash_rows.append([COPY.copy("v220_cash_open"),_ledger_int(ledger,["cash_open"])])
-		cash_rows.append([COPY.copy("v220_cash_in"),_ledger_int(ledger,["cash_in"])])
-		cash_rows.append([COPY.copy("v220_cash_out"),_ledger_int(ledger,["cash_out"])])
+		cash_rows.append(["入金合計",_ledger_int(ledger,["cash_in"])])
+		cash_rows.append(["出金合計",-_ledger_int(ledger,["cash_out"])])
 		cash_rows.append([COPY.copy("v220_cash_change"),cash_change])
-	else:
-		cash_rows.append([COPY.copy("v220_cash_end"),_ledger_int(ledger,["cash_after"])])
-	if cash_complete:
 		var cash_flow: Variant = ledger.get("cash_flow", {})
 		if cash_flow is Dictionary:
-			for flow_spec in [["v220_collections", "invoice_collections"],["v220_job_payments", "job_receipts"],["v220_job_costs", "job_costs"],["v220_care_income", "care_receipts"],["v220_care_costs", "care_costs"],["v220_stock_purchases", "stock_purchases"],["v220_investment", "investment"],["v220_recruitment", "recruitment"],["v220_wages_paid", "wages_paid"]]:
-				if cash_flow.has(str(flow_spec[1])): cash_rows.append([COPY.copy(str(flow_spec[0])), int(cash_flow.get(str(flow_spec[1]), 0))])
-		cash_rows.append([COPY.copy("v220_cash_end"),_ledger_int(ledger,["cash_after"])])
-	cash_rows.append([COPY.copy("billing_due_next_day"),_ledger_int(ledger,["due_next_day"])])
-	var asset_spending:=_ledger_int(ledger,["inventory_spending","investment_spending","assetspend","assets_spend"])
-	if asset_spending!=0:
-		cash_rows.append([COPY.copy("v220_investment"),asset_spending])
-	_closeout_group(ui, details, COPY.copy("v220_cash_flow"), cash_rows, false, "CloseoutCash")
+			for flow_spec in [["v220_collections", "invoice_collections", 1],["v220_job_payments", "job_receipts", 1],["v220_job_costs", "job_costs", -1],["v220_care_income", "care_receipts", 1],["v220_care_costs", "care_costs", -1],["v220_stock_purchases", "stock_purchases", -1],["v220_investment", "investment", -1],["v220_recruitment", "recruitment", -1],["v220_wages_paid", "wages_paid", -1]]:
+				if cash_flow.has(str(flow_spec[1])): cash_rows.append([COPY.copy(str(flow_spec[0])), int(cash_flow.get(str(flow_spec[1]), 0)) * int(flow_spec[2])])
+	cash_rows.append([COPY.copy("v220_cash_end"),_ledger_int(ledger,["cash_after"])])
+	cash_rows.append(["請求未確定",_ledger_int(ledger,["draft_total"])])
+	cash_rows.append([COPY.copy("billing_receivable_total"),_ledger_int(ledger,["receivable_total"])])
+	cash_rows.append([COPY.copy("billing_due_next_day") + "（売掛の内数）",_ledger_int(ledger,["due_next_day"])])
+	cash_rows.append(["給与未払",_ledger_int(ledger,["arrears"])])
+	_closeout_group(ui, details, COPY.copy("v220_cash_flow") + (" · 精算見込み" if preview else " · 確定") + (" / 旧台帳の内訳なし" if not cash_complete else ""), cash_rows, false, "CloseoutCash")
 	var warnings:=VBoxContainer.new();warnings.name="CloseoutWarnings";warnings.add_theme_constant_override("separation",3);ui.modal_body.add_child(warnings)
-	ui.modal_body.move_child(warnings, summary.get_index()+1)
+	ui.modal_body.move_child(warnings, summary.get_index())
 	if int(ledger.get("open_contracts",0))>0:label(ui,warnings,COPY.copy("ops_carryover") % int(ledger.get("open_contracts",0)),14,M.WARNING)
 	if int(ledger.get("missed_maintenance",0))>0:label(ui,warnings,COPY.copy("ops_missed") % int(ledger.get("missed_maintenance",0)),14,M.DANGER)
-	var receivable:=_ledger_int(ledger,["receivable_total","due_next_day"])
-	if receivable>0:label(ui,warnings,COPY.copy("billing_due_next_day")+"  ¥%d" % receivable,14,M.WARNING)
+	var receivable: int = _ledger_int(ledger,["receivable_total"])
+	var draft: int = _ledger_int(ledger,["draft_total"])
 	if not settled and int(ledger.get("open_contracts",0))>0:
 		for item in g.contract_queue():
 			if bool(item.completed):continue
 			var pending:=flow(warnings);label(ui,pending,str(item.client)+" / "+str(item.title)+"  ·  "+str(item.deadline_text),14,M.WARNING)
 			button(ui,pending,"ops_open",ui._operations_open.bind(str(item.id),-1))
 	var actions:=footer(ui)
-	if receivable>0:action(ui,actions,"billing_app",ui._open_billing,"DayBilling","quiet")
+	if receivable>0 or draft>0:action(ui,actions,"billing_app",ui._open_billing,"DayBilling","quiet")
 	var spacer:=Control.new();spacer.size_flags_horizontal=Control.SIZE_EXPAND_FILL;actions.add_child(spacer)
 	if settled:
 		action(ui,actions,"ops_open_tasks",ui.open_panel.bind("board"),"DayNext","primary")
