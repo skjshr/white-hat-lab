@@ -3,6 +3,7 @@ const U=preload("res://scripts/investigation_ui.gd")
 const UI=preload("res://scripts/ui_theme.gd")
 const Canvas=preload("res://scripts/saas_response_canvas.gd")
 const SessionIdentity=preload("res://scripts/os_saas_session_identity.gd")
+const Business=preload("res://scripts/os_saas_business.gd")
 const KIND:="advanced-saas-response"
 const INK=Color("242a30")
 const MUTED=Color("68747e")
@@ -50,11 +51,21 @@ static func refresh(d) -> void:
 	var body:=U.begin(d,KIND,data)
 	if body==null or n.is_empty():return
 	var s:=U.state(d,KIND)
-	U.navigation(d,KIND,[["identity","Identity"],["billing","請求デスク"],["records","原記録・整理"],["results","受入確認"]],"identity","SaasTab_")
+	var tabs:Array=[["identity","Identity"],["billing","請求デスク"],["records","原記録・整理"],["results","受入確認"]]
+	if Business.enabled(n):
+		tabs[1][1]=Business.tab_label(n,"billing")
+		tabs.insert(2,["batch",Business.tab_label(n,"aggregation")])
+	U.navigation(d,KIND,tabs,"identity","SaasTab_")
 	for tab in d.widgets.advanced.nav.get_children():
 		if tab is Button:_light(tab)
 	match str(s.get("tab","identity")):
 		"billing":_billing(d,body,n)
+		"batch":
+			if Business.enabled(n):
+				var batch:=_surface(body,"Batch Desk / 配車集計",Color("326e66"))
+				_raw(d,batch,n)
+				Business.render(d,batch,n,"aggregation")
+			else:_identity(d,body,n)
 		"records":_records(d,body,n,data.get("checks",[]))
 		"results":U.checks(body,data)
 		_:_identity(d,body,n)
@@ -195,15 +206,21 @@ static func _billing(d,parent:Node,n:Dictionary) -> void:
 	var session_case:Dictionary=n.get("session_case",{});var session_billing:Dictionary=session_case.get("billing",{})
 	var attempts:Array=invoice.get("attempts",[]);var last:Dictionary=attempts.back() if not attempts.is_empty() else {}
 	var accepted:=not str(invoice.get("receipt_id","")).is_empty();var actions:=U.row(body)
-	var submit:=_button(actions,"受付を再確認" if accepted else "同じ請求を再送 · 2分" if int(last.get("status",0))>=400 else "顧客へ送信 · 2分","SaasSubmitInvoice",_send.bind(d,"submit_invoice",{"invoice_id":str(invoice.get("id",""))}))
+	var has_business:=Business.enabled(n)
+	var submit_label:="受付を再確認" if accepted else "同じ請求を再送 · 2分" if int(last.get("status",0))>=400 else "顧客へ送信 · 2分"
+	if has_business:submit_label=str(invoice.get("id",""))+("の受付を再確認" if accepted else "を再送 · 2分" if int(last.get("status",0))>=400 else "を送信 · 2分")
+	var submit:=_button(actions,submit_label,"SaasSubmitInvoice",_send.bind(d,"submit_invoice",{"invoice_id":str(invoice.get("id",""))}))
 	submit.disabled=invoice.is_empty()
 	var used_session:=str(session_billing.get("used_session_id",""))
 	var return_session:=used_session
 	if return_session.is_empty():
 		for session in session_case.get("sessions",[]):
 			if str(session.get("purpose",""))=="billing":return_session=str(session.get("id",""))
-	_button(actions,"使用した券へ" if not used_session.is_empty() else "請求の接続券へ" if not session_case.is_empty() else "連携アクセスへ","SaasBillingOpenIdentity",_billing_identity.bind(d,return_session))
+	if not has_business:_button(actions,"使用した券へ" if not used_session.is_empty() else "請求の接続券へ" if not session_case.is_empty() else "連携アクセスへ","SaasBillingOpenIdentity",_billing_identity.bind(d,return_session))
 	_raw(d,body,n)
+	if has_business:
+		Business.render(d,body,n,"billing")
+		_label(body,"個別請求 / "+str(invoice.get("id","")),15,PURPLE)
 	var app:=_app(n,"app-19");var route:=U.row(body)
 	if not session_case.is_empty():
 		_label(route,str(invoice.get("id",""))+" → app-19",13,PURPLE)
@@ -224,6 +241,8 @@ static func _billing_identity(d,session_id:String="") -> void:
 
 static func _record_label(record:Dictionary) -> String:
 	var action:=str(record.get("action",""))
+	if action in ["business_job_queued","business_job_overdue","business_job_completed"]:
+		return str(record.get("data",{}).get("label","業務"))+" / "+str({"business_job_queued":"Ⅱ 待機","business_job_overdue":"! 期限超過","business_job_completed":"✓ 完了"}.get(action,""))
 	return str({"baseline_reference":"前回の申請原本","consent_review":"申請原本","session_issued":"接続券の発行原本","connection_issued":"接続券の発行原本","inspect_connection":"要求調査","revoke_connection":"接続券を失効","revoke_all_connections":"全接続券を失効","reissue_connection":"接続券を再発行","inspect_app":"アプリ調査","collect_audit":"監査取得","probe_session":"接続実測","change_consent":"同意変更","change_session":"接続変更","session_reissued_by_sync":"同期で再発行","scheduled_export":"外部同期","password_reset":"パスワード更新","submit_invoice":"顧客請求","organize_manual":"手動整理","organize_assistant":"助手による整理","submit_report":"報告提出"}.get(action,action))
 
 static func _records(d,parent:Node,n:Dictionary,checks:Array) -> void:

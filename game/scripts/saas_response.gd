@@ -5,7 +5,8 @@ const CASE_ID := "advanced-saas-response"
 const WATCH_CASE_ID := "advanced-saas-watch"
 const SESSIONS_CASE_ID := "advanced-saas-sessions"
 const MODEL_VERSION := "saas-response-v1"
-const SESSIONS_MODEL_VERSION := "saas-sessions-v1"
+const LEGACY_SESSIONS_MODEL_VERSION := "saas-sessions-v1"
+const SESSIONS_MODEL_VERSION := "saas-sessions-v2"
 const SESSIONS := preload("res://scripts/saas_session_model.gd")
 const ASSISTANT_COST := 300
 const ROW_IMPACT_COST := 500
@@ -132,10 +133,33 @@ static func _valid_state(s: Dictionary) -> bool:
 	if str(s.get("kind", "")) != CASE_ID: return false
 	var case_id := str(s.get("case_id", ""))
 	if case_id == SESSIONS_CASE_ID:
-		return str(s.get("model_version", "")) == SESSIONS_MODEL_VERSION and SESSIONS.validate(s.get("session_case", null))
+		var model_version := str(s.get("model_version", ""))
+		var session_world: Variant = s.get("session_case", null)
+		if model_version == LEGACY_SESSIONS_MODEL_VERSION:
+			return SESSIONS.validate(session_world, int(s.get("elapsed_minutes", -1))) and int(session_world.get("version", 0)) == SESSIONS.LEGACY_VERSION
+		if model_version == SESSIONS_MODEL_VERSION:
+			return SESSIONS.validate(session_world, int(s.get("elapsed_minutes", -1))) and int(session_world.get("version", 0)) == SESSIONS.VERSION and _valid_business_event_records(s, session_world)
+		return false
 	if str(s.get("model_version", "")) != MODEL_VERSION: return false
 	if case_id == CASE_ID: return true
 	return case_id == WATCH_CASE_ID and _valid_watch_source(s.get("watch_source", null)) and str(s.get("threat_app_id", "")) == "app-84"
+
+static func _valid_business_event_records(s: Dictionary, world: Dictionary) -> bool:
+	var records: Variant = s.get("records", null)
+	if not records is Array: return false
+	for job in world.get("business", {}).get("jobs", []):
+		for entry in [["queued_record_id", "business_job_queued"], ["record_id", "business_job_completed"], ["loss_record_id", "business_job_overdue"]]:
+			var record_id := str(job.get(entry[0], ""))
+			if record_id.is_empty(): continue
+			var found := false
+			for record in records:
+				if not record is Dictionary: continue
+				if str(record.get("id", "")) != record_id: continue
+				if str(record.get("action", "")) != str(entry[1]) or str(record.get("data", {}).get("job_id", "")) != str(job.get("id", "")): return false
+				found = true
+				break
+			if not found: return false
+	return true
 
 static func _threat_app_id(s: Dictionary) -> String:
 	if str(s.get("case_id", "")) == SESSIONS_CASE_ID: return "app-19"
@@ -209,6 +233,13 @@ static func _advance(s: Dictionary, minutes: int) -> int:
 		var advancement: Dictionary = SESSIONS.advance(s, minutes)
 		for event in advancement.get("events", []):
 			s["elapsed_minutes"] = int(event.get("minute", previous_elapsed))
+			if str(event.get("event_kind", "")) == "business":
+				var action := str(event.get("action", ""))
+				var job_data: Dictionary = event.get("data", {}).duplicate(true)
+				var detail := "通常業務ジョブは必要な接続がないため待機しています。" if action == "business_job_queued" else ("業務ジョブの期限超過損失が確定しました。" if action == "business_job_overdue" else "通常業務ジョブを処理しました。")
+				var business_record := _append_record(s, "app-19", "business-job:" + str(event.get("job_id", "")), action, int(event.get("status", 200)), detail, job_data, "business-worker")
+				SESSIONS.bind_business_record(s.session_case, str(event.get("job_id", "")), action, str(business_record.get("id", "")))
+				continue
 			var status := int(event.get("status", 403))
 			var event_data: Dictionary = event.get("data", {}).duplicate(true)
 			var event_record := _append_record(s, "app-19", "external-storage", "scheduled_export", status, "外部保存への同期が3件の写しを送信しました。" if status == 200 else "外部保存への同期は現在の接続では拒否されました。", event_data, "SYNC-NODE")
@@ -314,6 +345,27 @@ static func _report_covers_latest_egress(report_record: Dictionary, s: Dictionar
 		if str(source.get("action", "")) == "collect_audit" and _audit_snapshot_covers_egress(source, egress_id): return true
 	return false
 
+static func _audit_covers_business_events(audit_record: Dictionary, s: Dictionary) -> bool:
+	if str(s.get("model_version", "")) != SESSIONS_MODEL_VERSION: return true
+	var required_ids: Array[String] = SESSIONS.business_event_record_ids(s.get("session_case", {}))
+	for record_id in required_ids:
+		if not _audit_snapshot_covers_egress(audit_record, record_id): return false
+	return true
+
+static func _report_covers_latest_business(report_record: Dictionary, s: Dictionary) -> bool:
+	if str(s.get("model_version", "")) != SESSIONS_MODEL_VERSION: return true
+	if not SESSIONS.business_snapshot_matches(report_record.get("business_snapshot", null), s.get("session_case", {})): return false
+	var required_ids: Array[String] = SESSIONS.business_event_record_ids(s.get("session_case", {}))
+	for source in report_record.get("records", []):
+		if str(source.get("action", "")) != "collect_audit": continue
+		var covers_all := true
+		for record_id in required_ids:
+			if not _audit_snapshot_covers_egress(source, record_id):
+				covers_all = false
+				break
+		if covers_all: return true
+	return required_ids.is_empty()
+
 static func _act(s: Dictionary, action: String, args: Dictionary) -> Dictionary:
 	var app_id := str(args.get("app", ""))
 	var threat_id := _threat_app_id(s)
@@ -406,7 +458,7 @@ static func _act(s: Dictionary, action: String, args: Dictionary) -> Dictionary:
 				if str(report_source_record.get("action", "")) == "inspect_connection": inspected_sessions[str(report_source_record.get("data", {}).get("session_id", ""))] = true
 				if str(report_source_record.get("action", "")) == "collect_audit":
 					var captured_audit_ids: Variant = report_source_record.get("data", {}).get("audit_ids", [])
-					if captured_audit_ids is Array and required_audit_ids.all(func(id): return id in captured_audit_ids) and _audit_snapshot_covers_egress(report_source_record, _latest_egress_record_id(s)):
+					if captured_audit_ids is Array and required_audit_ids.all(func(id): return id in captured_audit_ids) and _audit_snapshot_covers_egress(report_source_record, _latest_egress_record_id(s)) and _audit_covers_business_events(report_source_record, s):
 						collected_audit = true
 			var selected_required_audit := required_audit_ids.all(func(id): return id in report_source_ids_list)
 			var inspected_all_connections := true
@@ -417,7 +469,7 @@ static func _act(s: Dictionary, action: String, args: Dictionary) -> Dictionary:
 				return _error("発行原本、3接続の調査、取得済み監査記録が必要です。") if str(s.get("case_id", "")) == SESSIONS_CASE_ID else _error("両アプリと前回の承認原本、取得した監査記録が必要です。")
 			var prior_report: Dictionary = s.get("report", {})
 			var prior_latest_report: Dictionary = prior_report.get("latest", prior_report.get("original", {}))
-			if bool(prior_report.get("submitted", false)) and _report_covers_latest_egress(prior_latest_report, s):
+			if bool(prior_report.get("submitted", false)) and _report_covers_latest_egress(prior_latest_report, s) and _report_covers_latest_business(prior_latest_report, s):
 				var prior_report_hash := _organized_hash(report_source_ids_list)
 				if str(prior_latest_report.get("input_hash", "")) == prior_report_hash:
 					return _result(true,false,false,0,0,0,"現在の報告原本に最新の送信記録まで含まれています。",{"record_ids":report_source_ids_list,"record_id":str(prior_latest_report.get("record_id", ""))})
@@ -555,6 +607,8 @@ static func _act(s: Dictionary, action: String, args: Dictionary) -> Dictionary:
 			if bool(existing_report.get("submitted", false)):
 				report_version = int(existing_report.get("version", 1)) + 1
 			var immutable := {"version":report_version,"record_ids":submission_record_ids.duplicate(),"records":original_records.duplicate(true),"input_hash":submission_hash,"accepted_minute":int(s.elapsed_minutes),"revision":world_revision}
+			if sessions_case and int(s.session_case.get("version", 0)) >= SESSIONS.VERSION:
+				immutable["business_snapshot"] = SESSIONS.business_view(s.session_case, int(s.elapsed_minutes))
 			record = _append_record(s, "", "incident-report", "submit_report", 200, "申請と監査の原記録を含む報告を提出しました。", immutable)
 			immutable["record_id"] = str(record.get("id", ""))
 			record["data"] = immutable.duplicate(true)
@@ -654,6 +708,7 @@ static func _report_requirements(s: Dictionary) -> bool:
 			if str(raw.get("action", "")) == "inspect_connection": inspected[str(raw.get("data", {}).get("session_id", ""))] = true
 		for session_id in ["SES-201", "SES-202", "SES-203"]:
 			if not inspected.has(session_id): return false
+		if str(s.get("model_version", "")) == SESSIONS_MODEL_VERSION and not _report_covers_latest_business(latest, s): return false
 	if str(s.get("case_id", "")) == WATCH_CASE_ID:
 		var ids: Variant = latest.get("record_ids", [])
 		if not ids is Array: return false
@@ -711,7 +766,7 @@ static func _session_checks(s: Dictionary) -> Array:
 	if invoice_current:
 		var attempts: Array = invoice.get("attempts", [])
 		invoice_current = not attempts.is_empty() and int(attempts.back().get("status", 0)) == 200 and int(attempts.back().get("world_revision", -1)) == int(s.get("world_revision", 0)) and str(attempts.back().get("data", {}).get("used_session_id", "")) == str(active_billing.get("id", ""))
-	return [
+	var checks: Array = [
 		{"id":"report","label_key":"saas_sessions_check_report","passed":_report_requirements(s)},
 		{"id":"consent","label_key":"saas_sessions_check_consent","passed":bool(consent.get("enabled", false)) and str(consent.get("approved_change", "")) == "FIN-114"},
 		{"id":"revocation","label_key":"saas_sessions_check_revocation","passed":not threat.is_empty() and not bool(threat.get("active", true)) and str(threat.get("status", "")) == "revoked"},
@@ -719,6 +774,10 @@ static func _session_checks(s: Dictionary) -> Array:
 		{"id":"billing","label_key":"saas_sessions_check_billing","passed":invoice_current},
 		{"id":"aggregation","label_key":"saas_sessions_check_aggregation","passed":aggregation_current}
 	]
+	if int(world.get("version", 0)) >= SESSIONS.VERSION:
+		var jobs: Array = world.get("business", {}).get("jobs", [])
+		checks.append({"id":"business_jobs","label_key":"saas_sessions_check_business","passed":jobs.size() == 2 and jobs.all(func(job): return str(job.get("status", "")) == "completed")})
+	return checks
 
 static func view(state: Dictionary, selected: String = "") -> Dictionary:
 	if not _valid_state(state): return {}
@@ -771,7 +830,7 @@ static func view(state: Dictionary, selected: String = "") -> Dictionary:
 		"report":state.get("report", {}).duplicate(true)
 	}
 	if str(state.get("case_id", "")) == SESSIONS_CASE_ID:
-		var session_view: Dictionary = SESSIONS.view(state.get("session_case", {}), state.get("records", []))
+		var session_view: Dictionary = SESSIONS.view(state.get("session_case", {}), state.get("records", []), int(state.get("elapsed_minutes", 0)))
 		var invoice_attempt: Dictionary = attempts.back().duplicate(true) if not attempts.is_empty() else {}
 		invoice["last_attempt"] = invoice_attempt
 		session_view["schedule"] = schedule.duplicate(true)

@@ -118,3 +118,9 @@ Godot --path game --script res://tests/test_service_monitor_ui.gd -- --qa-profil
 [Microsoftの緊急アクセス失効資料](https://learn.microsoft.com/en-us/entra/identity/users/users-revoke-access)（2026-06-19更新）は、アプリが発行するセッションをアプリ側で管理する必要と、失効の反映が方式に依存する点を説明する。ゲームの個別券失効は架空アプリ自身の機能であり、実在の全IdP/SaaSに共通する即時失効機能として説明しない。同期時刻・データ量・費用もゲーム内の値とする。
 
 AIについては[GTIGの2026-09-08報告](https://cloud.google.com/blog/topics/threat-intelligence/from-prompting-to-autonomy-the-evolution-of-adversarial-ai)を確認した。AIによる作業自動化と、開発用アシスタントが読む構成物への攻撃を題材候補にする。現行助手は取得済み記録の整理まで。将来の高レベル機能では、実行範囲・承認・利用費と誤対応の影響を会社の判断にするが、この接続案件へ自律実行は追加しない。
+
+## 2026-10-07 業務継続と復旧順序
+
+新規の接続対応案件に、請求予約と配車集計の実処理を追加した。請求デスクは用紙トレー・接続券・受付控え、Batch Deskは行データ・集計機・処理表で表現する。どちらも同じ保存済み接続を使い、全停止で待機、再発行後の作業時間で処理し、締切超過は補償として残る。待機・完了・補償は別々の原記録になり、報告原本、顧客の返答、会社の精算へ渡る。通信の200だけで業務完了を扱わない。既存受注のv1へ新しい期限や費用を加えない。
+
+[Verizonの2026 DBIR公式発表](https://www.verizon.com/about/news/breach-industry-wide-dbir-finds)が扱う第三者経由の侵害、脆弱性の悪用、未承認AI利用を、今後の予防・緊急対応・復旧案件の題材とする。[公式の対象期間説明](https://www.verizon.com/business/resources/reports/dbir/)では主なインシデント期間は2024-11-01〜2025-10-31であり、2026年の世界全体の速報とは区別する。調査結果を架空案件の発生率へ直接置き換えず、業務依存を見て優先順位を決める設計へ使う。実操作した成果・限界は [`gameplay-cycle.md`](gameplay-cycle.md) の今回記録を参照。

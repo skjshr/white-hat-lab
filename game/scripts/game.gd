@@ -1160,10 +1160,14 @@ func _saas_case_review() -> Dictionary:
 	var reported := bool(state.advanced.get("report", {}).get("submitted", false))
 	var verified := not checks.is_empty() and checks.all(func(row): return bool(row.get("passed", false)))
 	var lost: int = state.advanced.get("egress", {}).get("exported_rows", []).size()
+	var business: Dictionary = state.advanced.get("session_case", {}).get("business", {})
+	var business_loss := _saas_business_cost(state.advanced)
 	var status := work_status()
 	var on_time := float(status.get("elapsed_minutes", status.get("minutes", 0))) <= float(status.get("budget", 0))
 	var score := int(reported) + int(verified) + int(on_time)
-	return {"available":not current_done(),"can_capture":false,"recorded":reported,"current_recorded":reported,"recorded_sites":1 if reported else 0,"total_sites":1,"score":score,"grade":"S" if score == 3 and lost == 0 else "A" if score == 3 else "B" if score == 2 else "C","bonus":roundi(int(status.get("estimated_fee", 0))*0.05) if reported and verified and lost == 0 else 0,"objectives":[{"id":"evidence","title":"申請と監査の報告","detail":"保存した原記録","done":reported},{"id":"retest","title":"封じ込めと請求復旧","detail":"現在の接続と実受付","done":verified},{"id":"prevention","title":"流出前の防止","detail":"持出し 延べ%d行" % lost,"done":lost == 0},{"id":"deadline","title":"期限内の納品","detail":"契約の作業期限","done":on_time}],"record_path":""}
+	var objectives: Array = [{"id":"evidence","title":"申請と監査の報告","detail":"保存した原記録","done":reported},{"id":"retest","title":"封じ込めと請求復旧","detail":"現在の接続と実受付","done":verified},{"id":"prevention","title":"流出前の防止","detail":"持出し 延べ%d行" % lost,"done":lost == 0},{"id":"deadline","title":"期限内の納品","detail":"契約の作業期限","done":on_time}]
+	if not business.is_empty(): objectives.append({"id":"continuity","title":"顧客業務の締切","detail":"業務遅延の補償 ¥%d" % business_loss,"done":business_loss == 0 and business.get("jobs", []).all(func(job): return str(job.get("status", "")) == "completed")})
+	return {"available":not current_done(),"can_capture":false,"recorded":reported,"current_recorded":reported,"recorded_sites":1 if reported else 0,"total_sites":1,"score":score,"grade":"S" if score == 3 and lost == 0 and business_loss == 0 else "A" if score == 3 else "B" if score == 2 else "C","bonus":roundi(int(status.get("estimated_fee", 0))*0.05) if reported and verified and lost == 0 and business_loss == 0 else 0,"objectives":objectives,"record_path":""}
 
 func _portal_case_review() -> Dictionary:
 	# A tester preserves HTTP evidence, not a customer's server configuration.
@@ -1618,7 +1622,8 @@ func advanced_action(action: String, args: Dictionary = {}) -> Dictionary:
 		state.work["pentest_change_cost"] = int(state.work.get("pentest_change_cost", 0)) + change_cost
 	if str(state.advanced.get("kind", "")) == "advanced-saas-response":
 		change_cost = maxi(0, int(result.get("cost", 0)))
-		_record_saas_costs(int(result.get("usage_cost", 0)), int(result.get("impact_cost", 0)))
+		var business_added := maxi(0, _saas_business_cost(state.advanced) - _saas_business_cost(before.get("advanced", {})))
+		_record_saas_costs(int(result.get("usage_cost", 0)), maxi(0, int(result.get("impact_cost", 0)) - business_added), business_added)
 	_work_add(float(result.get("minutes", 0)), change_cost, true)
 	_sync_target()
 	if not save_game():
@@ -1655,11 +1660,15 @@ func _store_vm(before: Array, previous_mutation: int) -> bool:
 	if saved: changed.emit()
 	return saved
 
-func _record_saas_costs(usage: int, impact: int) -> void:
+func _saas_business_cost(model: Dictionary) -> int:
+	return maxi(0, int(model.get("session_case", {}).get("business", {}).get("loss_cost", 0)))
+
+func _record_saas_costs(usage: int, impact: int, business: int = 0) -> void:
 	var costs: Dictionary = state.work.get("saas_costs", {})
 	costs["usage_cost"] = int(costs.get("usage_cost", 0)) + maxi(0, usage)
 	costs["impact_cost"] = int(costs.get("impact_cost", 0)) + maxi(0, impact)
 	costs["assistant_runs"] = int(costs.get("assistant_runs", 0)) + (1 if usage > 0 else 0)
+	if business > 0 or costs.has("business_cost"): costs["business_cost"] = int(costs.get("business_cost", 0)) + maxi(0, business)
 	state.work["saas_costs"] = costs
 
 func _saas_outcome() -> Dictionary:
@@ -1681,9 +1690,11 @@ func _work_add(minutes: float, cost: int = 0, advance_clock := true) -> void:
 		# added elsewhere (for example acceptance verification), in this save.
 		var remaining := maxf(0.0, float(state.work.minutes) - float(state.advanced.get("elapsed_minutes", 0)))
 		if remaining > 0:
+			var business_before := _saas_business_cost(state.advanced)
 			var impact: int = _advanced_engine().advance(state.advanced, remaining)
+			var business_added := maxi(0, _saas_business_cost(state.advanced) - business_before)
 			state.work.incident_cost = int(state.work.incident_cost) + impact
-			_record_saas_costs(0, impact)
+			_record_saas_costs(0, maxi(0, impact - business_added), business_added)
 	if advance_clock:state.clock_minutes = maxi(BUSINESS_START_MINUTE, int(state.get("clock_minutes", BUSINESS_START_MINUTE)) + int(round(added)))
 
 func action_minutes(kind: String, base_minutes: float) -> float:
@@ -2984,7 +2995,10 @@ func deliver() -> bool:
 	var endpoint_containment := endpoint_impact.values().any(func(item): return item is Dictionary and item.has("uncontained_minutes"))
 	var saas_outcome := _saas_outcome()
 	var saas_satisfaction_delta := -mini(9, saas_outcome.get("egress", {}).get("exported_rows", []).size())
-	var satisfaction_delta := quality_satisfaction_delta + price_satisfaction_delta + endpoint_satisfaction_delta + saas_satisfaction_delta
+	var saas_business_satisfaction_delta := 0
+	for job in saas_outcome.get("session_case", {}).get("business", {}).get("jobs", []):
+		if int(job.get("loss_amount", 0)) > 0: saas_business_satisfaction_delta -= 3
+	var satisfaction_delta := quality_satisfaction_delta + price_satisfaction_delta + endpoint_satisfaction_delta + saas_satisfaction_delta + saas_business_satisfaction_delta
 	relation.satisfaction = clampi(satisfaction_before + satisfaction_delta, 0, 100)
 	relation.completed_count = int(relation.get("completed_count",0)) + 1
 	relation.last_quality = str(status.quality); relation.last_day = int(state.day)
@@ -3013,6 +3027,7 @@ func deliver() -> bool:
 	if not saas_outcome.is_empty():
 		state.last_receipt.saas_outcome = saas_outcome.duplicate(true)
 		state.last_receipt.saas_satisfaction_delta = saas_satisfaction_delta
+		if saas_outcome.get("session_case", {}).has("business"): state.last_receipt.saas_business_satisfaction_delta = saas_business_satisfaction_delta
 	if str(state.get("advanced", {}).get("kind", "")) == "advanced-pentest" and not state.advanced.get("world", {}).get("remediation", {}).get("requests", []).is_empty():
 		state.last_receipt.pentest_changes = {"cost_total":int(state.work.get("pentest_change_cost", 0)),"requests":state.advanced.world.remediation.requests.duplicate(true),"revision":int(state.advanced.world.get("change_revision", 0)),"retests":state.advanced.world.get("retests", {}).duplicate(true)}
 		if str(state.advanced.get("engagement", "")) == "relay-v1":
@@ -3043,6 +3058,7 @@ func deliver() -> bool:
 	if state.last_receipt.has("saas_outcome"):
 		state.history[-1].saas_outcome = state.last_receipt.saas_outcome.duplicate(true)
 		state.history[-1].saas_satisfaction_delta = saas_satisfaction_delta
+		if state.last_receipt.has("saas_business_satisfaction_delta"): state.history[-1].saas_business_satisfaction_delta = saas_business_satisfaction_delta
 	if state.last_receipt.has("endpoint_impact"): state.history[-1].endpoint_impact = state.last_receipt.endpoint_impact.duplicate(true)
 	if endpoint_containment: state.history[-1].endpoint_satisfaction_delta = endpoint_satisfaction_delta
 	if state.last_receipt.has("hotel_workflow"): state.history[-1].hotel_workflow = state.last_receipt.hotel_workflow.duplicate(true)

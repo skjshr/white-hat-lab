@@ -77,7 +77,7 @@ func report(ids: Array) -> void:
 
 func verify_ready(expected_copies: int) -> void:
 	var checks: Array = game.verify()
-	check(checks.size() == 6 and checks.all(func(row): return bool(row.get("passed", false))) and game.can_deliver() and exported() == expected_copies, "current denial, billing, aggregation and original report all permit delivery")
+	check(checks.size() == 7 and checks.all(func(row): return bool(row.get("passed", false))) and game.can_deliver() and exported() == expected_copies, "current denial, billing, aggregation, scheduled jobs and original report all permit delivery")
 
 func run() -> void:
 	game = root.get_node("Game"); game.set_process(false)
@@ -94,7 +94,7 @@ func run() -> void:
 	legacy_world = encoded(game.state.advanced)
 	check(not game.state.advanced.has("session_case") and game.save_game() and game.load_game() and encoded(game.state.advanced) == legacy_world, "existing SaaS world reloads without retrofitting the new session model")
 	if not accept_from_market(CASE_ID): finish(); return
-	check(str(game.state.contract.case_id) == CASE_ID and str(game.state.advanced.kind) == LEGACY_CASE and str(game.state.advanced.model_version) == "saas-sessions-v1", "new case identity uses its own version of the existing SaaS engine")
+	check(str(game.state.contract.case_id) == CASE_ID and str(game.state.advanced.kind) == LEGACY_CASE and str(game.state.advanced.model_version) == "saas-sessions-v2", "new case identity uses its own version of the existing SaaS engine")
 	var before := encoded(game.state)
 	for _i in 3: game.advanced_view(); game.saas_watch_status(); game.company_cycle_view()
 	var projected: Dictionary = game.advanced_view()

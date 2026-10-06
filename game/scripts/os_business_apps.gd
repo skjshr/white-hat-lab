@@ -455,7 +455,11 @@ static func refresh_mail(d) -> void:
 		var info: Dictionary = g.vm_info()
 		var phase := "未接続" if not info.connected else ("完了" if g.current_done() else "接続中")
 		var progress = d._label(phase,13,TEAL); progress.size_flags_horizontal = Control.SIZE_EXPAND_FILL; footer.add_child(progress)
-		actions.add_child(d._button("ターミナル",d._show_app.bind("terminal"))); var report = d._button("納品",d._show_app.bind("receipt")); actions.add_child(report)
+		if g.has_method("advanced_active") and g.advanced_active():
+			var open_work: Button = d._primary("対応ソフトを開く",d._show_app.bind("advanced")); open_work.name="MailOpenAdvanced"; actions.add_child(open_work)
+		else:
+			actions.add_child(d._button("ターミナル",d._show_app.bind("terminal")))
+		var report = d._button("納品",d._show_app.bind("receipt")); actions.add_child(report)
 		w.progress = progress; w.report = report
 
 static func refresh_mail_status(d) -> void:

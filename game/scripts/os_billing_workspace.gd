@@ -398,6 +398,7 @@ static func _invoicedetail(d, parent: Node, invoice: Dictionary, payments: Array
 		for delivery in d.game.state.get("history", []):
 			if str(delivery.get("id", "")) == str(invoice.get("contract_id", "")) and str(delivery.get("case_id", "")) in ["advanced-saas-response", "advanced-saas-watch", "advanced-saas-sessions"]:
 				bonus_label = "流出予防ボーナス"
+				if delivery.get("saas_outcome", {}).get("session_case", {}).has("business"): bonus_label = "業務継続・流出予防ボーナス"
 				break
 		_line_item(d, lines, bonus_label, _number(invoice.get("baseline_bonus", 0)))
 	var material_cost := int(invoice.get("material_cost", 0))

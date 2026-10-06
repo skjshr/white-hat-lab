@@ -36,6 +36,13 @@ static func project(state: Dictionary, record: Dictionary) -> Dictionary:
 			reply.body += "\n予定同期による持出しはありませんでした。" if lost == 0 else "\n外部へ持ち出された延べ%d行の記録は消せません。補償費用¥%dと影響報告を受領しました。" % [lost, int(saas.get("costs", {}).get("impact_cost", 0))]
 			reply.body += "\n請求 %s / 受付 %s を確認しました。" % [str(invoice.get("id", "")), str(invoice.get("receipt_id", ""))]
 			if invoice.get("attempts", []).any(func(attempt): return int(attempt.get("status", 0)) >= 400): reply.body += "\n途中で未受付になった請求も、同じ原票から復旧できています。"
+			for job in saas.get("session_case", {}).get("business", {}).get("jobs", []):
+				var completed_minute := int(job.get("completed_minute", -1))
+				if str(job.get("status", "")) != "completed" or completed_minute < 0: continue
+				var loss := int(job.get("loss_amount", 0))
+				reply.body += "\n%s%d%sは対応%d分に処理を確認しました。" % [str(job.get("label", "")), int(job.get("units", 0)), str(job.get("unit", "")), completed_minute]
+				if loss > 0: reply.body += " 締切に間に合わなかったため、補償¥%dを計上しています。" % loss
+				else: reply.body += " 締切内に業務を継続できました。"
 		var pentest_changes: Dictionary = own.get("pentest_changes", {})
 		if str(reply.case_id) == "advanced-pentest" and not pentest_changes.get("requests", []).is_empty():
 			var requests: Array = pentest_changes.requests
