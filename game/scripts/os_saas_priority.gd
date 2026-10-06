@@ -6,7 +6,6 @@ const KIND := "advanced-saas-priority"
 const INK = Color("f0eee3")
 const MUTED = Color("b5c7cd")
 const AMBER = Color("edb767")
-const RECIPIENTS := ["minato/dispatch", "minato/claims", "minato/archive"]
 
 static func build(d, parent: VBoxContainer) -> void:
 	U.mount(d, parent, KIND, "Dispatch Control / 復旧の優先順位"); refresh(d)
@@ -14,7 +13,7 @@ static func build(d, parent: VBoxContainer) -> void:
 static func refresh(d) -> void:
 	var data: Dictionary = d.game.advanced_view(); var n: Dictionary = data.get("priority", {})
 	var tab := str(U.state(d, KIND).get("tab", "board")); var workspace: Dictionary = d.widgets.advanced
-	if str(workspace.get("priority_tab", tab)) != tab: workspace.next_scroll = 0
+	if str(workspace.get("priority_tab", tab)) != tab and not workspace.has("next_scroll"): workspace.next_scroll = 0
 	var body: VBoxContainer = U.begin(d, KIND, data)
 	if body == null or n.is_empty(): return
 	workspace.priority_tab = tab
@@ -23,6 +22,8 @@ static func refresh(d) -> void:
 		if button is Button:
 			for key in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color", "font_hover_pressed_color"]: button.add_theme_color_override(key, Color("243d48"))
 	if tab == "results": U.checks(body, data); return
+	# Keep the live workbench in view; open the compact response to read its full text.
+	if tab == "board": workspace.feedback.hide()
 	var panel := PanelContainer.new(); panel.theme = Board.tooltip_theme(float(d.game.settings.get("text_scale", 1.0))); panel.add_theme_stylebox_override("panel", UI.style(Color("132b36"), Color("48636d"), 10, 8, 7)); body.add_child(panel)
 	var surface := VBoxContainer.new(); surface.add_theme_constant_override("separation", 7); panel.add_child(surface)
 	if tab == "records": _records(d, surface, n)
@@ -52,83 +53,39 @@ static func _select_queue(id: String, d) -> void:
 	U.choose(d, KIND, "queue_id", id)
 
 static func _item(queue_id: String, index: int, d) -> void:
-	U.state(d, KIND).queue_id = queue_id; U.choose(d, KIND, "item_index", index)
+	var state := U.state(d, KIND)
+	state.queue_id = queue_id; state.item_index = index; state.open_record = ""
+	state.scroll_records = 0; U.choose(d, KIND, "tab", "records")
 
 static func _board(d, parent: Node, n: Dictionary) -> void:
 	var queue := _selected(d, n)
 	if queue.is_empty(): _label(parent, "業務データを確認できません", 15); return
-	var id := str(queue.get("id", "")); var policy: Dictionary = queue.get("policy", {})
-	var actions := U.row(parent); _label(actions, str(queue.get("label", id)), 17, AMBER)
-	var current := bool(queue.get("current", false))
-	var run := _button(actions, "現在設定で受付確認済み" if current else "受付を再確認 · 3分" if not str(queue.get("receipt_id", "")).is_empty() else "業務を送付 · 3分", "PriorityRun", _send.bind(d, "run_queue", {"queue_id":id})); run.disabled = current
-	_button(actions, "範囲外要求を試験 · 2分", "PriorityProbe", _send.bind(d, "probe_queue", {"queue_id":id}))
-	_impact_band(parent, n, float(d.game.settings.get("text_scale", 1.0)))
-	if not n.get("recovery", {}).is_empty(): _recovery_actions(d, parent, n, queue)
-	var controls := U.row(parent); _label(controls, "範囲", 13, MUTED)
-	for scope in ["off", "linked", "all"]:
-		var text := "0件" if scope == "off" else "当該%d件" % int(queue.get("approved_count", 0)) if scope == "linked" else "全%d件" % int(queue.get("all_count", 0))
-		var button := _button(controls, text, "PriorityScope_" + scope, _send.bind(d, "configure", {"queue_id":id, "key":"scope", "value":scope}))
-		button.toggle_mode = true; button.button_pressed = str(policy.get("scope", "off")) == scope; button.disabled = button.button_pressed; button.tooltip_text = "範囲を適用 · 1分"
-	_label(controls, "送付扉", 13, MUTED)
-	var recipient := OptionButton.new(); recipient.name = "PriorityRecipient"; recipient.tooltip_text = "送付先を適用 · 1分"
-	var recipient_options: Array = n.get("recipient_options", RECIPIENTS)
-	for path in recipient_options: recipient.add_item(str(path))
-	var selected_index := recipient_options.find(str(policy.get("recipient", ""))); recipient.select(selected_index)
-	for key in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]: recipient.add_theme_color_override(key, INK)
-	for key in ["normal", "hover", "pressed"]: recipient.add_theme_stylebox_override(key, UI.style(Color("25414c"), Color("63828b"), 5, 6, 1))
-	recipient.add_theme_stylebox_override("focus", UI.style(Color.TRANSPARENT, AMBER, 0, 0, 2)); controls.add_child(recipient)
-	recipient.item_selected.connect(func(index): _send(d, "configure", {"queue_id":id, "key":"recipient", "value":recipient_options[index]}))
-	_raw(d, parent, n)
 	var board := Board.new(); parent.add_child(board)
-	board.configure(n, float(d.game.settings.get("text_scale", 1.0)), id, _select_queue.bind(d), _open_from_diagram.bind(d), _item.bind(d))
+	var board_scale := maxf(float(d.game.settings.get("text_scale", 1.0)), minf(1.3, float(d.windows.advanced.size.x) / 960.0))
+	board.configure(n, board_scale, str(queue.get("id", "")), _select_queue.bind(d), _open_from_diagram.bind(d), _item.bind(d), func(action: String, args: Dictionary): _send(d, action, args))
+	var message := str(d.widgets.advanced.status.text)
+	if not message.is_empty():
+		var ok := bool(U.state(d, KIND).get("result_ok", d.game.advanced_view().get("last_result", {}).get("ok", true)))
+		var status := _button(parent, ("✓ " if ok else "× ") + message + "  ↗", "PriorityResponse", _show_response.bind(d))
+		status.custom_minimum_size.y = 24; status.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		status.add_theme_font_size_override("font_size", roundi(12 * float(d.game.settings.get("text_scale", 1.0))))
+		status.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		status.tooltip_text = message + "\n押すと原記録・報告で全文を表示"
+
+static func _show_response(d) -> void:
+	var state := U.state(d, KIND)
+	state.item_index = -1; state.open_record = ""; state.scroll_records = 0
+	U.choose(d, KIND, "tab", "records")
+
+static func _item_detail(d, parent: Node, n: Dictionary) -> void:
+	var queue := _selected(d, n)
 	var items: Array = queue.get("items", []); var selected_item := int(U.state(d, KIND).get("item_index", -1))
-	if selected_item >= 0 and selected_item < items.size():
-		var item: Dictionary = items[selected_item]; var detail := U.row(parent)
-		_label(detail, str(item.get("id", "")) + " / " + str(item.get("label", "")), 15, AMBER)
-		_button(detail, "閉じる", "PriorityCloseItem", U.choose.bind(d, KIND, "item_index", -1))
-		_label(parent, str(item.get("detail", "")), 14)
-		if item.has("amount"): _label(parent, "返金額 ¥%d" % int(item.amount), 14)
-	var background: Dictionary = n.get("background", {}); var background_row := U.row(parent)
-	_button(background_row, "背景同期を停止 · 1分" if bool(background.get("enabled", false)) else "背景同期を有効化 · 1分", "PriorityBackground", _send.bind(d, "toggle_background", {"enabled":not bool(background.get("enabled", false))}))
-	_button(background_row, "同期口を試験 · 2分", "PriorityProbeBackground", _send.bind(d, "probe_background"))
-	_button(background_row, "入力を待つ · 3分", "PriorityWait", _send.bind(d, "wait"))
-	var conveyor := Board.Background.new(); parent.add_child(conveyor); conveyor.configure(n, float(d.game.settings.get("text_scale", 1.0)))
-	var observations := U.row(parent)
-	var latest: Dictionary = {}
-	for record in n.get("records", []):
-		if str(record.get("action", "")) in ["scheduled_background_send", "probe_background"]: latest = record
-	var stale := not latest.is_empty() and int(latest.get("data", {}).get("background_revision", -1)) != int(background.get("policy_revision", 0))
-	var status := int(latest.get("status", 0)); var source := "試験" if str(latest.get("action", "")) == "probe_background" else "通信"
-	var result := _button(observations, "背景 ? 未実測" if latest.is_empty() else ("旧設定 " if stale else "") + "背景 " + source + (" ↑" if status == 200 else " ×") + str(status), "PriorityBackgroundRecord", _open.bind(d, str(latest.get("id", "")))); result.disabled = latest.is_empty()
-	_label(observations, "補償累計 ¥%d" % (int(n.get("impact_cost", 0)) + int(n.get("loss_cost", 0))), 13, MUTED)
-
-static func _impact_band(parent: Node, n: Dictionary, scale: float) -> void:
-	var band := U.row(parent); band.name = "PriorityImpactBand"
-	var leaked := int(n.get("leaked_rows", 0)); var impact := int(n.get("impact_cost", 0)); var delay := int(n.get("loss_cost", 0))
-	_label(band, "累積 ↑ 流出 %d行 / 補償 ¥%d" % [leaked, impact], 14, AMBER if leaked > 0 or impact > 0 else MUTED)
-	var delayed := HBoxContainer.new(); delayed.add_theme_constant_override("separation", 5); band.add_child(delayed)
-	var ink := AMBER if delay > 0 else MUTED
-	var saved_clock := Control.new(); saved_clock.custom_minimum_size = Vector2(18, 18) * scale; saved_clock.mouse_filter = Control.MOUSE_FILTER_IGNORE; delayed.add_child(saved_clock)
-	saved_clock.draw.connect(func():
-		var center := saved_clock.size / 2
-		saved_clock.draw_circle(center, 7 * scale, ink, false, 1.5 * scale)
-		saved_clock.draw_line(center, center + Vector2(0, -4) * scale, ink, 1.5 * scale)
-		saved_clock.draw_line(center, center + Vector2(4, 2) * scale, ink, 1.5 * scale))
-	U.label(delayed, ("× " if delay > 0 else "") + "業務遅延補償 ¥%d" % delay, 14, ink, false)
-	if not n.get("recovery", {}).is_empty(): _label(band, "手動受付費 ¥%d" % int(n.recovery.get("manual_usage_cost", 0)), 14, MUTED)
-
-static func _recovery_actions(d, parent: Node, n: Dictionary, queue: Dictionary) -> void:
-	var recovery: Dictionary = n.get("recovery", {}); var row := U.row(parent)
-	var ready := str(recovery.get("connector_status", "stopped")) == "ready"
-	var rebuild := _button(row, "新連携 復旧済み · %d分" % int(recovery.get("rebuilt_minute", 0)) if ready else "新連携を復旧 · %d分" % int(recovery.get("rebuild_minutes", 6)), "PriorityRebuild", _send.bind(d, "rebuild_connector")); rebuild.disabled = ready
-	var available := int(recovery.get("manual_remaining", 0)) > 0
-	var used_here := str(recovery.get("manual_queue_id", "")) == str(queue.get("id", ""))
-	var title := "この業務を手動受付 · %d分 / ¥%d" % [int(recovery.get("manual_minutes", 2)), int(recovery.get("manual_cost", 900))]
-	if not available: title = "手動受付済み · %d分" % int(recovery.get("manual_used_minute", 0)) if used_here else "手動枠 使用済み"
-	elif not str(queue.get("receipt_id", "")).is_empty(): title = "受付済み / 手動不要"
-	var manual := _button(row, title, "PriorityManual", _send.bind(d, "manual_queue", {"queue_id":str(queue.get("id", ""))}))
-	manual.disabled = not available or not str(queue.get("receipt_id", "")).is_empty()
-	manual.tooltip_text = str(queue.get("label", "")) + "の受付だけを手動で運びます。新連携と旧背景同期の設定は変わりません。"
+	if selected_item < 0 or selected_item >= items.size(): return
+	var item: Dictionary = items[selected_item]; var row := U.row(parent)
+	_label(row, str(item.get("id", "")) + " / " + str(item.get("label", "")), 15, AMBER)
+	_button(row, "閉じる", "PriorityCloseItem", U.choose.bind(d, KIND, "item_index", -1))
+	_label(parent, str(item.get("detail", "")), 14)
+	if item.has("amount"): _label(parent, "返金額 ¥%d" % int(item.amount), 14)
 
 static func _sources(n: Dictionary) -> Array:
 	return n.get("records", []).filter(func(record): return str(record.get("action", "")) not in ["organize_manual", "organize_assistant", "submit_report"])
@@ -156,6 +113,9 @@ static func _records(d, parent: Node, n: Dictionary) -> void:
 	var state := U.state(d, KIND); var ids: Array = state.get("record_ids", [])
 	var report: Dictionary = n.get("report", {}); var organization: Dictionary = n.get("organization", {}); var assistant: Dictionary = d.game.record_assistant_status()
 	var heading := U.row(parent); _label(heading, "EVIDENCE / 二つの業務と背景同期", 18, AMBER); _label(heading, "選択 %d / 32件" % ids.size(), 13, MUTED)
+	_button(heading, "搬送盤に戻る", "PriorityBackToBoard", U.choose.bind(d, KIND, "tab", "board"))
+	_item_detail(d, parent, n)
+	_raw(d, parent, n)
 	var actions := U.row(parent)
 	_button(actions, "監査を取得 · 2分", "PriorityCollectAudit", _send.bind(d, "collect_audit"))
 	_button(actions, "報告用の原本をまとめる", "PrioritySelectAll", _select_records.bind(d, n))
@@ -170,7 +130,6 @@ static func _records(d, parent: Node, n: Dictionary) -> void:
 	var missing: Array = report.get("required_record_ids", []).filter(func(id): return str(id) not in ids)
 	if not missing.is_empty(): _label(parent, "報告用原本の選択漏れ %d件" % missing.size(), 13, AMBER)
 	if bool(report.get("submitted", false)): _label(parent, "報告 第%d版 / " % int(report.get("version", 1)) + ("現在の根拠を提出済み" if bool(n.get("report_fresh", false)) else "変更・損失の追補が必要"), 14, AMBER)
-	_raw(d, parent, n)
 	if not organization.is_empty():
 		_label(parent, "保存した整理 · %d分 / 保存済み原記録だけを参照" % int(organization.get("created_minute", 0)), 14, AMBER)
 		if not same: _label(parent, "選択を変更しました。下は前回保存した整理です。", 12, MUTED)
@@ -214,10 +173,13 @@ static func _buy(d) -> void:
 	var bought: bool = d.game.buy_record_assistant(); U.state(d, KIND).message = "記録整理助手を導入しました。" if bought else str(d.game.record_assistant_status().get("reason", "導入できませんでした。")); d._refresh_advanced.call_deferred()
 
 static func _open_from_diagram(id: String, d) -> void:
-	_open(d, id)
+	var state := U.state(d, KIND)
+	state.item_index = -1; state.open_record = id; state.raw_json = false
+	state.scroll_records = 0; U.choose(d, KIND, "tab", "records")
 
 static func _open(d, id: String) -> void:
-	d.widgets.advanced.next_scroll = 0; U.state(d, KIND).raw_json = false; U.choose(d, KIND, "open_record", id)
+	d.widgets.advanced.next_scroll = 0; U.state(d, KIND).raw_json = false; U.state(d, KIND).item_index = -1
+	U.choose(d, KIND, "open_record", id)
 
 static func _raw(d, parent: Node, n: Dictionary) -> void:
 	var id := str(U.state(d, KIND).get("open_record", "")); var selected: Dictionary = {}
@@ -228,6 +190,8 @@ static func _raw(d, parent: Node, n: Dictionary) -> void:
 	_button(row, "閉じる", "PriorityCloseRecord", U.choose.bind(d, KIND, "open_record", ""))
 	var original: Dictionary = selected.get("data", {}).get("original", {}) if str(selected.get("action", "")) == "baseline_reference" else selected
 	_label(parent, "前回の保存原本 / 今回の実測ではありません" if str(selected.get("action", "")) == "baseline_reference" else "旧設定の実測" if _stale(selected, n) else "保存原本", 13, MUTED)
+	if original.has("status") and str(original.get("action", "")) != "consent_review":
+		_label(parent, "%d分 / 応答 %d / %s" % [int(original.get("minute", 0)), int(original.get("status", 0)), str(original.get("destination", ""))], 14, AMBER)
 	_label(parent, str(original.get("detail", "")), 14)
 	var expanded := bool(U.state(d, KIND).get("raw_json", false)); _button(parent, "▾ JSON原本" if expanded else "▸ JSON原本", "PriorityExpandRaw", U.choose.bind(d, KIND, "raw_json", not expanded))
 	if expanded:
