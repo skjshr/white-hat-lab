@@ -246,6 +246,7 @@ static func _finance(d, host: VBoxContainer, receipt: Dictionary) -> void:
 		if receipt.get("saas_outcome", {}).get("session_case", {}).has("business"): label = "業務継続・流出予防ボーナス"
 		if str(receipt.get("case_id", "")) == "advanced-saas-ai-preflight": label = "公開前審査・業務継続ボーナス"
 		if str(receipt.get("case_id", "")) == "advanced-saas-ai-handoff": label = "配送連絡・流出予防ボーナス"
+		if str(receipt.get("case_id", "")) == "advanced-saas-priority": label = "業務復旧・流出予防ボーナス"
 		_row(d, income, "ReceiptEvidenceBonus", label, baseline)
 	var material := int(receipt.get("material_cost", 0))
 	if bool(receipt.get("material_billable", false)) and material > 0: _row(d, income, "ReceiptMaterialBillable", UI.copy("receipt_hardware_sales"), material)
@@ -263,6 +264,7 @@ static func _finance(d, host: VBoxContainer, receipt: Dictionary) -> void:
 		var business_label := "請求予約・委託先受渡の遅延補償" if str(receipt.get("saas_outcome", {}).get("model_version", "")) == "saas-partner-v1" else "請求予約・配車集計の遅延補償"
 		if str(receipt.get("saas_outcome", {}).get("model_version", "")) == "saas-ai-preflight-v1": business_label = "要約受付の遅延補償"
 		if str(receipt.get("saas_outcome", {}).get("model_version", "")) == "saas-ai-handoff-v1": business_label = "配送障害連絡の遅延補償"
+		if str(receipt.get("saas_outcome", {}).get("model_version", "")) == "saas-priority-v1": business_label = "配送連絡・返金照合の遅延補償"
 		_row(d, costs, "ReceiptBusinessCost", business_label, business_cost)
 	if change_cost > 0: _row(d, costs, "ReceiptPentestChangeCost", "顧客変更作業費（%d件）" % receipt.pentest_changes.get("requests", []).size(), change_cost)
 	if compensation > 0: _row(d, costs, "ReceiptCompensationCost", "未封じ込め・業務誤停止の補償" if receipt.get("endpoint_impact",{}).values().any(func(item):return item.has("uncontained_minutes")) else "業務停止・不審送信の補償", compensation)

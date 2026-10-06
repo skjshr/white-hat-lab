@@ -18,7 +18,9 @@ func setup(saved: Dictionary, factor: float) -> void:
 	_field("ReceiptGradeCaption", "納品評価", 12, INK, 0.025, 10, 0.16)
 	_field("ReceiptGradeValue", str(receipt.get("grade", "—")), 48, _result_color(), 0.025, 30, 0.16)
 	var late: bool = str(receipt.get("rating", "")) == "late"
-	_field("ReceiptTiming", "期限超過" if late else "期限内" if str(receipt.get("rating", "")) == "on_time" else "期限の記録なし", 12, RED if late else INK, 0.025, 99, 0.16)
+	var timing := "期限超過" if late else "期限内" if str(receipt.get("rating", "")) == "on_time" else "期限の記録なし"
+	if str(receipt.get("case_id", "")) == "advanced-saas-priority" and timing != "期限の記録なし": timing = "契約" + timing
+	_field("ReceiptTiming", timing, 12, RED if late else INK, 0.025, 99, 0.16)
 	_field("ReceiptSatisfactionCaption", "顧客満足 / 100", 13, INK, 0.225, 10, 0.335)
 	_field("ReceiptSatisfactionValue", _change("satisfaction"), 23, INK, 0.225, 33, 0.335)
 	_field("ReceiptCreditCaption", "会社の信頼", 13, INK, 0.61, 10, 0.215)

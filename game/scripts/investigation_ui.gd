@@ -158,7 +158,9 @@ static func chip(parent: Node,text: String,color: Color=UI.MUTED) -> void:
 
 static func checks(parent: Node, data: Dictionary) -> void:
 	var box := panel(parent, "受入確認")
-	for item in data.get("checks", []): label(box, ("✓  " if item.get("passed", false) else "○  ") + UI.copy(str(item.get("label_key", ""))), 14, UI.GREEN if item.get("passed", false) else UI.MUTED, true)
+	for item in data.get("checks", []):
+		var title := str(item.get("label", UI.copy(str(item.get("label_key", "")))))
+		label(box, ("✓  " if item.get("passed", false) else "○  ") + title, 14, UI.GREEN if item.get("passed", false) else UI.MUTED, true)
 
 static func observations(parent: Node, rows: Array, id: String = "InvestigationObservations") -> Tree:
 	var tree := table(parent, id, ["記録", "操作", "対象", "結果"], 150)

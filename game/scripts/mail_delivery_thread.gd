@@ -27,6 +27,14 @@ static func project(state: Dictionary, record: Dictionary) -> Dictionary:
 	if confirmed:
 		reply.body = "対応内容の受取を確認しました。"
 		var saas: Dictionary = own.get("saas_outcome", {})
+		if str(reply.case_id) == "advanced-saas-priority" and str(saas.get("model_version", "")) == "saas-priority-v1":
+			reply.body = "二つの業務の受付と、承認範囲の確認結果を受領しました。"
+			for queue in saas.get("priority", {}).get("queues", []):
+				reply.body += "\n%s: %s、%d分に受付（締切%d分）。" % [str(queue.label),str(queue.get("receipt_id", "")),int(queue.get("received_minute", -1)),int(queue.get("deadline_minute", 0))]
+				var loss := int(queue.get("loss_cost", 0))
+				reply.body += " 締切内に業務を続けられました。" if loss == 0 else " 遅延補償¥%dを計上しました。復旧後も記録を保管します。" % loss
+			var lost: int = saas.get("egress", {}).get("exported_rows", []).size()
+			reply.body += "\n承認外の送付は発生しませんでした。" if lost == 0 else "\n過剰送付の延べ%d行と補償¥%dを確認しました。" % [lost,int(saas.get("costs", {}).get("impact_cost", 0))]
 		if str(reply.case_id) == "advanced-saas-ai-handoff" and str(saas.get("model_version", "")) == "saas-ai-handoff-v1":
 			var business: Dictionary = saas.get("handoff", {}).get("business", {})
 			var lost: int = saas.get("egress", {}).get("exported_rows", []).size()
@@ -95,7 +103,7 @@ static func project(state: Dictionary, record: Dictionary) -> Dictionary:
 			if bool(site.get("reservation_isolated", false)): reply.body += "\n予約端末PC-Aは隔離したまま、後続の調査担当へ引き継ぎます。"
 		if str(reply.rating) == "late": reply.body += "\nただ、予定していた時刻を超えてしまいました。"
 		elif str(reply.rating) == "rework": reply.body += "\n手戻りがあり、次回は事前の確認をお願いします。"
-		elif str(reply.rating) == "on_time": reply.body += "\n契約の納品期限内に審査・対応報告を受領しました。" if str(reply.case_id) in ["advanced-saas-ai-preflight", "advanced-saas-ai-handoff"] else "\n予定に間に合いました。ありがとうございました。"
+		elif str(reply.rating) == "on_time": reply.body += "\n契約の納品期限内に審査・対応報告を受領しました。" if str(reply.case_id) in ["advanced-saas-ai-preflight", "advanced-saas-ai-handoff", "advanced-saas-priority"] else "\n予定に間に合いました。ありがとうございました。"
 		var stop_minutes:=0.0
 		for impact in own.get("endpoint_impact",{}).values():
 			if impact is Dictionary and impact.has("uncontained_minutes"):stop_minutes+=float(impact.get("stop_minutes",0))
