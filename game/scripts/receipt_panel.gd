@@ -40,6 +40,12 @@ static func render(d, body: VBoxContainer, receipt: Dictionary, first_view: bool
 	_metric(d, summary, "ReceiptProfit", UI.copy("receipt_profit"), profit, UI.GREEN if profit >= 0 else UI.RED)
 	_invoice(d, finance, receipt, sales)
 	_finance(d, finance, receipt)
+	if receipt.get("endpoint_impact",{}) is Dictionary and not receipt.get("endpoint_impact",{}).is_empty():
+		var impact: VBoxContainer=d._disclosure(finance,"補償費用の内訳")
+		impact.name="ReceiptEndpointImpact"
+		for item in receipt.endpoint_impact.values():
+			impact.add_child(_text(d,str(item.get("name","拠点")),14,UI.INK))
+			impact.add_child(_text(d,preload("res://scripts/endpoint_engagement.gd").summary({"site":item}),13,UI.MUTED))
 	var evaluation := VBoxContainer.new(); evaluation.name = "ReceiptEvaluation"; evaluation.visible = selected == "evaluation"; body.add_child(evaluation)
 	if bool(d.widgets.receipt.get("evidence", false)):
 		_evidence(d, evaluation, receipt)
@@ -224,7 +230,9 @@ static func _finance(d, host: VBoxContainer, receipt: Dictionary) -> void:
 	var material := int(receipt.get("material_cost", 0))
 	if bool(receipt.get("material_billable", false)) and material > 0: _row(d, income, "ReceiptMaterialBillable", UI.copy("receipt_hardware_sales"), material)
 	var operating := int(receipt.get("cost", 0)) - material
-	_row(d, costs, "ReceiptOperatingCost", UI.copy("receipt_operating_cost"), operating)
+	var compensation := preload("res://scripts/endpoint_engagement.gd").total_cost(receipt.get("endpoint_impact",{}))
+	_row(d, costs, "ReceiptOperatingCost", UI.copy("receipt_operating_cost"), operating-compensation)
+	if compensation > 0: _row(d, costs, "ReceiptCompensationCost", "業務停止・不審送信の補償", compensation)
 	if material > 0: _row(d, costs, "ReceiptMaterialCost", UI.copy("stock_material_cost"), material)
 	if not str(receipt.get("hardware_serial", "")).is_empty():
 		var serial := _text(d, UI.copy("stock_serial") + "  " + str(receipt.get("hardware_serial")), 12, UI.MUTED)

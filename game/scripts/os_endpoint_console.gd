@@ -3,6 +3,9 @@ class_name OSEndpointConsole
 
 const UI = preload("res://scripts/ui_theme.gd")
 const Glyph = preload("res://scripts/service_glyph.gd")
+const WorkflowLinks = preload("res://scripts/endpoint_workflow_links.gd")
+const Workstation = preload("res://assets/ui/endpoint/workstation-v1.png")
+const Impact = preload("res://scripts/endpoint_engagement.gd")
 const NAV := Color("f3f2f1")
 const INK := Color("323130")
 const MUTED := Color("605e5c")
@@ -84,7 +87,9 @@ static func fluent_control(d, node: Control) -> void:
 		node.add_theme_color_override(key,INK)
 	node.add_theme_color_override("font_disabled_color",Color("a19f9d"))
 	for pair in [["normal",Color.WHITE,Color("8a8886")],["hover",Color("f3f2f1"),Color("605e5c")],["pressed",Color("edebe9"),INK],["disabled",Color("f3f2f1"),LINE],["focus",Color.TRANSPARENT,BLUE]]:
-		node.add_theme_stylebox_override(pair[0],UI.style(pair[1],pair[2],10,5,2))
+		var style := UI.style(pair[1],pair[2],10,5,3)
+		style.set_border_width_all(2 if pair[0]=="focus" else 1)
+		node.add_theme_stylebox_override(pair[0],style)
 
 static func button(d, parent: Node, text: String, name: String, callback: Callable) -> Button:
 	var node: Button=d._button(text,callback)
@@ -162,7 +167,7 @@ static func _business_state(snap: Dictionary, selected: String) -> String:
 	var record := recovery_device_record(snap, selected)
 	var processes: Array = snap.get("processes", []).filter(func(item): return item is Dictionary and str(item.get("device", "")) == selected)
 	var files: Array = snap.get("files", []).filter(func(item): return item is Dictionary and str(item.get("device", "")) == selected)
-	return JSON.stringify({"device":record, "processes":processes, "files":files}, "", true)
+	return JSON.stringify({"device":{"isolated":record.get("isolated",false),"business_status":record.get("business_status",""),"management_connected":record.get("management_connected",false)}, "processes":processes, "files":files}, "", true)
 
 static func _business_probe(d, selected: String) -> void:
 	# Exercise the same endpoint as the browser and shell, including isolation
@@ -185,7 +190,7 @@ static func _normal_use(d, body: VBoxContainer, state: Dictionary, snap: Diction
 	button(d, controls, "端末状態を再読込", "EdrRefresh_" + selected, func(): d._render_endpoint())
 	var observation: Dictionary = state.get("business_observations", {}).get(selected, {})
 	if observation.is_empty():
-		label(d, panel, "この端末の接続結果は未確認です。隔離や復旧の後に実際の応答を確認できます。", 12, MUTED)
+		label(d, panel, "接続結果 · 未測定", 12, MUTED)
 	else:
 		var response := str(observation.get("response", ""))
 		var fresh := str(observation.get("state", "")) == _business_state(snap, selected)
@@ -282,70 +287,92 @@ static func recovery_scan_text(d, device: Dictionary, snap: Dictionary = {}) -> 
 	return rcopy("rmd_scan_threats", "%d threats" % findings.size())
 
 static func recovery_inventory(d, body: VBoxContainer, rows: Array, state: Dictionary, snap: Dictionary) -> void:
-	label(d,body,copy("edr_devices"),24)
-	tabline(d,body,copy("edr_devices")+"  ("+str(rows.size())+")","EdrRecoveryInventoryTab")
-	var search:=LineEdit.new()
-	search.name="EdrRecoveryDeviceSearch"
-	search.placeholder_text=rcopy("edr_search", "Search")
-	search.text=str(state.get("inventory_query",""))
-	search.custom_minimum_size.x=260*scale(d)
-	search.size_flags_horizontal=Control.SIZE_SHRINK_BEGIN
-	fluent_control(d,search)
-	body.add_child(search)
-	var table:=VBoxContainer.new()
-	table.name="EdrRecoveryDeviceRows"
-	table.add_theme_constant_override("separation",0)
-	body.add_child(table)
-	search.text_changed.connect(func(value: String):
-		state["inventory_query"]=value
-		recovery_inventory_rows(d,table,rows,state,value,snap))
-	recovery_inventory_rows(d,table,rows,state,search.text,snap)
-
-static func recovery_inventory_rows(d, table: VBoxContainer, rows: Array, state: Dictionary, query: String, snap: Dictionary) -> void:
-	d._clear(table)
-	var head:=table_row(table,Color("faf9f8"))
-	for key in ["edr_device","edr_status","rmd_scan_results"]:
-		label(d,head,rcopy(key,key),12).size_flags_stretch_ratio=1.0
-	var found:=0
+	label(d,body,"業務と端末",24).name="EdrRecoveryInventoryTab"
+	var scenario: Dictionary = d.game._scenario()
+	if int(scenario.get("endpoint_engagement",0))==1:
+		var sites := HFlowContainer.new(); sites.name="EdrSiteChoices"
+		sites.add_theme_constant_override("h_separation",8); body.add_child(sites)
+		for index in d.game.state.targets.size():
+			var current: bool = index==int(d.game.state.target_index)
+			var pick := button(d,sites,("●  " if current else "○  ")+str(d.game.state.targets[index].name),"EdrSite_"+str(index),func():
+				if d._select_target(index): d._show_app("terminal"))
+			pick.disabled=current
+		var impact: Dictionary=d.game.state.work.get("endpoint_impact",{})
+		label(d,body,Impact.summary(impact),12,MUTED).name="EdrImpactSummary"
+	var headings := HBoxContainer.new();headings.add_theme_constant_override("separation",28);body.add_child(headings)
+	for title in ["業務接続を確認", "端末を調査", "通信記録を開く"]:
+		var heading := label(d,headings,title,12,MUTED);heading.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
+	var map := VBoxContainer.new(); map.name="EdrRecoveryDeviceRows";map.add_theme_constant_override("separation",8);body.add_child(map)
 	for raw in rows:
 		if not raw is Dictionary: continue
 		var device: Dictionary=raw
 		var id:=str(device.get("id",""))
-		if not query.is_empty() and not device_name(id).to_lower().contains(query.to_lower()): continue
-		found+=1
-		var open:=button(d,table,"","EdrDevice_"+id,func():
-			state["device"]=id
-			state["event_index"]=0
-			state["query"]=""
-			state["inventory_query"]=""
-			state["event_type"]="all"
-			state["details_open"]=true
-			state["recovery_tab"]="timeline"
-			state.erase("file_id")
-			state.erase("output")
-			d._render_endpoint())
-		open.size_flags_horizontal=Control.SIZE_EXPAND_FILL
-		open.custom_minimum_size.y=46*scale(d)
-		var row_style:=UI.style(Color.WHITE,LINE,10,7,0)
-		row_style.set_border_width_all(0);row_style.border_width_bottom=1
-		open.add_theme_stylebox_override("normal",row_style)
-		open.add_theme_stylebox_override("hover",UI.style(Color("f3f2f1"),Color.TRANSPARENT,10,7,0))
-		var row:=HBoxContainer.new();row.mouse_filter=Control.MOUSE_FILTER_IGNORE
-		row.add_theme_constant_override("separation",14)
-		open.add_child(row);row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		row.offset_left=10;row.offset_right=-10
-		var name:=label(d,row,device_name(id),13,BLUE);name.mouse_filter=Control.MOUSE_FILTER_IGNORE
-		name.size_flags_stretch_ratio=1.2
-		var scan:=recovery_scan_data(snap,id)
-		var findings: Array=scan.get("findings",[]) if scan.get("findings",[]) is Array else []
-		var threat_text:=rcopy("rmd_detected_count","Findings: {count}").replace("{count}",(str(findings.size()) if not scan.is_empty() else "—"))
-		var threats:=label(d,row,threat_text,13,UI.RED if not findings.is_empty() else MUTED)
-		threats.mouse_filter=Control.MOUSE_FILTER_IGNORE
-		threats.size_flags_stretch_ratio=0.55
-		var scan_label:=label(d,row,recovery_scan_text(d,device,snap),13,UI.GREEN if bool(scan.get("clean",false)) and bool(device.get("scan_current",false)) else UI.WARNING)
-		scan_label.mouse_filter=Control.MOUSE_FILTER_IGNORE
-		scan_label.size_flags_stretch_ratio=1.0
-	if found==0: label(d,table,copy("edr_no_results"),14,MUTED)
+		var row:=Control.new();row.name="EdrWorkflow_"+id;row.custom_minimum_size.y=148*scale(d);map.add_child(row)
+		var links:=WorkflowLinks.new();row.add_child(links);links.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		var layout:=HBoxContainer.new();layout.add_theme_constant_override("separation",28);row.add_child(layout);layout.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		var job:=_object_button(d,layout,"EdrBusinessProbe_"+id,func():_business_probe(d,id))
+		var job_box:=_object_content(job)
+		Glyph.add_to(job_box,"file",30,BLUE)
+		var job_title:=label(d,job_box,str(scenario.get("endpoint_business",{}).get(id,"業務サイト")),14)
+		job_title.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
+		var observation: Dictionary=state.get("business_observations",{}).get(id,{})
+		var result:="未測定"
+		if not observation.is_empty():
+			result=str(observation.get("response","")).get_slice("\n",0)
+			if str(observation.get("state",""))!=_business_state(snap,id): result="変更前 · "+result
+		label(d,job_box,result,12,MUTED).horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
+		var open:=_object_button(d,layout,"EdrDevice_"+id,func():_open_recovery_device(d,state,id))
+		var device_box:=_object_content(open)
+		var image:=TextureRect.new();image.texture=Workstation;image.expand_mode=TextureRect.EXPAND_IGNORE_SIZE;image.stretch_mode=TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		image.custom_minimum_size.y=86*scale(d);device_box.add_child(image)
+		label(d,device_box,device_name(id)+" · "+copy("edr_isolated" if bool(device.get("isolated",false)) else "edr_connected"),14).horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
+		var scan_label:=label(d,device_box,recovery_scan_text(d,device,snap),12,MUTED);scan_label.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
+		var event: Dictionary={}
+		var trace_index:=0
+		for index in device.get("events",[]).size():
+			var item: Dictionary=device.events[index]
+			if str(item.get("type",""))=="outbound": event=item;trace_index=index;break
+		var evidence:=_object_button(d,layout,"EdrTrace_"+id,func():_open_recovery_device(d,state,id,trace_index))
+		var evidence_box:=_object_content(evidence)
+		Glyph.add_to(evidence_box,"network",28,MUTED)
+		label(d,evidence_box,"記録 "+str(event.get("time","—")),12,MUTED).horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
+		label(d,evidence_box,str(event.get("process","通信記録なし")),13).horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
+		label(d,evidence_box,str(event.get("remote_address","—")),12,MUTED).horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
+		links.bind_controls(job,open,evidence,bool(device.get("isolated",false)),scale(d))
+		for object in [job_box,device_box,evidence_box]:_ignore_object_children(object)
+	label(d,body,"実線: 接続設定   ×: 隔離   点線: 過去の記録",11,MUTED)
+
+static func _object_button(d, parent: Node, name: String, callback: Callable) -> Button:
+	var node:=button(d,parent,"",name,callback)
+	node.size_flags_horizontal=Control.SIZE_EXPAND_FILL
+	for pair in [["normal",Color.TRANSPARENT,Color.TRANSPARENT],["hover",Color("f0f6fc"),Color("deecf9")],["pressed",Color("deecf9"),BLUE]]:
+		var style:=UI.style(pair[1],pair[2],4,4,4);style.set_border_width_all(1)
+		node.add_theme_stylebox_override(pair[0],style)
+	return node
+
+static func _object_content(parent: Control) -> VBoxContainer:
+	var margin:=MarginContainer.new();parent.add_child(margin);margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	for edge in ["left","right","top","bottom"]:margin.add_theme_constant_override("margin_"+edge,5)
+	var box:=VBoxContainer.new();box.add_theme_constant_override("separation",3);box.size_flags_vertical=Control.SIZE_SHRINK_CENTER;margin.add_child(box)
+	box.alignment=BoxContainer.ALIGNMENT_CENTER
+	return box
+
+static func _ignore_object_children(parent: Control) -> void:
+	parent.mouse_filter=Control.MOUSE_FILTER_IGNORE
+	for child in parent.get_children():
+		if child is Control:_ignore_object_children(child)
+
+static func _open_recovery_device(d, state: Dictionary, id: String, event_index: int = 0) -> void:
+	state["device"]=id;state["event_index"]=event_index;state["query"]="";state["event_type"]="all"
+	state["details_open"]=true;state["recovery_tab"]="timeline";state.erase("file_id");state.erase("output")
+	d._render_endpoint()
+	_show_top.call_deferred(d)
+
+static func _show_top(d) -> void:
+	if not is_instance_valid(d) or not d.widgets.has("browser"):return
+	var node: Node=d.widgets.browser.page
+	while node!=null and not node is ScrollContainer:node=node.get_parent()
+	if node is ScrollContainer:node.scroll_vertical=0
 
 static func recovery_device(d, body: VBoxContainer, state: Dictionary, snap: Dictionary, current: Dictionary) -> void:
 	var selected:=str(state.get("device",""))
@@ -366,10 +393,14 @@ static func recovery_device(d, body: VBoxContainer, state: Dictionary, snap: Dic
 	var current_scan:=recovery_scan_data(snap,selected)
 	var current_findings: Array=current_scan.get("findings",[]) if current_scan.get("findings",[]) is Array else []
 	var threat_text:=rcopy("rmd_detected_count","Findings: {count}").replace("{count}",(str(current_findings.size()) if not current_scan.is_empty() else "—"))
-	chip(d,status,threat_text,current_findings.is_empty() and bool(current.get("scan_current",false)))
-	chip(d,status,copy("rmd_scan_results")+" · "+recovery_scan_text(d,current,snap),bool(current.get("scan_current",false)) and bool(current_scan.get("clean",false)))
+	if current_scan.is_empty() or not bool(current.get("scan_current",false)):
+		var unknown:=label(d,status,"○  "+threat_text+" · "+recovery_scan_text(d,current,snap),13,MUTED)
+		unknown.size_flags_horizontal=Control.SIZE_FILL;unknown.autowrap_mode=TextServer.AUTOWRAP_OFF
+	else:
+		chip(d,status,threat_text,current_findings.is_empty())
+		chip(d,status,copy("rmd_scan_results")+" · "+recovery_scan_text(d,current,snap),bool(current_scan.get("clean",false)))
 	var controls:=HFlowContainer.new();controls.add_theme_constant_override("h_separation",8);controls.add_theme_constant_override("v_separation",6);body.add_child(controls)
-	button(d,controls,copy("edr_collect"),"EdrCollect",func():run(d,"collect"))
+	button(d,controls,("✓  " if bool(snap.get("evidence",{}).get("valid",false)) else "")+copy("edr_collect"),"EdrCollect",func():run(d,"collect"))
 	button(d,controls,rcopy("rmd_scan","Scan"),"EdrScan_"+selected,func():run(d,"scan "+selected))
 	var isolated:=bool(current.get("isolated",false))
 	var isolate_button:=button(d,controls,copy("edr_release" if isolated else "edr_isolate"),("EdrRelease_" if isolated else "EdrIsolate_")+selected,func():run(d,("release " if isolated else "isolate ")+selected))
@@ -420,7 +451,7 @@ static func recovery_file_rows(d, table: VBoxContainer, snap: Dictionary, device
 		if not query.is_empty() and not haystack.contains(query.to_lower()):continue
 		found+=1
 		var file_id:=str(file.get("id",""))
-		var open:=button(d,table,"","EdrRecoveryFile_"+file_id,func():state["file_id"]=file_id;d._render_endpoint())
+		var open:=button(d,table,"","EdrRecoveryFile_"+file_id,func():state["file_id"]=file_id;d._render_endpoint();_show_top.call_deferred(d))
 		open.size_flags_horizontal=Control.SIZE_EXPAND_FILL;open.custom_minimum_size.y=44*scale(d)
 		var row_style:=UI.style(Color.WHITE,LINE,10,6,0);row_style.set_border_width_all(0);row_style.border_width_bottom=1
 		open.add_theme_stylebox_override("normal",row_style)

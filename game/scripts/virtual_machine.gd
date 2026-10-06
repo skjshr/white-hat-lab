@@ -181,6 +181,7 @@ func setup(chapter: int, saved: Dictionary = {}, scenario: Dictionary = {}) -> v
 		return
 	state = {"schema":2,"access_model_version":ACCESS_MODEL_VERSION,"portal_model_version":2 if _chapter == 5 else 1,"identity_model_version":IDENTITY_MODEL_VERSION if _chapter == 3 else 1,"samba_model_version":2 if _chapter == 0 else 1,"backup_model_version":2 if _chapter == 1 else 1,"edr_model_version":EDR_MODEL_VERSION if _chapter == 4 else 1,"firewall_model_version":FIREWALL_MODEL_VERSION if _chapter == 2 else 1,"fs":{},"dirs":["/","/etc","/srv","/srv/data","/srv/share","/var","/var/log","/tmp","/home",OPERATOR_HOME,"/restore","/evidence"],"cwd":OPERATOR_HOME,"host":HOSTS[_chapter],"connected":false,"config_path":PATHS[_chapter],"service":SERVICES[_chapter],"active":true,"applied":{},"snapshots":[],"events":[],"observations":[],"last_restore":{},"error":"","mutation":0,"dirty":false,"scenario":scenario.duplicate(true)}
 	state.dirs.append(PATHS[_chapter].get_base_dir())
+	if not str(scenario.get("host", "")).is_empty(): state.host = str(scenario.host)
 	state.fs[PATHS[_chapter]] = Samba.configuration_text({"staff":"read","guest":"write"}) if _chapter == 0 else (FirewallPolicy.configuration_text(scenario.initial if scenario.has("initial") else {"dns":"off","business":"allow","admin_public":"allow","tls":"off"}) if _chapter == 2 else "# " + SERVICES[_chapter] + " service configuration\n" + SEEDS[_chapter])
 	if not scenario.is_empty() and scenario.has("initial"):
 		if _chapter != 2: state.fs[PATHS[_chapter]] = _config_text(scenario.initial)

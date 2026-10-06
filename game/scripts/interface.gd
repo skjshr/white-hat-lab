@@ -6,6 +6,7 @@ const SALES_PANEL = preload("res://scripts/sales_panel.gd")
 const HARDWARE_QUOTE_BOARD = preload("res://scripts/hardware_quote_board.gd")
 const QUOTE_PRICE_SCALE = preload("res://scripts/quote_price_scale.gd")
 const SHARE_INTAKE_BOARD = preload("res://scripts/share_intake_board.gd")
+const ENDPOINT_ENGAGEMENT = preload("res://scripts/endpoint_engagement.gd")
 const PROCUREMENT_PANEL = preload("res://scripts/procurement_panel.gd")
 const GAME_THEME = preload("res://scripts/game_theme.gd")
 const M = preload("res://scripts/management_ui.gd")
@@ -963,6 +964,11 @@ func _contract_detail(offer: Dictionary) -> void:
 	elif share_quote:
 		var scene := SHARE_INTAKE_BOARD.new(); scene.setup(intake, text_scale); body.add_child(scene)
 	else: body.add_child(_label(UI.copy("board_facts") % [int(offer.targets),int(quote.budget),int(quote.costs)],14,INK))
+	var endpoint_quote: bool = str(offer.get("case_id",""))=="endpoint-recovery" and offer.get("target_specs",[]).any(func(item):return int(item.get("scenario",{}).get("endpoint_engagement",0))==1)
+	if endpoint_quote:
+		var rates:=HFlowContainer.new();rates.name="QuoteEndpointCompensation";rates.add_theme_constant_override("h_separation",16);body.add_child(rates)
+		for text in ["不審送信 ¥%d / 分" % ENDPOINT_ENGAGEMENT.SEND_RATE, "制作・入稿の停止 ¥%d / 分" % ENDPOINT_ENGAGEMENT.STOP_RATE]:
+			var rate:=_label(text,13,INK);rate.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART;rates.add_child(rate)
 	if not offer.unlocked:
 		var eligibility := _label(" / ".join(PackedStringArray(reasons)),14,WARNING)
 		eligibility.name = "ContractEligibility"
@@ -1020,7 +1026,7 @@ func _contract_detail(offer: Dictionary) -> void:
 		if is_instance_valid(invoice_total_label): invoice_total_label.text = UI.copy("billing_total") + "  ¥%d" % int(proposed.get("invoice_total", proposed.get("quoted_fee", 0)))
 		var reaction := str(proposed.price_reaction)
 		var reaction_text: String = {"discount":"割安 · 顧客評価 +3","fair":"相場内 · 顧客評価 ±0","premium":"高め · 顧客評価 -3"}.get(reaction,reaction)
-		price_preview.text=(UI.copy("board_profit") % int(proposed.net)) + "  ·  " + reaction_text
+		price_preview.text=(UI.copy("board_profit") % int(proposed.net)) + ("（補償前）" if endpoint_quote else "") + "  ·  " + reaction_text
 		if not bool(proposed.affordable): price_preview.text += "\n顧客予算超過。成約不可。"
 		elif int(proposed.net) < 0: price_preview.text += "\n基本経費を下回る赤字見積です。"
 		price_preview.add_theme_color_override("font_color", WARNING if not bool(proposed.affordable) or int(proposed.net)<0 else INK)

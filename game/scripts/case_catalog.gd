@@ -141,6 +141,9 @@ static func _add_endpoint_recovery() -> void:
 		probe.merge({"recorded":false,"passed":false,"fresh":false,"result":""})
 	var config := {"pc_a":"connected","pc_b":"connected","logs":"keep","reset":"wait"}
 	_catalog.append({"id":"endpoint-recovery","title":DISPLAY_COPY.copy("rmd_case_title"),"client":CLIENTS[1],"chapter":4,"category":"response","tier":2,"required_level":5,"brief":DISPLAY_COPY.copy("rmd_case_brief"),"service":SERVICES[4],"evidence":[DISPLAY_COPY.copy("rmd_guide_review")],"hints":[],"debrief":DISPLAY_COPY.copy("rmd_debrief"),"checks":[DISPLAY_COPY.copy("rmd_check_business"),DISPLAY_COPY.copy("rmd_check_clean"),DISPLAY_COPY.copy("rmd_check_evidence")],"probes":probes,"desired":config.duplicate(true),"initial":config.duplicate(true),"required_files":[],"reward":7800,"suspect":"pc_a","edr_recovery_required":true})
+	_catalog.back().engagement_brief = "本社の外部送信と、入稿室の業務停止を調査してください。端末・ファイル・変更記録を比較し、証拠を保全して両拠点の業務を復旧します。対応中の不審送信は1分¥100、入稿・制作の停止は1分¥50の補償経費がかかります。"
+	_catalog.back().reward = 15600 # Both authored sites; retain the former two-site quote.
+	_catalog.back().targets = preload("res://scripts/endpoint_engagement.gd").profiles(_catalog.back())
 
 static func _add_advanced_cases() -> void:
 	_add_portal_pentest()

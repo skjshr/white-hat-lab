@@ -81,16 +81,24 @@ func run() -> void:
 	if not game.state.accepted: _finish(); return
 	game.inspect_mission(); game.vm_run("ssh client")
 	check(bool(game._vm().state.get("scenario",{}).get("edr_recovery_required",false)), "recovery scenario enabled")
-	game.set_settings({"resolution":"960x640" if narrow else "1280x720","window_mode":"windowed","text_scale":1.3 if narrow else 1.0,"volume":0}, false)
-	root.size = Vector2i(960,640) if narrow else Vector2i(1280,720); await frames(3)
+	game.set_settings({"resolution":"960x600" if narrow else "1280x720","window_mode":"windowed","text_scale":1.3 if narrow else 1.0,"volume":0}, false)
+	root.size = Vector2i(960,600) if narrow else Vector2i(1280,720)
+	# Graphics._sync_surface skips the headless display. Match the native logical
+	# viewport too, otherwise a 960-pixel window still lays out a 1280-pixel canvas.
+	root.content_scale_size = root.size
+	await frames(3)
 	ui.open_panel("terminal"); pc=ui.desktop; pc._show_app("browser"); await frames(4)
 	if not pc.windows.browser.maximized: pc.windows.browser.toggle_maximize()
 	pc._browse_url(pc.EDR_URL, true); await frames(8)
 	check(control("EdrRecoveryInventoryTab") != null and control("EdrDevice_pc_a") != null and control("EdrDevice_pc_b") != null, "endpoint recovery inventory")
+	var map_work: String=JSON.stringify(game.state.work,"",true)
+	var map_vm: String=JSON.stringify(game._vm().export_state(),"",true)
+	pc._render_endpoint();await frames(4)
+	check(JSON.stringify(game.state.work,"",true)==map_work and JSON.stringify(game._vm().export_state(),"",true)==map_vm,"workflow map does not measure, charge or repair")
+	for id in ["EdrBusinessProbe_pc_a","EdrDevice_pc_a","EdrTrace_pc_a"]:
+		var object=control(id)
+		check(object is Control and object.get_global_rect().end.x<=root.size.x+2,"workflow object fits "+id)
 	await capture("inventory")
-	var search = control("EdrRecoveryDeviceSearch")
-	if search is LineEdit:
-		search.grab_focus(); search.text="PC-A"; search.text_changed.emit(search.text); await frames(3); check(search.has_focus(), "inventory search preserves focus"); game.changed.emit(); await frames(2); check(search.has_focus(), "refresh preserves inventory focus"); search.text=""; search.text_changed.emit("")
 	var pointer_before := root.get_mouse_position(); press_id("EdrDevice_pc_a", "open PC-A"); await frames(6); var pointer_after := root.get_mouse_position(); check(pointer_before.distance_to(pointer_after) <= 1.0, "device selection does not move pointer")
 	check(control("EdrRecoveryTabs") != null and control("RecoveryTab_timeline") != null and control("RecoveryTab_files") != null, "timeline and files tabs")
 	press_id("EdrCollect", "collect endpoint evidence"); await frames(6)
@@ -107,10 +115,12 @@ func run() -> void:
 	await capture("file-profile")
 	check(pc.widgets.browser.page.get_global_rect().end.x <= root.size.x+2,"file profile fits viewport width")
 	var before_state := JSON.stringify(game._vm().export_state(),"",true); var old_save: String = game.save_path; var old_backup: String = game.backup_path; var old_previous: String = game.previous_path; var old_settings: String = game.settings_path
+	var before_work: String=JSON.stringify(game.state.work,"",true);var before_clock: int=int(game.state.clock_minutes)
 	game.save_path="user://qa-remediation-save-failure-"+profile+"/missing/state.json"; game.backup_path=game.save_path+".bak"; game.previous_path=game.save_path+".previous"; game.settings_path=game.save_path+".settings"
 	press_id("EdrQuarantine_pc_a-sync", "quarantine save failure"); await frames(6)
 	var failed_output: Dictionary = pc.edr_ui.get("output",{})
 	check(int(failed_output.get("code",0))==507, "quarantine save failure code"); check(JSON.stringify(game._vm().export_state(),"",true)==before_state, "quarantine save failure rollback")
+	check(JSON.stringify(game.state.work,"",true)==before_work and int(game.state.clock_minutes)==before_clock,"failed save rolls back compensation and elapsed time")
 	game.save_path=old_save; game.backup_path=old_backup; game.previous_path=old_previous; game.settings_path=old_settings
 	# Desktop notifications are a status label; Node.notification is a method.
 	if is_instance_valid(pc.status): pc.status.hide()
@@ -146,7 +156,25 @@ func run() -> void:
 	press_id("EdrView_devices"); await frames(4); await capture("restored-devices")
 	check(game.save_game() and game.load_game(),"remediated case survives actual save reload")
 	for probe in game.diagnostic_probes(): game.run_diagnostic(str(probe.get("id", "")))
-	game.verify(); check(game.can_deliver(), "fresh diagnostics and verify permit delivery"); check(game.deliver(), "endpoint recovery delivers through Game")
+	game.verify()
+	check(not game.can_deliver(),"first site alone cannot complete two-site engagement")
+	check(pc._select_target(1),"select press-room through desktop session");await frames(5)
+	game.vm_run("ssh client");pc._show_app("browser");pc._browse_url(pc.EDR_URL,true);await frames(5)
+	check(not _snapshot().get("files",[]).any(func(item):return str(item.get("name",""))=="sync-agent.exe"),"press-room has no injected infection")
+	await _select_device("pc_a")
+	press_id("EdrCollect");await frames(4)
+	await _scan("pc_a");press_id("EdrRelease_pc_a");await frames(4)
+	press_id("EdrBusinessProbe_pc_a");await frames(4)
+	await _scan("pc_a")
+	var business_result = control("EdrBusinessResult_pc_a")
+	check(business_result is Label and "200 OK" in business_result.text and not "変更前" in business_result.text,"scan alone keeps the business connection observation current")
+	await _select_device("pc_b");await _scan("pc_b")
+	for probe in game.diagnostic_probes():game.run_diagnostic(str(probe.get("id","")))
+	game.verify();check(game.can_deliver(),"both sites with fresh diagnostics permit delivery")
+	var impact_cost: int=preload("res://scripts/endpoint_engagement.gd").total_cost(game.state.work.get("endpoint_impact",{}))
+	check(impact_cost>0,"response order leaves real compensation expense")
+	check(game.deliver(), "endpoint recovery delivers through Game")
+	check(int(game.state.last_receipt.cost)==700+impact_cost and game.state.last_receipt.endpoint_impact==game.state.history.back().endpoint_impact,"receipt and history retain compensation without double charging")
 	_finish()
 
 func _finish() -> void:

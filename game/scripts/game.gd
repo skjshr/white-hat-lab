@@ -1603,6 +1603,7 @@ func _store_vm(before: Array, previous_mutation: int) -> bool:
 func _work_add(minutes: float, cost: int = 0, advance_clock := true) -> void:
 	if not state.has("work") or not state.accepted: return
 	var added := maxf(0.0, minutes)
+	preload("res://scripts/endpoint_engagement.gd").advance(self, added)
 	state.work.minutes = float(state.work.get("minutes", 0.0)) + added
 	state.work.incident_cost = int(state.work.get("incident_cost", 0)) + cost
 	if advance_clock:state.clock_minutes = maxi(BUSINESS_START_MINUTE, int(state.get("clock_minutes", BUSINESS_START_MINUTE)) + int(round(added)))
@@ -1662,6 +1663,7 @@ func vm_run(command: String, work_kind: String = "") -> String:
 	var machine = _vm()
 	var operation := command.strip_edges().trim_prefix("sudo ")
 	var console_operation := operation.begins_with("cp ") or int(state.get("contract", {}).get("linked_identity_version", 0)) == 1 or operation.begins_with("identity ") or operation.begins_with("edr ") or operation.begins_with("portal ") or (_current_chapter()==0 and int(machine.state.get("samba_model_version",1))>=2) or (_current_chapter()==1 and int(machine.state.get("backup_model_version",1))>=2) or (operation.begins_with("curl ") and _current_chapter()==5 and int(machine.state.get("portal_model_version",1))>=2)
+	console_operation = console_operation or int(machine.state.get("scenario", {}).get("endpoint_engagement", 0)) == 1
 	var transactional := transaction_requested or console_operation
 	var previous_state: Dictionary = transaction_state if transaction_requested else (state.duplicate(true) if console_operation else {})
 	var previous_assignments: Dictionary = transaction_assignments if transaction_requested else (_assignments.duplicate(true) if console_operation else {})
@@ -2341,6 +2343,7 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 		var supply_cost := int(CUSTOMER_STOCK.product(str(supply_requirement.get("sku",CUSTOMER_STOCK.SKU))).get("unit_cost",CUSTOMER_STOCK.UNIT_COST)) if not supply_requirement.is_empty() else 0
 		state.offers.append({"id":"career-%d-%s" % [state.day,selected.id],"case_id":selected.id,"chapter":selected.chapter,"title":selected.title,"client":selected.client,"brief":selected.brief,"service":selected.service,"category":category,"grade":tier,"targets":sites,"target_specs":target_specs.duplicate(true),"reward":reward,"base_reward":reward,"required_credit":0,"required_level":needed_level,"required_rank":required_rank,"required_skills":required_skills,"work_family":str(selected.get("work_family","chapter-"+str(selected.chapter))),"supply_requirement":supply_requirement,"estimated_cost":700+supply_cost,"estimated_budget":estimated_budget,"deadline_text":_clock_text(BUSINESS_START_MINUTE+estimated_budget),"unlocked":_case_skills_met(selected,state.skills) and level>=needed_level,"market_available":false,"market_day":int(state.day),"retired_from_new_offers":bool(selected.get("retired_from_new_offers",false))})
 		state.offers[-1].advanced_work_minutes = int(selected.get("advanced_work_minutes", 0))
+		if selected.has("engagement_brief"): state.offers[-1].brief = str(selected.engagement_brief)
 	var candidate_offers: Array = []
 	var carried_cases: Array = []
 	var completed_cases: Dictionary = {}
@@ -2661,6 +2664,7 @@ func choose_contract(id: String) -> bool:
 			for spec in specs:
 				var target_chapter := int(spec.get("chapter",state.chapter))
 				state.targets.append({"chapter":target_chapter,"case_id":str(spec.get("case_id",offer.case_id)),"name":str(spec.get("name","拠点")),"config":_default_fields(target_chapter),"inspected":false,"checks":[],"revision":0,"validated_revision":-1,"baseline_recorded":false,"baseline_locked":false,"baseline_config":"","baseline_sha":"","baseline_report":"","baseline_report_content":""})
+				if spec.get("scenario", null) is Dictionary: state.targets[-1].scenario = spec.scenario.duplicate(true)
 			var selected_case_id := str(offer.get("case_id", ""))
 			if not handoff_scenario.is_empty():
 				state.targets[0].scenario = handoff_scenario
@@ -2779,6 +2783,7 @@ func deliver() -> bool:
 	if state.care_agreements.has(client): renewal_outcome = "active" if bool(state.care_agreements[client].get("active",false)) else "suspended"
 	state.last_receipt = {"day":int(state.day),"client":mission().client,"title":mission().title,"fee":fee,"bonus":bonus,"baseline_bonus":baseline_bonus,"quality_score":int(review.get("score",0)),"grade":str(review.get("grade","C")),"baseline_sites":int(review.get("recorded_sites",0)),"baseline_total_sites":int(review.get("total_sites",1)),"cost":int(status.costs),"material_cost":material_cost,"material_billable":invoiced and material_cost > 0,"hardware_serial":str(_customer_hardware().get("serial","")),"net":net,"minutes":status.minutes,"elapsed_minutes":status.get("elapsed_minutes",status.minutes),"budget":status.budget,"rating":status.quality,"credit_gain":int(state.credit)-credit_before,"credit_before":credit_before,"credit_after":state.credit,"checks":state.checks.duplicate(true),"plan":state.contract_plan,"level_before":level_before,"level_after":int(company_level().level),"xp_gain":maxi(net,0),"satisfaction_before":satisfaction_before,"satisfaction_after":int(relation.satisfaction),"renewal_outcome":renewal_outcome,"price_satisfaction_delta":price_satisfaction_delta,"quality_satisfaction_delta":quality_satisfaction_delta,"agreed_fee":agreed_fee,"reference_fee":reference_fee}
 	state.last_receipt.case_id = str(state.contract.get("case_id", ""))
+	if state.work.has("endpoint_impact"): state.last_receipt.endpoint_impact = state.work.endpoint_impact.duplicate(true)
 	state.last_receipt.delivery_results = _delivery_results()
 	if invoiced:
 		var draft: Dictionary = BILLING.create_draft(state, id, state.contract, state.last_receipt)
@@ -2794,6 +2799,7 @@ func deliver() -> bool:
 	state.history[-1].work_family = str(delivered_case.get("work_family", COMPANY_CYCLE.FAMILIES[_current_chapter()]))
 	# Keep this delivery's existing observations after dispatch contexts retire.
 	state.history[-1].delivery_results = state.last_receipt.delivery_results.duplicate(true)
+	if state.last_receipt.has("endpoint_impact"): state.history[-1].endpoint_impact = state.last_receipt.endpoint_impact.duplicate(true)
 	state.history[-1].request_mail = preload("res://scripts/mail_request_record.gd").capture(mission(),str(state.contract.get("case_id","")),str(mission().get("id","" )).begins_with("service-4-case-") and int(_vm().state.get("edr_model_version",1))>=2)
 	state.clients[id] = {"title":mission().title,"debrief":mission().debrief,"config":_vm().state.get("applied", {}).duplicate(true),"evidence":mission().evidence.duplicate(true),"checks":state.checks.duplicate(true)}
 	COMPANY_CYCLE.record_delivery(self, id, state.last_receipt)

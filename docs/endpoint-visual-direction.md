@@ -1,0 +1,21 @@
+# EDR の造形と素材
+
+2026-10-06。業務接続 → 端末 → 通信記録を、操作できる対象として配置する。青い実線は現在の接続設定、切断記号は隔離、灰色の点線は過去の通信記録。画像自体には状態・文字・判定を焼き込まない。接続の測定、スキャン、ファイルの詳細はプレイヤーの操作で開く。
+
+文字は既存同梱の Noto Sans JP を使い、本文14、補足12、見出し24を基本とする。平常・未測定は中立色、操作と選択は青、失敗は文字と記号を併用する。実サービスのブランドフォントは追加配布しない。
+
+参照した一次資料:
+
+- [Fluent 2 typography](https://fluent2.microsoft.design/typography): 文字の階層、本文と補足の大きさ。
+- [Fluent 2 color](https://fluent2.microsoft.design/color): 中立色・操作色・状態色の使い分け。
+- [Defender incident investigation](https://learn.microsoft.com/en-us/defender-endpoint/investigate-incidents): 端末と証拠を関係から調べる構造。
+- [Defender device actions](https://learn.microsoft.com/en-us/defender-endpoint/respond-machine-alerts): 隔離・解除・調査と操作履歴。
+- [Kenney Furniture Kit](https://kenney.nl/assets/furniture-kit): 無料モデルの公式 CC0 表記を確認。既存のオフィス素材と整合を検討するための参照。今回、新しいモデル一式は追加していない。
+
+## 組み込んだ生成画像
+
+ファイル: `game/assets/ui/endpoint/workstation-v1.png`。Codex の組み込み画像生成で作成した透明背景の端末。ローカルな別サービス、追加APIキー、有料外部サービスは使用していない。素材の加工は行わず、Godotの表示サイズで縮小する。生成物を CC0 素材として扱わない。
+
+生成時の最終プロンプト:
+
+> Use case: stylized-concept. Asset type: a reusable transparent game UI hardware sprite for White Hat Lab, a professional fictional security-company simulator. Create one premium semi-realistic isometric desktop workstation: a slim dark graphite monitor with a quiet blank deep navy screen, compact dark graphite computer tower, pale gray keyboard and mouse. The whole workstation is one centered isolated object, view from slightly above at a 3/4 angle, front of monitor facing the viewer. Refined hard-surface construction, precise bevels, restrained industrial design, clean studio lighting with subtle blue reflection. Crisp readable silhouette when reduced to 100 pixels. Actual transparent background, no ground plane, no environment, no table, no opaque shadow rectangle. Keep every object fully inside the image with 12 percent empty margin. No text, no logo, no label, no security badge, no baked-in status indicator, no rounded UI panel, no border. The image will be used as an interactive device object, with separate code-rendered status and connections.

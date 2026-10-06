@@ -8,6 +8,10 @@ static func enabled(state: Dictionary) -> bool:
 	var scenario: Dictionary = state.get("scenario", {}) if state.get("scenario", {}) is Dictionary else {}
 	return bool(scenario.get("edr_recovery_required", false))
 
+static func affected(state: Dictionary, device: String) -> bool:
+	var suspect := str(state.get("scenario", {}).get("suspect", "pc_a"))
+	return suspect == device or suspect == "both"
+
 static func initialize(state: Dictionary) -> void:
 	if state.has("edr_files"): return
 	state.edr_files = []
@@ -23,13 +27,13 @@ static func initialize(state: Dictionary) -> void:
 	for device in ["pc_a", "pc_b"]:
 		_add_file(state, fs, device, "%s-office" % device, "office.exe", "/endpoints/%s/office.exe" % device, "Signed Business Suite", "CHG-EDR-OFFICE-2026", true)
 		_add_file(state, fs, device, "%s-backup" % device, "backup-agent.exe", "/endpoints/%s/backup-agent.exe" % device, "unsigned", "CHG-EDR-BACKUP-2026")
-		if device == "pc_a":
+		if affected(state, device):
 			_add_file(state, fs, device, "%s-sync" % device, "sync-agent.exe", "/endpoints/%s/sync-agent.exe" % device, "Unsigned", "")
 		state.edr_processes.append({"device":device,"file_id":"%s-office" % device,"sha256":_seed_hash("office.exe"),"running":true})
 		state.edr_processes.append({"device":device,"file_id":"%s-backup" % device,"sha256":_seed_hash("backup-agent.exe"),"running":true})
-		if device == "pc_a": state.edr_processes.append({"device":device,"file_id":"%s-sync" % device,"sha256":MALICIOUS_SHA256,"running":true})
+		if affected(state, device): state.edr_processes.append({"device":device,"file_id":"%s-sync" % device,"sha256":MALICIOUS_SHA256,"running":true})
 		state.edr_persistence.append({"device":device,"file_id":"%s-backup" % device,"sha256":_seed_hash("backup-agent.exe")})
-		if device == "pc_a": state.edr_persistence.append({"device":device,"file_id":"%s-sync" % device,"sha256":MALICIOUS_SHA256})
+		if affected(state, device): state.edr_persistence.append({"device":device,"file_id":"%s-sync" % device,"sha256":MALICIOUS_SHA256})
 		_seed_events(state, device)
 
 static func _seed_hash(name: String) -> String:
@@ -45,7 +49,7 @@ static func _seed_events(state: Dictionary, device: String) -> void:
 	for item in state.get("edr_devices", []):
 		if not item is Dictionary or str(item.get("id", "")) != device: continue
 		item.events = []
-		if device == "pc_a":
+		if affected(state, device):
 			item.events.append({"time":"09:41","type":"outbound","process":"sync-agent.exe","publisher":"Unsigned","remote_address":"203.0.113.77","detail":"unusual outbound connection","change_ref":"","file_id":"%s-sync" % device,"file_name":"sync-agent.exe"})
 			item.events.append({"time":"09:42","type":"file_read","process":"sync-agent.exe","publisher":"Unsigned","remote_address":"","detail":"endpoint file access","change_ref":"","file_id":"%s-sync" % device,"file_name":"sync-agent.exe"})
 			item.events.append({"time":"09:43","type":"dns","process":"sync-agent.exe","publisher":"Unsigned","remote_address":"203.0.113.77","detail":"unlisted endpoint lookup","change_ref":"","file_id":"%s-sync" % device,"file_name":"sync-agent.exe"})
@@ -55,6 +59,8 @@ static func _seed_events(state: Dictionary, device: String) -> void:
 			item.events.append({"time":"09:44","type":"outbound","process":"office.exe","publisher":"Signed Business Suite","remote_address":"192.0.2.20","detail":"approved business session","change_ref":"CHG-EDR-OFFICE-2026","file_id":"%s-office" % device,"file_name":"office.exe"})
 			item.events.append({"time":"09:42","type":"file_read","process":"backup-agent.exe","publisher":"unsigned","remote_address":"","detail":"endpoint file access","change_ref":"CHG-EDR-BACKUP-2026","file_id":"%s-backup" % device,"file_name":"backup-agent.exe"})
 			item.events.append({"time":"09:43","type":"dns","process":"backup-agent.exe","publisher":"unsigned","remote_address":"192.0.2.20","detail":"approved backup lookup","change_ref":"CHG-EDR-BACKUP-2026","file_id":"%s-backup" % device,"file_name":"backup-agent.exe"})
+		if int(state.get("scenario",{}).get("endpoint_engagement",0))==1:
+			for event in item.events: event.time=str(event.time).replace("09:","08:")
 
 static func _file(state: Dictionary, device: String, file_id: String = "") -> Dictionary:
 	for item in state.get("edr_files", []):
