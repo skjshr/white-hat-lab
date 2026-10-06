@@ -372,6 +372,12 @@
     "saas_check_controls": "対象連携の同意と発行済み接続を取り消す",
     "saas_check_denial": "現在の設定で対象接続の取得拒否を実測する",
     "saas_check_invoice": "現在の設定で対象請求の受付を確認する",
-    "saas_check_audit": "同期と持出しの監査記録を保全する"
+    "saas_check_audit": "同期と持出しの監査記録を保全する",
+    "saas_sessions_check_report": "発行原本と接続ごとの調査記録を報告する",
+    "saas_sessions_check_consent": "承認済みの業務連携を維持する",
+    "saas_sessions_check_revocation": "根拠を確認した対象接続を失効させる",
+    "saas_sessions_check_denial": "失効した接続の取得拒否を実測する",
+    "saas_sessions_check_billing": "請求BILL-003の受付を確認する",
+    "saas_sessions_check_aggregation": "社内集計の接続を実測する"
   }
 }

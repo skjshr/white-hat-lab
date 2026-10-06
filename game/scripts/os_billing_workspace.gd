@@ -396,7 +396,7 @@ static func _invoicedetail(d, parent: Node, invoice: Dictionary, payments: Array
 	if int(invoice.get("baseline_bonus", 0)) > 0:
 		var bonus_label := copy("baseline_bonus", "Baseline bonus")
 		for delivery in d.game.state.get("history", []):
-			if str(delivery.get("id", "")) == str(invoice.get("contract_id", "")) and str(delivery.get("case_id", "")) in ["advanced-saas-response", "advanced-saas-watch"]:
+			if str(delivery.get("id", "")) == str(invoice.get("contract_id", "")) and str(delivery.get("case_id", "")) in ["advanced-saas-response", "advanced-saas-watch", "advanced-saas-sessions"]:
 				bonus_label = "流出予防ボーナス"
 				break
 		_line_item(d, lines, bonus_label, _number(invoice.get("baseline_bonus", 0)))

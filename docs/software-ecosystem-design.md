@@ -110,3 +110,11 @@ Godot --path game --script res://tests/test_service_monitor_ui.gd -- --qa-profil
 **実装済み：納品後のSaaS監視から翌日の緊急案件まで。** 前回納品の承認原本とDAY2の新しい未承認連携を比較し、通常請求を復旧しながらアクセスを封じ込める。2,400円の一回限りの設備投資で同期前に警報を出す経路と、未導入で顧客通報が9分遅れ、調査中に3コピーが流出する経路を通常見積・受注から実プレイした。導入側は同じ請求を再確認して5/5受入、流出0で納品。設備導入・警報・完了/中止は保存されるが、継続保守契約や無限の毎日案件・収入は作らない。費用、時間、顧客、外部連携、データコピーはゲーム内の架空値・模擬データで、実サービスへ接続しない。詳細な操作・経営結果と検証限界は [`gameplay-cycle.md`](gameplay-cycle.md) の本サイクル記録を参照。
 
 **今後の調査：認証と実データ取得の相関。** [MicrosoftのOAuth連携悪用報告](https://www.microsoft.com/en-us/security/blog/2026/07/13/defending-saas-based-applications-against-shinyhunters-oauth-abuse/)（2026-07-13公開、2025年半ば〜2026年半ばの観測）と[クラウド侵入報告](https://www.microsoft.com/en-us/security/blog/2026/09/09/passkey-themed-social-engineering-leads-identity-cloud-compromise/)（2026-09-09公開、同年5月以降の活動）を参考に、承認変更だけを侵害の証明とせず、認証成功と実際のデータ取得を結び付けて調査する題材を検討する。MFA登録や複数クラウドの相関調査は未実装であり、次の優先候補とする。
+
+## 2026-10-06 承認済み連携と接続単位の対応
+
+[Google Cloud Threat Horizons H1 2026](https://cloud.google.com/security/report/resources/cloud-threat-horizons-report-h1-2026)は、2025年下半期の調査をもとに、正規のクラウド・SaaSアクセス経路を悪用するデータ窃取を扱う。これを題材に、承認済みアプリでも接続の発行元・要求先を照合する架空案件を実装した。正規の月次集計にも120行の要求を持たせ、要求量だけでは判別できない比較にした。要求先・対象行数の調査と、同期で実際に送信されたコピーは別の原記録で扱う。接続の選択的失効、全接続停止後の新IDによる業務復旧、流出後の報告・補償を一つの案件にした。Lv5・調査復旧Lv1から通常受注でき、前日の監視案件で信頼を得た顧客は市場で優先される。全停止からの復旧・納品・入金、および遅延流出からの中止と保存再開を実操作した。詳しい経営結果と未検証範囲は [`gameplay-cycle.md`](gameplay-cycle.md) に記録している。
+
+[Microsoftの緊急アクセス失効資料](https://learn.microsoft.com/en-us/entra/identity/users/users-revoke-access)（2026-06-19更新）は、アプリが発行するセッションをアプリ側で管理する必要と、失効の反映が方式に依存する点を説明する。ゲームの個別券失効は架空アプリ自身の機能であり、実在の全IdP/SaaSに共通する即時失効機能として説明しない。同期時刻・データ量・費用もゲーム内の値とする。
+
+AIについては[GTIGの2026-09-08報告](https://cloud.google.com/blog/topics/threat-intelligence/from-prompting-to-autonomy-the-evolution-of-adversarial-ai)を確認した。AIによる作業自動化と、開発用アシスタントが読む構成物への攻撃を題材候補にする。現行助手は取得済み記録の整理まで。将来の高レベル機能では、実行範囲・承認・利用費と誤対応の影響を会社の判断にするが、この接続案件へ自律実行は追加しない。

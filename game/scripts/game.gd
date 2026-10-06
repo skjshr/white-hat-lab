@@ -1126,7 +1126,7 @@ func rollback_configuration() -> bool:
 func case_review() -> Dictionary:
 	if str(state.get("contract", {}).get("case_id", "")) == "advanced-portal" and advanced_active():
 		return _portal_case_review()
-	if str(state.get("contract", {}).get("case_id", "")) in ["advanced-saas-response", "advanced-saas-watch"] and advanced_active():
+	if str(state.get("contract", {}).get("case_id", "")) in ["advanced-saas-response", "advanced-saas-watch", "advanced-saas-sessions"] and advanced_active():
 		return _saas_case_review()
 	var total := maxi(1, state.get("targets", []).size())
 	var recorded_sites := 0
@@ -1552,12 +1552,12 @@ func incident_active() -> bool:
 	return advanced_active() and str(state.advanced.get("kind", "")) == "advanced-portal" and bool(state.advanced.get("exercise", {}).get("active", false))
 
 func _advanced_case_id(case_id: String) -> bool:
-	return case_id in ["advanced-hunt","advanced-pentest","advanced-pentest-relay","advanced-recovery","advanced-ddos","advanced-api","advanced-supplychain","advanced-cloud","advanced-saas-response","advanced-saas-watch","advanced-malware","advanced-detection","advanced-portal"]
+	return case_id in ["advanced-hunt","advanced-pentest","advanced-pentest-relay","advanced-recovery","advanced-ddos","advanced-api","advanced-supplychain","advanced-cloud","advanced-saas-response","advanced-saas-watch","advanced-saas-sessions","advanced-malware","advanced-detection","advanced-portal"]
 
 func _advanced_engine(case_id: String = ""):
 	var id := case_id if not case_id.is_empty() else str(state.get("contract", {}).get("case_id", ""))
 	if id == "advanced-portal": return load("res://scripts/pentest_portal.gd")
-	if id in ["advanced-saas-response", "advanced-saas-watch"]: return load("res://scripts/saas_response.gd")
+	if id in ["advanced-saas-response", "advanced-saas-watch", "advanced-saas-sessions"]: return load("res://scripts/saas_response.gd")
 	if id in ["advanced-cloud","advanced-malware","advanced-detection"]: return load("res://scripts/advanced_threats.gd")
 	if id in ["advanced-ddos","advanced-api","advanced-supplychain"]: return load("res://scripts/advanced_assurance.gd")
 	return load("res://scripts/advanced_operations.gd")
@@ -1666,7 +1666,7 @@ func _saas_outcome() -> Dictionary:
 	var model: Dictionary = state.get("advanced", {})
 	if str(model.get("kind", "")) != "advanced-saas-response": return {}
 	var outcome := {"costs":state.work.get("saas_costs", {}).duplicate(true)}
-	for key in ["model_version", "elapsed_minutes", "egress", "invoice", "report", "records", "organization", "watch_source", "threat_app_id"]:
+	for key in ["model_version", "elapsed_minutes", "egress", "invoice", "report", "records", "organization", "watch_source", "threat_app_id", "session_case"]:
 		if model.has(key): outcome[key] = model[key].duplicate(true) if model[key] is Dictionary or model[key] is Array else model[key]
 	return outcome
 
@@ -2651,6 +2651,17 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 	var protected_leads: Array = quoted_case_ids.keys()
 	protected_leads.append_array(carried_cases)
 	var relationship_priorities: Array = COMPANY_CYCLE.priority_case_ids(self); relationship_priorities.append_array(recovery_cases)
+	# A successfully supported SaaS customer brings a more detailed access
+	# investigation from the next business day. Read the saved delivery;
+	# never rewrite its observations or upgrade an already-issued contract.
+	if not completed_cases.has("advanced-saas-sessions"):
+		for delivery in state.get("history", []):
+			if not delivery is Dictionary or not str(delivery.get("kind", "")).is_empty(): continue
+			if str(delivery.get("case_id", "")) != "advanced-saas-watch" or int(delivery.get("day", 0)) >= int(state.day): continue
+			var source_checks: Array = delivery.get("checks", [])
+			if str(delivery.get("id", "")) in state.get("completed_ids", []) and str(delivery.get("rating", "")) == "on_time" and int(delivery.get("satisfaction_after", 0)) >= 40 and not source_checks.is_empty() and source_checks.all(func(row): return row is Dictionary and bool(row.get("passed", false))):
+				relationship_priorities.push_front("advanced-saas-sessions")
+				break
 	if not hotel_recoveries.is_empty(): relationship_priorities.push_front(HOTEL_HANDOFF.CASE_ID)
 	if not saas_incidents.is_empty(): relationship_priorities.push_front("advanced-saas-watch")
 	state.market_leads = MARKET_DEMAND.prioritize_relationships(candidate_offers, state.market_leads, relationship_priorities, protected_leads, int(state.day))

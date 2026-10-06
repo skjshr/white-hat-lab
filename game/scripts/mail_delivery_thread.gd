@@ -27,10 +27,12 @@ static func project(state: Dictionary, record: Dictionary) -> Dictionary:
 	if confirmed:
 		reply.body = "対応内容の受取を確認しました。"
 		var saas: Dictionary = own.get("saas_outcome", {})
-		if str(reply.case_id) in ["advanced-saas-response", "advanced-saas-watch"] and not saas.is_empty():
+		if str(reply.case_id) in ["advanced-saas-response", "advanced-saas-watch", "advanced-saas-sessions"] and not saas.is_empty():
 			var lost: int = saas.get("egress", {}).get("exported_rows", []).size()
 			var invoice: Dictionary = saas.get("invoice", {})
 			reply.body = "連携の同意と発行済み接続の取消、既存接続からの取得拒否を確認しました。"
+			if str(reply.case_id) == "advanced-saas-sessions":
+				reply.body = "承認済みの連携を維持したまま、対象接続の失効と取得拒否を確認しました。請求と社内集計を続けられます。"
 			reply.body += "\n予定同期による持出しはありませんでした。" if lost == 0 else "\n外部へ持ち出された延べ%d行の記録は消せません。補償費用¥%dと影響報告を受領しました。" % [lost, int(saas.get("costs", {}).get("impact_cost", 0))]
 			reply.body += "\n請求 %s / 受付 %s を確認しました。" % [str(invoice.get("id", "")), str(invoice.get("receipt_id", ""))]
 			if invoice.get("attempts", []).any(func(attempt): return int(attempt.get("status", 0)) >= 400): reply.body += "\n途中で未受付になった請求も、同じ原票から復旧できています。"

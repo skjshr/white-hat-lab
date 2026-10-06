@@ -2,6 +2,7 @@ extends RefCounted
 const U=preload("res://scripts/investigation_ui.gd")
 const UI=preload("res://scripts/ui_theme.gd")
 const Canvas=preload("res://scripts/saas_response_canvas.gd")
+const SessionIdentity=preload("res://scripts/os_saas_session_identity.gd")
 const KIND:="advanced-saas-response"
 const INK=Color("242a30")
 const MUTED=Color("68747e")
@@ -111,6 +112,9 @@ static func _clock(parent:Node,n:Dictionary) -> void:
 	_label(row,"延べ送信 %d行" % count,14,UI.RED if count>0 else INK)
 
 static func _identity(d,parent:Node,n:Dictionary) -> void:
+	if n.get("session_case", {}) is Dictionary and not n.get("session_case", {}).is_empty():
+		SessionIdentity.render(d,parent,n)
+		return
 	var body:=_surface(parent,"IDENTITY / 連携アクセス",Color("252a2e"));var s:=U.state(d,KIND)
 	_clock(body,n)
 	_watch_source(d,body,n)
@@ -188,26 +192,39 @@ static func _raw(d,parent:Node,n:Dictionary) -> void:
 
 static func _billing(d,parent:Node,n:Dictionary) -> void:
 	var body:=_surface(parent,"請求デスク / 顧客への送信",PURPLE);var invoice:Dictionary=n.get("invoice",{})
+	var session_case:Dictionary=n.get("session_case",{});var session_billing:Dictionary=session_case.get("billing",{})
 	var attempts:Array=invoice.get("attempts",[]);var last:Dictionary=attempts.back() if not attempts.is_empty() else {}
 	var accepted:=not str(invoice.get("receipt_id","")).is_empty();var actions:=U.row(body)
 	var submit:=_button(actions,"受付を再確認" if accepted else "同じ請求を再送 · 2分" if int(last.get("status",0))>=400 else "顧客へ送信 · 2分","SaasSubmitInvoice",_send.bind(d,"submit_invoice",{"invoice_id":str(invoice.get("id",""))}))
 	submit.disabled=invoice.is_empty()
-	_button(actions,"連携アクセスへ","SaasBillingOpenIdentity",_billing_identity.bind(d))
+	var used_session:=str(session_billing.get("used_session_id",""))
+	var return_session:=used_session
+	if return_session.is_empty():
+		for session in session_case.get("sessions",[]):
+			if str(session.get("purpose",""))=="billing":return_session=str(session.get("id",""))
+	_button(actions,"使用した券へ" if not used_session.is_empty() else "請求の接続券へ" if not session_case.is_empty() else "連携アクセスへ","SaasBillingOpenIdentity",_billing_identity.bind(d,return_session))
 	_raw(d,body,n)
 	var app:=_app(n,"app-19");var route:=U.row(body)
-	_label(route,str(invoice.get("id",""))+" → app-19 → 顧客受付",13,PURPLE)
-	_label(route,"同意 "+("✓" if bool(app.get("consent",{}).get("enabled",false)) else "×")+"  接続 "+("✓" if bool(app.get("session",{}).get("active",false)) else "×"),12,MUTED)
+	if not session_case.is_empty():
+		_label(route,str(invoice.get("id",""))+" → app-19",13,PURPLE)
+		if not used_session.is_empty():_button(route,"接続券 "+used_session,"SaasBillingSession",_billing_identity.bind(d,used_session))
+		else:_label(route,"→ ? 未送信" if last.is_empty() else "→ × 有効な請求券なし",13,MUTED)
+		_label(route,"→ 顧客受付",13,PURPLE)
+	else:
+		_label(route,str(invoice.get("id",""))+" → app-19 → 顧客受付",13,PURPLE)
+		_label(route,"同意 "+("✓" if bool(app.get("consent",{}).get("enabled",false)) else "×")+"  接続 "+("✓" if bool(app.get("session",{}).get("active",false)) else "×"),12,MUTED)
 	if not last.is_empty():_response(body,d,n,last)
 	var canvas:=Canvas.new();body.add_child(canvas)
 	canvas.configure("invoice",{"id":str(invoice.get("id","")),"customer":str(invoice.get("customer","")),"lines":invoice.get("lines",[]),"total":int(invoice.get("amount",0)),"status":int(last.get("status",0)),"receipt_id":str(invoice.get("receipt_id",""))},float(d.game.settings.get("text_scale",1.0)),"",Callable())
 
-static func _billing_identity(d) -> void:
+static func _billing_identity(d,session_id:String="") -> void:
 	var s:=U.state(d,KIND);s.selected_app="app-19";s.selected_part="app"
+	if not session_id.is_empty():s.selected_session=session_id;s.session_evidence=""
 	U.choose(d,KIND,"tab","identity")
 
 static func _record_label(record:Dictionary) -> String:
 	var action:=str(record.get("action",""))
-	return str({"baseline_reference":"前回の申請原本","consent_review":"申請原本","inspect_app":"アプリ調査","collect_audit":"監査取得","probe_session":"接続実測","change_consent":"同意変更","change_session":"接続変更","session_reissued_by_sync":"同期で再発行","scheduled_export":"外部同期","password_reset":"パスワード更新","submit_invoice":"顧客請求","organize_manual":"手動整理","organize_assistant":"助手による整理","submit_report":"報告提出"}.get(action,action))
+	return str({"baseline_reference":"前回の申請原本","consent_review":"申請原本","session_issued":"接続券の発行原本","connection_issued":"接続券の発行原本","inspect_connection":"要求調査","revoke_connection":"接続券を失効","revoke_all_connections":"全接続券を失効","reissue_connection":"接続券を再発行","inspect_app":"アプリ調査","collect_audit":"監査取得","probe_session":"接続実測","change_consent":"同意変更","change_session":"接続変更","session_reissued_by_sync":"同期で再発行","scheduled_export":"外部同期","password_reset":"パスワード更新","submit_invoice":"顧客請求","organize_manual":"手動整理","organize_assistant":"助手による整理","submit_report":"報告提出"}.get(action,action))
 
 static func _records(d,parent:Node,n:Dictionary,checks:Array) -> void:
 	var body:=_surface(parent,"調査ノート / 原記録と時系列",Color("3d5655"));var s:=U.state(d,KIND)
@@ -223,7 +240,15 @@ static func _records(d,parent:Node,n:Dictionary,checks:Array) -> void:
 		if str(check.get("id",""))=="report":current_report=bool(check.get("passed",false))
 	if submitted:_label(status,("✓ 最新の報告" if current_report else "△ 追補が必要")+" · 第%d版" % int(report.get("version",1)),13,UI.GREEN if current_report else UI.WARNING)
 	var actions:=U.row(body)
-	_button(actions,"原本と最新記録を選択","SaasSelectRecords",_select_records.bind(d,sources))
+	var required_sessions:Array=[]
+	for session in n.get("session_case",{}).get("sessions",[]).slice(0,3):required_sessions.append(str(session.get("id","")))
+	if not required_sessions.is_empty():
+		var missing:Array=required_sessions.duplicate();var audit_acquired:=false
+		for record in sources:
+			if str(record.get("action",""))=="inspect_connection":missing.erase(_record_session(record))
+			if str(record.get("action",""))=="collect_audit":audit_acquired=true
+		if not missing.is_empty() or not audit_acquired:_label(status,("未調査 " + " / ".join(missing) if not missing.is_empty() else "")+(" · 監査未取得" if not audit_acquired else ""),13,MUTED)
+	_button(actions,"原本と最新記録を選択","SaasSelectRecords",_select_records.bind(d,sources,required_sessions))
 	var same:=ids.size()==organized.size() and not ids.is_empty()
 	for id in ids:
 		if not id in organized:same=false
@@ -250,7 +275,7 @@ static func _records(d,parent:Node,n:Dictionary,checks:Array) -> void:
 	var selection:=U.row(body);var show_sources:=bool(s.get("show_sources",false))
 	_button(selection,("▾" if show_sources else "▸")+" 原記録を選ぶ (%d/32件)" % ids.size(),"SaasShowRecordSelection",U.choose.bind(d,KIND,"show_sources",not show_sources))
 	if show_sources:
-		for record in sources:_timeline_row(d,body,record,true,ids)
+		for record in sources:_timeline_row(d,body,record,true,ids,not required_sessions.is_empty())
 
 static func _source_records(records:Array) -> Array:
 	var result:Array=[]
@@ -264,19 +289,24 @@ static func _source_records(records:Array) -> Array:
 
 static func _organized_rails(d,parent:Node,n:Dictionary,sources:Array,ids:Array) -> void:
 	var lanes:Array=[]
+	var session_case:Dictionary=n.get("session_case",{});var by_session:=not session_case.is_empty()
 	var prior: HFlowContainer
 	for record in sources:
 		if str(record.get("id", "")) not in ids or str(record.get("action", "")) != "baseline_reference": continue
 		if prior == null:
 			prior = U.row(parent); _label(prior, "▤ 過去の申請原本 · DAY %02d" % int(record.get("data", {}).get("source_day", 0)), 13, MUTED)
 		_button(prior, str(record.get("app", ""))+" · "+str(record.get("data", {}).get("source_record_id", "")), "SaasOrganized_"+str(record.get("id", "")), _open.bind(d, str(record.get("id", ""))))
-	for app in n.get("apps",[]):lanes.append({"id":str(app.get("id","")),"label":str(app.get("id",""))+" / "+str(app.get("label","")),"events":[]})
-	lanes.append({"id":"","label":"共通 / 利用者と監査原本","events":[]})
+	if by_session:
+		for session in session_case.get("sessions",[]):lanes.append({"id":str(session.get("id","")),"label":str(session.get("id",""))+" / "+str(session.get("device","")),"events":[]})
+	else:
+		for app in n.get("apps",[]):lanes.append({"id":str(app.get("id","")),"label":str(app.get("id",""))+" / "+str(app.get("label","")),"events":[]})
+	lanes.append({"id":"","label":"共通 / 承認・監査原本" if by_session else "共通 / 利用者と監査原本","events":[]})
 	for record in sources:
 		if not str(record.get("id","")) in ids:continue
 		if str(record.get("action", "")) == "baseline_reference": continue
+		var record_lane:=_record_session(record) if by_session else str(record.get("app",""))
 		for lane in lanes:
-			if str(lane.id)!=str(record.get("app","")):continue
+			if str(lane.id)!=record_lane:continue
 			var label:=_record_label(record)
 			if str(record.get("action",""))=="scheduled_export":label+=" · %d行" % record.get("data",{}).get("row_ids",[]).size()
 			elif str(record.get("action","")) in ["change_consent","change_session"]:label+=" · "+("再開" if bool(record.get("data",{}).get("enabled",false)) else "停止")
@@ -289,7 +319,10 @@ static func _organized_rails(d,parent:Node,n:Dictionary,sources:Array,ids:Array)
 
 static func _open_organized(id:String,_part:String,d) -> void:
 	_open(d,id)
-static func _timeline_row(d,parent:Node,record:Dictionary,selectable:bool,ids:Array) -> void:
+static func _record_session(record:Dictionary) -> String:
+	return str(record.get("data",{}).get("session_id",record.get("data",{}).get("used_session_id",record.get("session_id",""))))
+
+static func _timeline_row(d,parent:Node,record:Dictionary,selectable:bool,ids:Array,by_session:bool=false) -> void:
 	var row:=U.row(parent);var id:=str(record.get("id",""));var code:=int(record.get("status",0))
 	var reference := str(record.get("action", "")) == "baseline_reference"
 	if selectable:
@@ -302,14 +335,21 @@ static func _timeline_row(d,parent:Node,record:Dictionary,selectable:bool,ids:Ar
 	_label(row,"▤ 過去 DAY %02d" % int(record.get("data", {}).get("source_day", 0)) if reference else "│ %02d分" % int(record.get("minute",0)),12,MUTED)
 	_button(row,_record_label(record)+" · "+id,("SaasRecord_" if selectable else "SaasOrganized_")+id,_open.bind(d,id))
 	_label(row,str(record.get("app",""))+ (" · 保存原本" if reference else " "+("✓ " if code==200 else "× ")+str(code)),12,UI.RED if code>=400 and not reference else MUTED)
+	var session_id:=_record_session(record)
+	if by_session and not session_id.is_empty():_label(row,session_id,12,MUTED)
 	if str(record.get("action",""))=="scheduled_export":_label(row,"%d行" % record.get("data",{}).get("row_ids",[]).size(),12,UI.RED if code==200 else MUTED)
 
-static func _select_records(d,records:Array) -> void:
-	var chosen:Array=[];var audit:=""
+static func _select_records(d,records:Array,required_sessions:Array=[]) -> void:
+	var chosen:Array=[];var audit:="";var inspections:Dictionary={}
 	for record in records:
 		var id:=str(record.get("id",""))
-		if id in ["audit-1","audit-2"] or str(record.get("action", "")) == "baseline_reference":chosen.append(id)
+		if id in ["audit-1","audit-2","audit-3","audit-4"] or str(record.get("action", "")) == "baseline_reference":chosen.append(id)
 		if str(record.get("action",""))=="collect_audit":audit=id
+		var session_id:=str(record.get("data",{}).get("session_id",record.get("session_id","")))
+		if str(record.get("action",""))=="inspect_connection" and session_id in required_sessions and int(record.get("status",0))==200:inspections[session_id]=id
+	for session_id in required_sessions:
+		var inspection_id:=str(inspections.get(session_id,""))
+		if not inspection_id.is_empty() and not inspection_id in chosen:chosen.append(inspection_id)
 	if not audit.is_empty() and not audit in chosen:chosen.append(audit)
 	for index in range(records.size()-1,-1,-1):
 		if chosen.size()>=32:break
