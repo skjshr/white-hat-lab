@@ -4,6 +4,7 @@ const UI=preload("res://scripts/ui_theme.gd")
 const Canvas=preload("res://scripts/saas_response_canvas.gd")
 const SessionIdentity=preload("res://scripts/os_saas_session_identity.gd")
 const Business=preload("res://scripts/os_saas_business.gd")
+const AssistantCompare=preload("res://scripts/saas_assistant_compare_canvas.gd")
 const KIND:="advanced-saas-response"
 const INK=Color("242a30")
 const MUTED=Color("68747e")
@@ -92,6 +93,7 @@ static func _send(d,action:String,args:Dictionary={}) -> void:
 	var record:Dictionary=result.get("data",{}).get("record",{})
 	if action=="organize_records" and bool(result.get("ok",false)):
 		var s:=U.state(d,KIND);s.show_organization=true;s.show_sources=false;d.widgets.advanced.next_scroll=0
+		if str(args.get("mode",""))=="assistant":s.show_compare_timeline=false;s.erase("open_record")
 	if not record.is_empty():
 		U.state(d,KIND).last_record=str(record.get("id",""));d._save_session(false)
 
@@ -246,7 +248,8 @@ static func _record_label(record:Dictionary) -> String:
 	return str({"baseline_reference":"前回の申請原本","consent_review":"申請原本","session_issued":"接続券の発行原本","connection_issued":"接続券の発行原本","inspect_connection":"要求調査","revoke_connection":"接続券を失効","revoke_all_connections":"全接続券を失効","reissue_connection":"接続券を再発行","inspect_app":"アプリ調査","collect_audit":"監査取得","probe_session":"接続実測","change_consent":"同意変更","change_session":"接続変更","session_reissued_by_sync":"同期で再発行","scheduled_export":"外部同期","password_reset":"パスワード更新","submit_invoice":"顧客請求","organize_manual":"手動整理","organize_assistant":"助手による整理","submit_report":"報告提出"}.get(action,action))
 
 static func _records(d,parent:Node,n:Dictionary,checks:Array) -> void:
-	var body:=_surface(parent,"調査ノート / 原記録と時系列",Color("3d5655"));var s:=U.state(d,KIND)
+	var partner:=str(n.get("model_version",""))=="saas-partner-v1"
+	var body:=_surface(parent,"Evidence Desk / 原本の照合" if partner else "調査ノート / 原記録と時系列",Color("3d5655"));var s:=U.state(d,KIND)
 	var assistant:Dictionary=d.game.record_assistant_status();var ids:Array=s.get("record_ids",[]);var organization:Dictionary=n.get("organization",{});var report:Dictionary=n.get("report",{})
 	var sources:=_source_records(n.get("records",[]));var organized:Array=organization.get("record_ids",[])
 	var unorganized:=0
@@ -263,7 +266,15 @@ static func _records(d,parent:Node,n:Dictionary,checks:Array) -> void:
 	if required_sessions.is_empty():
 		for session in n.get("session_case",{}).get("sessions",[]).slice(0,3):required_sessions.append(str(session.get("id","")))
 	var required_records:Array=n.get("session_case",{}).get("required_record_ids",["audit-1","audit-2","audit-3","audit-4"])
-	if not required_sessions.is_empty():
+	if partner:
+		var selected_originals:=0;var selected_requests:Array=[]
+		for record in sources:
+			if not str(record.get("id","")) in ids:continue
+			if str(record.get("id","")) in required_records:selected_originals+=1
+			var session_id:=_record_session(record)
+			if str(record.get("action",""))=="inspect_connection" and int(record.get("status",0))==200 and session_id in required_sessions and not session_id in selected_requests:selected_requests.append(session_id)
+		_label(status,"選択根拠 · 原本 %d/%d · 要求 %d/%d" % [selected_originals,required_records.size(),selected_requests.size(),required_sessions.size()],13,MUTED)
+	elif not required_sessions.is_empty():
 		var missing:Array=required_sessions.duplicate();var audit_acquired:=false
 		for record in sources:
 			if str(record.get("action",""))=="inspect_connection":missing.erase(_record_session(record))
@@ -275,8 +286,9 @@ static func _records(d,parent:Node,n:Dictionary,checks:Array) -> void:
 		if not id in organized:same=false
 	var manual:=_button(actions,"整理済み" if same else "手動で整理 · %d分" % int(assistant.get("manual_minutes",5)),"SaasOrganizeManual",_send.bind(d,"organize_records",{"mode":"manual","record_ids":ids}))
 	manual.disabled=ids.is_empty() or ids.size()>32 or same
-	var assisted:=_button(actions,"整理済み" if same else "助手で整理 · %d分 / ¥%d" % [int(assistant.get("assistant_minutes",2)),int(assistant.get("run_cost",300))],"SaasOrganizeAssistant",_send.bind(d,"organize_records",{"mode":"assistant","record_ids":ids}))
-	assisted.disabled=not bool(assistant.get("owned",false)) or ids.is_empty() or ids.size()>32 or same
+	var same_assistant:bool=same and (not partner or str(organization.get("mode",""))=="assistant" and not organization.get("comparison",{}).is_empty())
+	var assisted:=_button(actions,("照合済み" if partner else "整理済み") if same_assistant else ("助手で照合" if partner else "助手で整理")+" · %d分 / ¥%d" % [int(assistant.get("assistant_minutes",2)),int(assistant.get("run_cost",300))],"SaasOrganizeAssistant",_send.bind(d,"organize_records",{"mode":"assistant","record_ids":ids}))
+	assisted.disabled=not bool(assistant.get("owned",false)) or ids.is_empty() or ids.size()>32 or same_assistant
 	var previous_ids:Array=report.get("latest",report.get("original",{})).get("record_ids",[])
 	var same_submission:=submitted and ids.size()==previous_ids.size()
 	for id in ids:
@@ -290,13 +302,69 @@ static func _records(d,parent:Node,n:Dictionary,checks:Array) -> void:
 	_raw(d,body,n)
 	if not organized.is_empty():
 		var header:=U.row(body);var expanded:=bool(s.get("show_organization",true))
-		_label(header,("助手" if str(organization.get("mode",""))=="assistant" else "手動")+"の整理 · %d件 / %d分時点" % [organized.size(),int(organization.get("created_minute",0))],14)
+		var has_comparison:bool=partner and str(organization.get("mode",""))=="assistant" and not organization.get("comparison",{}).is_empty()
+		_label(header,("助手の照合" if has_comparison else "助手の整理" if str(organization.get("mode",""))=="assistant" else "手動の整理")+" · %d件 / %d分時点" % [organized.size(),int(organization.get("created_minute",0))],14)
 		_button(header,"整理を閉じる" if expanded else "前の整理を開く・無料","SaasOpenOrganization",U.choose.bind(d,KIND,"show_organization",not expanded))
-		if expanded:_organized_rails(d,body,n,sources,organized)
+		if expanded:
+			if has_comparison:
+				_assistant_comparison(d,body,n,organization)
+				var timeline:=bool(s.get("show_compare_timeline",false))
+				_button(body,"▾ 選択原本の時系列" if timeline else "▸ 選択原本の時系列","SaasShowComparisonTimeline",U.choose.bind(d,KIND,"show_compare_timeline",not timeline))
+				if timeline:_organized_rails(d,body,n,sources,organized)
+			else:_organized_rails(d,body,n,sources,organized)
 	var selection:=U.row(body);var show_sources:=bool(s.get("show_sources",false))
 	_button(selection,("▾" if show_sources else "▸")+" 原記録を選ぶ (%d/32件)" % ids.size(),"SaasShowRecordSelection",U.choose.bind(d,KIND,"show_sources",not show_sources))
 	if show_sources:
 		for record in sources:_timeline_row(d,body,record,true,ids,not required_sessions.is_empty())
+
+static func _assistant_comparison(d,parent:Node,n:Dictionary,organization:Dictionary) -> void:
+	var snapshot:Dictionary=organization.get("comparison",{});var approval:Dictionary=snapshot.get("approval",{})
+	var authority:=U.row(parent);_label(authority,"保存済み記録のみ",13,Color("286c91"))
+	var revision:=int(snapshot.get("world_revision",-1));var current_revision:=int(n.get("world_revision",0))
+	_label(authority,"照合作成 世代%d" % revision+(" · 現在%d / 旧世代" % current_revision if revision!=current_revision else " · 作成後の変更なし"),12,MUTED)
+	for prior in approval.get("prior",[]):
+		var id:=str(prior.get("reference_record_id",""))
+		if not id.is_empty():_button(authority,"当時 "+str(prior.get("approved_change","")),"SaasAssistantPriorApproval_"+id,_open.bind(d,id))
+	var lanes:Array=[]
+	for source in snapshot.get("lanes",[]):
+		var observed:Dictionary=source.get("observed",{});var prior:Dictionary=source.get("prior_issue",{})
+		var destinations:Array=approval.get("destinations",[]);var authorized:Dictionary={}
+		for target in destinations:
+			if str(target.get("device",""))==str(source.get("device","")):authorized=target;break
+		if authorized.is_empty() and not observed.is_empty():
+			for target in destinations:
+				if str(target.get("destination","")).get_slice("/",0)==str(observed.get("destination","")).get_slice("/",0):authorized=target;break
+		var prior_cell:=_comparison_cell(str(prior.get("destination","")),str(prior.get("record_id","")),-1,not prior.is_empty(),"選択内に原本なし")
+		if not prior.is_empty():
+			prior_cell.service=("当時 承認なし" if prior.get("approved",null)==false else "当時 "+str(prior.get("approved_change","―")))+" / "+str(prior.get("session_id",""))
+			if str(prior.get("destination","")) in ["","unknown"]:prior_cell.folder="要求先記載なし"
+		var approval_cell:=_comparison_cell(str(authorized.get("destination","")),str(approval.get("current_record_id","")),int(authorized.get("rows",-1)),str(approval.get("state","unknown"))=="known","承認未選択")
+		approval_cell["device"]=str(authorized.get("device",""))
+		if approval_cell.known and authorized.is_empty():
+			var places:Array=[]
+			for target in destinations:places.append(str(target.get("destination","")).get_slice("/",1))
+			approval_cell.service=str(approval.get("approved_change",""));approval_cell.folder=" / ".join(places)
+		var request_cell:=_comparison_cell(str(observed.get("destination","")),str(source.get("inspection_record_id","")),int(observed.get("rows",-1)),not observed.is_empty(),"要求未選択")
+		var record_state:="? 要求記録なし"
+		if not str(source.get("inspection_record_id","")).is_empty():record_state="要求原本 世代%d · %s" % [int(source.get("inspection_world_revision",-1)),"現世代" if bool(source.get("inspection_fresh",false)) else "旧世代"]
+		lanes.append({"session_id":str(source.get("session_id","")),"device":str(source.get("device","")),"prior":prior_cell,"approval":approval_cell,"request":request_cell,"result":str(source.get("approval_match","unknown")),"record_state":record_state})
+	var canvas:=AssistantCompare.new();parent.add_child(canvas)
+	canvas.configure({"lanes":lanes},float(d.game.settings.get("text_scale",1.0)),_assistant_open_source.bind(d),_assistant_open_session.bind(d))
+	if lanes.is_empty():_label(parent,"? 接続券の発行原本・要求記録が未選択",13,MUTED)
+
+static func _comparison_cell(destination:String,record_id:String,rows:int,known:bool,missing:String) -> Dictionary:
+	var service:=destination.get_slice("/",0);var folder:=destination.trim_prefix(service+"/")
+	if not destination.contains("/"):
+		service="保存された要求先"
+		folder=str({"internal-aggregate":"社内集計","internal-aggregation":"社内集計","external-storage":"外部保存"}.get(destination,destination))
+	return {"service":service,"folder":folder,"record_id":record_id,"rows":rows,"known":known,"missing":missing}
+
+static func _assistant_open_source(id:String,d) -> void:
+	_open(d,id)
+
+static func _assistant_open_session(id:String,d) -> void:
+	var s:=U.state(d,KIND);s.selected_session=id;s.session_evidence="";s.erase("open_record")
+	U.choose(d,KIND,"tab","identity");d.widgets.advanced.next_scroll=0
 
 static func _source_records(records:Array) -> Array:
 	var result:Array=[]

@@ -9,6 +9,7 @@ const LEGACY_SESSIONS_MODEL_VERSION := "saas-sessions-v1"
 const SESSIONS_MODEL_VERSION := "saas-sessions-v2"
 const PARTNER_SESSIONS_MODEL_VERSION := "saas-partner-v1"
 const SESSIONS := preload("res://scripts/saas_session_model.gd")
+const RECORD_COMPARISON := preload("res://scripts/saas_record_comparison.gd")
 const ASSISTANT_COST := 300
 const ROW_IMPACT_COST := 500
 const LEDGER_ROWS := [
@@ -487,6 +488,7 @@ static func _act(s: Dictionary, action: String, args: Dictionary) -> Dictionary:
 	var app: Dictionary
 	var usage_cost := 0
 	var minutes := 0
+	var organization_hash := ""
 	match action:
 		"inspect_connection":
 			if not sessions_case or SESSIONS.get_session(s.session_case, session_id).is_empty(): return _error("発行原本にある接続IDを選んでください。")
@@ -544,8 +546,15 @@ static func _act(s: Dictionary, action: String, args: Dictionary) -> Dictionary:
 				var organization_id := str(value)
 				if organization_id.is_empty() or organization_id in organization_ids or _record_by_id(s, organization_id).is_empty(): return _error("未取得の原記録を含むため整理できません。")
 				organization_ids.append(organization_id)
-			var organization_hash := _organized_hash(organization_ids)
-			if str(s.get("organization", {}).get("input_hash", "")) == organization_hash: return _result(true,false,false,0,0,0,"同じ整理結果を表示しています。",{"input_hash":organization_hash,"record_ids":organization_ids})
+			organization_hash = _organized_hash(organization_ids)
+			var previous_organization: Dictionary = s.get("organization", {})
+			if str(previous_organization.get("input_hash", "")) == organization_hash:
+				var same_saved_mode := str(previous_organization.get("mode", "")) == organization_mode
+				var previous_comparison: Variant = previous_organization.get("comparison", {})
+				var comparison_saved := false
+				if previous_comparison is Dictionary: comparison_saved = int(previous_comparison.get("version", 0)) == RECORD_COMPARISON.VERSION
+				var may_reuse := not partner_case or (same_saved_mode and (organization_mode != "assistant" or comparison_saved))
+				if may_reuse: return _result(true,false,false,0,0,0,"同じ整理結果を表示しています。",{"input_hash":organization_hash,"record_ids":organization_ids})
 			minutes = 5 if organization_mode == "manual" else 2
 			usage_cost = ASSISTANT_COST if organization_mode == "assistant" else 0
 		"submit_report":
@@ -715,9 +724,14 @@ static func _act(s: Dictionary, action: String, args: Dictionary) -> Dictionary:
 			var organization_action_mode := str(args.mode)
 			var organization_action_hash := _organized_hash(organization_record_ids)
 			if organization_action_mode == "assistant": usage_cost = ASSISTANT_COST
-			s.organization = {"mode":organization_action_mode,"record_ids":organization_record_ids.duplicate(),"input_hash":organization_action_hash,"usage_cost":usage_cost,"impact_cost":impact_cost,"created_minute":int(s.elapsed_minutes),"world_revision":int(s.world_revision)}
+			var organization_result := {"mode":organization_action_mode,"record_ids":organization_record_ids.duplicate(),"input_hash":organization_action_hash,"usage_cost":usage_cost,"impact_cost":impact_cost,"created_minute":int(s.elapsed_minutes),"world_revision":int(s.world_revision)}
+			if partner_case and organization_action_mode == "assistant":
+				var comparison: Dictionary = RECORD_COMPARISON.build(s.get("records", []), organization_record_ids, organization_action_hash, int(s.get("elapsed_minutes", 0)), int(s.get("world_revision", 0)))
+				if comparison.is_empty(): return _error("選択した原記録から比較を作れませんでした。記録を選び直してください。")
+				organization_result["comparison"] = comparison
+			s.organization = organization_result
 			record = _append_record(s, "", "case-records", "organize_" + organization_action_mode, 200, "取得済み原記録を時系列に整理しました。", {"record_ids":organization_record_ids.duplicate(),"input_hash":organization_action_hash,"creates_evidence":false,"world_revision":int(s.world_revision)})
-			result.message = "原記録を整理しました。新しい証拠は作成していません。"
+			result.message = "選択した記録の承認範囲と調査結果を照合しました。照合結果は証拠ではありません。" if partner_case and organization_action_mode == "assistant" else "取得済み原記録を整理しました。新しい証拠は作成していません。"
 		"submit_report":
 			var submission_record_ids: Array[String] = []
 			for value in args.record_ids: submission_record_ids.append(str(value))
@@ -965,6 +979,13 @@ static func view(state: Dictionary, selected: String = "") -> Dictionary:
 	invoice["last_attempt"] = attempts.back().duplicate(true) if not attempts.is_empty() else {}
 	var egress_state: Dictionary = state.get("egress", {})
 	var exported_rows: Array = egress_state.get("exported_rows", []).duplicate(true)
+	var organization_view: Dictionary = state.get("organization", {}).duplicate(true)
+	if str(state.get("model_version", "")) == PARTNER_SESSIONS_MODEL_VERSION:
+		var comparison_projection: Dictionary = RECORD_COMPARISON.project(organization_view.get("comparison", {}), int(state.get("world_revision", 0)))
+		organization_view["comparison"] = comparison_projection.get("snapshot", {})
+		organization_view["comparison_state"] = str(comparison_projection.get("state", "unknown"))
+		organization_view["comparison_fresh"] = bool(comparison_projection.get("fresh", false))
+		organization_view["comparison_available"] = bool(comparison_projection.get("available", false))
 	var data := {
 		"model_version":str(state.get("model_version", MODEL_VERSION)),
 		"case_id":str(state.get("case_id", CASE_ID)),
@@ -983,7 +1004,7 @@ static func view(state: Dictionary, selected: String = "") -> Dictionary:
 		"egress":{"schedule":schedule,"exported_rows":exported_rows,"leaked_rows":exported_rows.size(),"impact_cost":int(state.get("egress", {}).get("impact_cost", 0))},
 		"leaked_rows":exported_rows.size(),
 		"invoice":invoice,
-		"organization":state.get("organization", {}).duplicate(true),
+		"organization":organization_view,
 		"organized":not str(state.get("organization", {}).get("input_hash", "")).is_empty(),
 		"report":state.get("report", {}).duplicate(true)
 	}
