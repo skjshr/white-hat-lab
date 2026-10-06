@@ -130,7 +130,13 @@ func run() -> void:
 	check(control("Hire_mio") is Button and control("Hire_mio").disabled, "missing workplace blocks hiring")
 	check(control("StaffHireReason") is Label and not control("StaffHireReason").text.is_empty(), "missing workplace explained")
 	await capture("01-staffing-requires-workplace")
-	await open_management("shop"); await click("EquipmentSelect_teamdesk")
+	await open_management("shop")
+	if narrow:
+		var equipment_picker: OptionButton = control("EquipmentPicker") as OptionButton
+		if is_instance_valid(equipment_picker):
+			for index in equipment_picker.item_count:
+				if str(equipment_picker.get_item_metadata(index)) == "teamdesk": await choose("EquipmentPicker", index); break
+	else: await click("EquipmentSelect_teamdesk")
 	var cash := int(game.state.cash)
 	await click("Buy_teamdesk", true)
 	check(game.state.delivery_orders.size() == 1 and int(game.state.cash) == cash - int(game.equipment_price("teamdesk")), "double equipment order charged once")
@@ -144,6 +150,15 @@ func run() -> void:
 	assert_feedback("failed hire"); invalid_save(false)
 	await click("Hire_mio", true)
 	check(int(game.staff_summary().count) == 1, "hire committed once")
+	await click("StaffCandidateTab")
+	var candidate_id: String = str(ui.get_meta("staff_selected_id", ""))
+	var candidate_name: String = ""
+	for candidate in game.staff_candidates():
+		if str(candidate.get("id", "")) == candidate_id: candidate_name = str(candidate.get("name", "")); break
+	var candidate_picker: OptionButton = control("StaffPicker") as OptionButton
+	var picker_matches: bool = not narrow or (is_instance_valid(candidate_picker) and candidate_picker.selected >= 0 and str(candidate_picker.get_item_metadata(candidate_picker.selected)) == candidate_id)
+	check(not candidate_id.is_empty() and not bool(game.state.staff.get(candidate_id, {}).get("active", false)) and picker_matches and control("Hire_" + candidate_id) is Button and control("StaffSelectedName") is Label and not candidate_name.is_empty() and control("StaffSelectedName").text.begins_with(candidate_name), "candidate tab keeps picker detail and hire target on the same unhired person")
+	await click("StaffActiveTab")
 	invalid_save(true); await choose("Shift_mio", 2)
 	check(str(game.state.staff.mio.pending_shift).is_empty() and control("Shift_mio").selected == 0, "failed shift restores visible saved choice")
 	assert_feedback("failed shift"); await capture("03-staff-save-failure"); invalid_save(false)

@@ -52,18 +52,21 @@ func placement_reason() -> String:
 	return _placement_error
 
 func _live_position_error(position: Array, rotation_y: float) -> String:
+	return _live_position_error_for(_placing_id, position, rotation_y)
+
+func _live_position_error_for(equipment_id: String, position: Array, rotation_y: float) -> String:
 	# The canonical monitor test is geometric (PlacementRules); once the office
 	# scene is present, let it add live physics/prop checks without making this
 	# delivery helper depend on the office implementation.
-	if _placing_id == "monitor":
+	if equipment_id == "monitor":
 		var monitor_office := get_parent()
 		if monitor_office != null and monitor_office.has_method("monitor_placement_error"):
 			return str(monitor_office.monitor_placement_error(position, rotation_y))
 		return ""
 	if position.size() < 3 or get_world_3d() == null: return ""
-	var footprint: Rect2 = PLACEMENT_RULES.footprint(_placing_id, Vector2(float(position[0]), float(position[2])), rotation_y)
+	var footprint: Rect2 = PLACEMENT_RULES.footprint(equipment_id, Vector2(float(position[0]), float(position[2])), rotation_y)
 	var shape := BoxShape3D.new()
-	var height: float = float({"plant":1.45,"backup":0.29,"diagnostic":1.08,"workstation":1.24,"teamdesk":1.27,"annexdesk_a":1.27,"annexdesk_b":1.27}.get(_placing_id,1.45))
+	var height: float = float({"plant":1.45,"backup":0.29,"diagnostic":1.08,"workstation":1.24,"teamdesk":1.27,"annexdesk_a":1.27,"annexdesk_b":1.27}.get(equipment_id,1.45))
 	shape.size = Vector3(footprint.size.x, height, footprint.size.y)
 	var query := PhysicsShapeQueryParameters3D.new()
 	query.shape = shape
@@ -71,7 +74,7 @@ func _live_position_error(position: Array, rotation_y: float) -> String:
 	query.transform = Transform3D(Basis.IDENTITY, Vector3(footprint.get_center().x, height * 0.5+0.01, footprint.get_center().y))
 	query.collision_mask = 1
 	var office := get_parent()
-	var moving_body: Object = office.get("upgrade_collisions").get(_placing_id) if office != null and office.get("upgrade_collisions") is Dictionary else null
+	var moving_body: Object = office.get("upgrade_collisions").get(equipment_id) if office != null and office.get("upgrade_collisions") is Dictionary else null
 	for hit in get_world_3d().direct_space_state.intersect_shape(query, 32):
 		var collider: Object = hit.get("collider")
 		if collider == self or collider == _ghost or collider == moving_body: continue
@@ -79,10 +82,40 @@ func _live_position_error(position: Array, rotation_y: float) -> String:
 	if office != null and office.has_method("placement_routes_clear"):
 		var proposed: Array=[]
 		for order in game.delivery_orders():
-			if str(order.get("id",""))!=_placing_id:proposed.append(order)
-		proposed.append({"id":_placing_id,"status":"installed","install_position":position,"rotation_y":rotation_y})
+			if str(order.get("id",""))!=equipment_id:proposed.append(order)
+		proposed.append({"id":equipment_id,"status":"installed","install_position":position,"rotation_y":rotation_y})
 		if not office.placement_routes_clear(proposed):return UI.copy("equipment_route_blocked")
 	return ""
+
+## The management floor plan shares the world's geometry and persistence path.
+## Browsing a plan does not pick up a box or change an existing placement.
+func plan_error(id: String, position: Array, rotation_y: float) -> String:
+	if game == null or id not in PLACEMENT_RULES.FLOOR_IDS: return "この設備は図面配置の対象外です。"
+	var order: Dictionary = game.delivery_for(id)
+	if str(order.get("status", "")) not in ["ready", "carried", "placing"] or bool(order.get("moving_installed", false)):
+		return "未設置の設備が入口に届いてから配置できます。"
+	var unavailable: String = str(game.equipment_unavailable_reason(id))
+	if not unavailable.is_empty(): return unavailable
+	for other in game.delivery_orders():
+		if str(other.get("id", "")) != id and str(other.get("status", "")) in ["carried", "placing"]: return "運搬中の設備を先に置いてください。"
+	var office := get_parent()
+	if office != null and office.has_method("_drink_coffee") and str(office.get("coffee_phase")) in ["carried", "carried_empty", "drinking"]: return "カップを置いてから搬入してください。"
+	var reason: String = PLACEMENT_RULES.position_error(id, position, rotation_y, game.delivery_orders(), game.office_expanded())
+	return reason if not reason.is_empty() else _live_position_error_for(id, position, rotation_y)
+
+func install_from_plan(id: String, position: Array, rotation_y: float) -> Dictionary:
+	var reason := plan_error(id, position, rotation_y)
+	if not reason.is_empty(): return {"ok":false, "error":reason}
+	var status: String = str(game.delivery_for(id).get("status", ""))
+	if status == "ready" and not interact("pickup", id): return {"ok":false, "error":"受取を保存できませんでした。設備の状態を確認してください。"}
+	if str(game.delivery_for(id).get("status", "")) == "carried" and not interact("place_start", id):
+		return {"ok":false, "error":"配置を開始できませんでした。運搬状態から再試行できます。"}
+	# A saved placing order can be resumed without an in-memory 3D ghost.
+	_placing_id = id; _placing_slot = allowed_slot(id); _moving_installed = false
+	update_placement_preview(position, rotation_y)
+	if not interact("confirm", id):
+		return {"ok":false, "error":placement_reason() if not placement_reason().is_empty() else "設置を保存できませんでした。位置を選び直して再試行できます。"}
+	return {"ok":true}
 
 func _is_stock_id(id: String) -> bool:
 	return id.begins_with("stock-")

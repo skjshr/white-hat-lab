@@ -7,12 +7,16 @@ const UI = preload("res://scripts/ui_theme.gd")
 const EQUIPMENT_ART = preload("res://scripts/equipment_art.gd")
 const PROCUREMENT_PANEL = preload("res://scripts/procurement_panel.gd")
 const M = preload("res://scripts/management_ui.gd")
+const CAPACITY = preload("res://scripts/equipment_capacity_canvas.gd")
 
 const EXPANSION_ID := "office_expansion"
 
 static func build(ui) -> void:
 	var game = ui._game()
 	if game == null:
+		return
+	if not str(ui.get_meta("equipment_plan_id", "")).is_empty():
+		preload("res://scripts/equipment_placement_panel.gd").build(ui)
 		return
 	var body: VBoxContainer = ui.modal_body
 	for child in body.get_children():
@@ -21,7 +25,7 @@ static func build(ui) -> void:
 	if is_instance_valid(ui.modal_footer):
 		ui.modal_footer.alignment = BoxContainer.ALIGNMENT_END
 		for child in ui.modal_footer.get_children():
-			if child.name.begins_with("Buy_") or child.name in ["BuyOfficeExpansion", "EquipmentReceive", "BackToQuote"]:
+			if child.name.begins_with("Buy_") or child.name.begins_with("EquipmentPlan_") or child.name in ["BuyOfficeExpansion", "EquipmentReceive", "EquipmentStaffing", "BackToQuote"]:
 				ui.modal_footer.remove_child(child)
 				child.queue_free()
 	body.add_theme_constant_override("separation", 8)
@@ -32,12 +36,19 @@ static func build(ui) -> void:
 		return
 
 	_add_shop_tabs(ui, body)
-	_add_delivery_summary(ui, body, game)
+	if not _compact(ui): _add_delivery_summary(ui, body, game)
+	var items: Array = game.equipment_catalog() if game.has_method("equipment_catalog") else []
+	var selected_id: String = str(ui.get_meta("equipment_selected", ""))
+	if selected_id.is_empty() or (selected_id != EXPANSION_ID and not _contains_item(items, selected_id)):
+		selected_id = str(items[0].get("id", "")) if not items.is_empty() else EXPANSION_ID
+		ui.set_meta("equipment_selected", selected_id)
+	var compact: bool = _compact(ui)
+	if compact: _add_compact_selector(ui, body, game, items, selected_id)
 	var panes := HBoxContainer.new()
 	panes.name = "EquipmentPanes"
 	panes.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panes.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panes.custom_minimum_size.y = 360 if float(ui.text_scale) >= 1.2 else 430
+	panes.size_flags_vertical = Control.SIZE_FILL if compact else Control.SIZE_EXPAND_FILL
+	panes.custom_minimum_size.y = 0 if compact else 340
 	panes.add_theme_constant_override("separation", 12)
 	body.add_child(panes)
 	var ui_ref: WeakRef = weakref(ui)
@@ -47,13 +58,14 @@ static func build(ui) -> void:
 		var current_ui = ui_ref.get_ref()
 		var current_body = body_ref.get_ref()
 		var current_panes = panes_ref.get_ref()
-		if is_instance_valid(current_ui) and is_instance_valid(current_body) and is_instance_valid(current_panes):
+		if is_instance_valid(current_ui) and is_instance_valid(current_body) and is_instance_valid(current_panes) and not _compact(current_ui):
 			_fit_panes(current_ui, current_body, current_panes)
 	, CONNECT_ONE_SHOT)
 
 	var left_frame := PanelContainer.new()
 	left_frame.name = "EquipmentSelectorPane"
-	left_frame.custom_minimum_size.x = 360
+	left_frame.custom_minimum_size.x = 264
+	left_frame.visible = not compact
 	left_frame.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	left_frame.add_theme_stylebox_override("panel", M.surface(M.PAPER, 10, true))
 	panes.add_child(left_frame)
@@ -69,11 +81,6 @@ static func build(ui) -> void:
 	list.add_theme_constant_override("separation", 2)
 	left_scroll.add_child(list)
 
-	var items: Array = game.equipment_catalog() if game.has_method("equipment_catalog") else []
-	var selected_id := str(ui.get_meta("equipment_selected", "")) if ui.has_meta("equipment_selected") else ""
-	if selected_id.is_empty() or (selected_id != EXPANSION_ID and not _contains_item(items, selected_id)):
-		selected_id = str(items[0].get("id", "")) if not items.is_empty() else EXPANSION_ID
-		ui.set_meta("equipment_selected", selected_id)
 	for item in items:
 		list.add_child(_selection_row(ui, game, item, selected_id == str(item.get("id", ""))))
 	list.add_child(_expansion_selection_row(ui, game, selected_id == EXPANSION_ID))
@@ -100,7 +107,7 @@ static func build(ui) -> void:
 	detail_frame.name = "EquipmentDetailPane"
 	detail_frame.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	detail_frame.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	detail_frame.add_theme_stylebox_override("panel", M.surface(M.PAPER, 16, true))
+	detail_frame.add_theme_stylebox_override("panel", M.surface(M.PAPER, 10 if compact else 14, true))
 	panes.add_child(detail_frame)
 	var detail := VBoxContainer.new()
 	detail.name = "EquipmentDetail"
@@ -116,10 +123,33 @@ static func build(ui) -> void:
 	_scale_text(body, float(ui.text_scale))
 	_add_back_to_quote(ui)
 
+static func _compact(ui) -> bool:
+	return float(ui.root.size.x) / maxf(1.0, float(ui.text_scale)) < 1080.0
+
+static func _add_compact_selector(ui, body: Node, game, items: Array, selected_id: String) -> void:
+	var picker: OptionButton = OptionButton.new()
+	picker.name = "EquipmentPicker"; picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	picker.custom_minimum_size.y = 36; picker.fit_to_longest_item = false; picker.clip_text = true
+	picker.add_theme_font_override("font", UI.font(500)); picker.add_theme_font_size_override("font_size", 15)
+	M.field(picker); body.add_child(picker)
+	for item in items:
+		var id: String = str(item.get("id", ""))
+		picker.add_item(str(item.get("title", id)) + "  " + _equipment_state(game, id))
+		picker.set_item_metadata(picker.item_count - 1, id)
+		if id == selected_id: picker.select(picker.item_count - 1)
+	picker.add_item(UI.copy("expansion_title")); picker.set_item_metadata(picker.item_count - 1, EXPANSION_ID)
+	if selected_id == EXPANSION_ID: picker.select(picker.item_count - 1)
+	picker.item_selected.connect(func(index: int):
+		ui.set_meta("equipment_plan_id", "")
+		ui.set_meta("equipment_selected", str(picker.get_item_metadata(index)))
+		build(ui)
+	)
+
 static func _add_back_to_quote(ui) -> void:
 	if str(ui.board_selected_id).is_empty() or not is_instance_valid(ui.modal_footer): return
 	var back_to_quote := _button(ui, ui.modal_footer, "← " + UI.copy("ops_sales"), func(): ui._return_to_quote(), "BackToQuote")
 	back_to_quote.custom_minimum_size.x = 150
+	back_to_quote.add_theme_font_size_override("font_size", roundi(14 * float(ui.text_scale)))
 	ui.modal_footer.move_child(back_to_quote, 0)
 
 static func _add_shop_tabs(ui, body: VBoxContainer) -> void:
@@ -137,19 +167,18 @@ static func _add_shop_tabs(ui, body: VBoxContainer) -> void:
 
 static func _add_delivery_summary(ui, body: VBoxContainer, game) -> void:
 	var orders: Array = game.state.get("delivery_orders", []) if game.state.get("delivery_orders", []) is Array else []
-	var installed := 0
+	var installed: int = game.state.get("equipment", []).size()
 	var counts := {"queued": 0, "ready": 0, "carried": 0, "placing": 0}
 	for order in orders:
 		var status := str(order.get("status", ""))
-		if status == "installed": installed += 1
-		elif counts.has(status): counts[status] = int(counts[status]) + 1
+		if status != "installed" and counts.has(status): counts[status] = int(counts[status]) + 1
 	var summary := VBoxContainer.new()
 	summary.name = "EquipmentDeliverySummary"
 	summary.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	summary.add_theme_constant_override("separation", 3)
 	body.add_child(summary)
-	var primary := HBoxContainer.new()
-	primary.add_theme_constant_override("separation", 14)
+	var primary := HFlowContainer.new()
+	primary.add_theme_constant_override("h_separation", 14)
 	summary.add_child(primary)
 	var installed_label := _add_label(primary, "%s %d / %d" % [UI.copy("delivery_installed"), installed, game.equipment_catalog().size()], 14, M.INK)
 	installed_label.autowrap_mode = TextServer.AUTOWRAP_OFF
@@ -170,7 +199,7 @@ static func _selection_row(ui, game, item: Dictionary, selected: bool) -> Button
 	var id := str(item.get("id", ""))
 	var row := Button.new()
 	row.name = "EquipmentSelect_" + id
-	row.custom_minimum_size.y = 64
+	row.custom_minimum_size.y = 76
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	M.button(row, "secondary", selected)
 	var line := HBoxContainer.new()
@@ -202,6 +231,7 @@ static func _selection_row(ui, game, item: Dictionary, selected: bool) -> Button
 		var scroll = ui.modal.find_child("EquipmentSelectorScroll", true, false)
 		if scroll is ScrollContainer: ui.set_meta("equipment_selector_scroll", scroll.scroll_vertical)
 		ui.set_meta("equipment_selected", id)
+		ui.set_meta("equipment_plan_id", "")
 		build(ui)
 	)
 	return row
@@ -240,70 +270,69 @@ static func _expansion_selection_row(ui, game, selected: bool) -> Button:
 		var scroll = ui.modal.find_child("EquipmentSelectorScroll", true, false)
 		if scroll is ScrollContainer: ui.set_meta("equipment_selector_scroll", scroll.scroll_vertical)
 		ui.set_meta("equipment_selected", EXPANSION_ID)
+		ui.set_meta("equipment_plan_id", "")
 		build(ui)
 	)
 	return row
 
 static func _render_item(ui, game, host: VBoxContainer, item: Dictionary) -> void:
-	var id := str(item.get("id", ""))
-	var hero := HBoxContainer.new()
-	hero.add_theme_constant_override("separation", 16)
-	host.add_child(hero)
-	var image := PanelContainer.new()
-	image.custom_minimum_size = Vector2(230, 178)
-	image.add_theme_stylebox_override("panel", M.surface(M.CANVAS, 8, false))
-	hero.add_child(image)
-	var art := TextureRect.new()
-	art.texture = EQUIPMENT_ART.icon(id)
-	art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	art.custom_minimum_size = Vector2(220, 168)
-	image.add_child(art)
-	var info := VBoxContainer.new()
-	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	info.add_theme_constant_override("separation", 5)
-	hero.add_child(info)
-	var title := _add_label(info, str(item.get("title", "")), 22, M.INK)
+	var id: String = str(item.get("id", ""))
+	var heading: HFlowContainer = HFlowContainer.new()
+	heading.add_theme_constant_override("h_separation", 16); heading.add_theme_constant_override("v_separation", 2)
+	host.add_child(heading)
+	var title := _add_label(heading, str(item.get("title", "")), 19, M.INK)
 	title.add_theme_font_override("font", UI.font(700))
-	var model := str(item.get("model", ""))
-	if not model.is_empty(): _add_label(info, model, 14, M.MUTED)
-	_add_label(info, _equipment_state(game, id), 14, M.ACCENT if id in game.state.equipment else M.MUTED)
-	var price := int(game.equipment_price(id)) if game.has_method("equipment_price") else int(item.get("price", 0))
-	_add_label(info, "¥%d" % price, 20, M.INK).name = "EquipmentPrice"
-	var catalog_price := int(item.get("price", 0))
+	title.autowrap_mode = TextServer.AUTOWRAP_OFF
+	var price: int = int(game.equipment_price(id)) if game.has_method("equipment_price") else int(item.get("price", 0))
+	var price_label: Label = _add_label(heading, "¥%d" % price, 19, M.INK)
+	price_label.name = "EquipmentPrice"; price_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	var capacity: Control = CAPACITY.new(); host.add_child(capacity)
+	capacity.configure(CAPACITY.snapshot(game, id), float(ui.text_scale))
+	var details: VBoxContainer = VBoxContainer.new()
+	details.name = "EquipmentDetails"; details.add_theme_constant_override("separation", 5)
+	details.visible = bool(ui.get_meta("equipment_details_" + id, false))
+	var links: HFlowContainer = HFlowContainer.new(); links.add_theme_constant_override("h_separation", 8); host.add_child(links)
+	var fold: Button = _button(ui, links, "▾ 効果・設置条件" if details.visible else "▸ 効果・設置条件", func():
+		details.visible = not details.visible; ui.set_meta("equipment_details_" + id, details.visible)
+		var current: Button = links.get_node("EquipmentDetailsToggle")
+		current.text = "▾ 効果・設置条件" if details.visible else "▸ 効果・設置条件"
+	, "EquipmentDetailsToggle")
+	M.button(fold, "quiet")
+	host.add_child(details)
+	if _compact(ui): _add_delivery_summary(ui, details, game)
+	var model: String = str(item.get("model", ""))
+	if not model.is_empty(): _add_label(details, model, 14, M.MUTED)
+	var catalog_price: int = int(item.get("price", 0))
 	if id in ["backup", "monitor"] and catalog_price > price and price >= 0:
 		var discount := roundi(100.0 * float(catalog_price - price) / float(catalog_price))
-		_add_label(info, UI.copy("equipment_operations_discount") % [catalog_price, price, discount], 13, M.MUTED).name = "EquipmentDiscount"
-	host.add_child(M.rule())
-	_add_label(host, str(item.get("effect", item.get("description", ""))), 16, M.INK).name = "EquipmentEffect"
+		_add_label(details, UI.copy("equipment_operations_discount") % [catalog_price, price, discount], 13, M.MUTED).name = "EquipmentDiscount"
+	_add_label(details, str(item.get("effect", item.get("description", ""))), 14, M.INK).name = "EquipmentEffect"
 	var physical := str(item.get("physical", ""))
-	if not physical.is_empty(): _add_label(host, physical, 14, M.MUTED)
-	var order: Dictionary = game.delivery_for(id) if game.has_method("delivery_for") else {}
-	if str(order.get("status", "")) == "ready": _ready_context(ui, host)
+	if not physical.is_empty(): _add_label(details, physical, 14, M.MUTED)
 	_add_footer_action(ui, game, id, item, price)
 
 static func _render_expansion(ui, game, host: VBoxContainer) -> void:
 	var expansion: Dictionary = game.office_expansion_status() if game.has_method("office_expansion_status") else {}
 	var hero := HBoxContainer.new()
-	hero.add_theme_constant_override("separation", 16)
+	hero.add_theme_constant_override("separation", 12)
 	host.add_child(hero)
 	var image := PanelContainer.new()
-	image.custom_minimum_size = Vector2(230, 178)
+	image.custom_minimum_size = Vector2(108, 116)
 	image.add_theme_stylebox_override("panel", M.surface(M.CANVAS, 8, false))
 	hero.add_child(image)
 	var art := TextureRect.new()
 	art.texture = EQUIPMENT_ART.icon("annexdesk_a")
 	art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	art.custom_minimum_size = Vector2(220, 168)
+	art.custom_minimum_size = Vector2(96, 104)
 	image.add_child(art)
 	var info := VBoxContainer.new()
 	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	info.add_theme_constant_override("separation", 6)
 	hero.add_child(info)
-	var title := _add_label(info, UI.copy("expansion_title"), 22, M.INK)
+	var title := _add_label(info, UI.copy("expansion_title"), 19, M.INK)
 	title.add_theme_font_override("font", UI.font(700))
-	_add_label(info, UI.copy("expansion_desk_effect"), 15, M.INK)
+	_add_label(info, "部屋の拡張 → 追加デスクの購入・設置", 14, M.INK)
 	var status := str(expansion.get("status", "locked"))
 	if status == "ordered":
 		_add_label(info, UI.copy("expansion_available_day") % int(expansion.get("available_day", 0)), 14, M.MUTED)
@@ -313,28 +342,16 @@ static func _render_expansion(ui, game, host: VBoxContainer) -> void:
 			if id in game.state.equipment: added += 1
 		_add_label(info, UI.copy("expansion_added_seats") % added, 14, M.MUTED)
 	var price := int(expansion.get("price", expansion.get("cost", 28000)))
-	_add_label(info, "¥%d" % price, 20, M.INK)
+	_add_label(info, "¥%d" % price, 19, M.INK)
 	host.add_child(M.rule())
-	_add_label(host, UI.copy("expansion_desk_location"), 15, M.MUTED)
+	var seats: Control = CAPACITY.new(); host.add_child(seats)
+	seats.configure(CAPACITY.snapshot(game), float(ui.text_scale), "staff", func(seat: Dictionary):
+		ui.set_meta("equipment_selected", str(seat.id)); ui.set_meta("equipment_plan_id", ""); build(ui)
+	)
+	_add_label(host, "工事だけでは採用席・業務枠は増えません。", 13, M.MUTED)
 	var reason := str(game.office_expansion_reason()) if game.has_method("office_expansion_reason") else ""
 	if not reason.is_empty(): _add_label(host, reason, 14, M.DANGER if status == "locked" else M.MUTED)
 	_add_footer_expansion(ui, game, expansion, status)
-
-static func _ready_context(ui, host: VBoxContainer) -> void:
-	var context := PanelContainer.new()
-	context.name = "EquipmentReadyContext"
-	context.add_theme_stylebox_override("panel", M.surface(M.SELECTED, 10, true))
-	host.add_child(context)
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 10)
-	context.add_child(row)
-	_add_label(row, UI.copy("delivery_ready"), 14, M.INK)
-	var receive := Button.new()
-	receive.name = "EquipmentReceive"
-	receive.text = UI.copy("delivery_destination")
-	M.button(receive, "quiet")
-	receive.pressed.connect(func(): ui.close_panel())
-	row.add_child(receive)
 
 static func _add_footer_action(ui, game, id: String, item: Dictionary, price: int) -> void:
 	if not is_instance_valid(ui.modal_footer): return
@@ -342,6 +359,13 @@ static func _add_footer_action(ui, game, id: String, item: Dictionary, price: in
 	var delivery_status := str(order.get("status", ""))
 	var owned: bool = id in game.state.equipment
 	var unavailable := str(game.equipment_unavailable_reason(id)) if game.has_method("equipment_unavailable_reason") else ""
+	# Keep the next step fixed after installation. Pending floor deliveries use
+	# this footer space for placement until the seat actually becomes usable.
+	if id in ["teamdesk", "annexdesk_a", "annexdesk_b"] and (owned or delivery_status in ["", "queued"]):
+		var staffing: Button = _button(ui, ui.modal_footer, "席・人員へ →", func(): ui.open_panel("staffing"), "EquipmentStaffing")
+		staffing.add_theme_font_size_override("font_size", roundi(14 * float(ui.text_scale)))
+		M.button(staffing, "primary" if owned else "secondary")
+		_right_align_footer_action(ui, staffing)
 	var action := Button.new()
 	action.name = "Buy_" + id
 	action.custom_minimum_size.x = 170
@@ -354,6 +378,15 @@ static func _add_footer_action(ui, game, id: String, item: Dictionary, price: in
 	action.pressed.connect(func(): ui._buy(id))
 	ui.modal_footer.add_child(action)
 	_right_align_footer_action(ui, action)
+	if not owned and delivery_status in ["ready", "carried", "placing"]:
+		if id != "monitor":
+			var plan: Button = _button(ui, ui.modal_footer, "図面で配置", func(): preload("res://scripts/equipment_placement_panel.gd").open(ui, id), "EquipmentPlan_" + id)
+			plan.add_theme_font_size_override("font_size", roundi(14 * float(ui.text_scale)))
+			M.button(plan, "primary"); _right_align_footer_action(ui, plan)
+		if delivery_status == "ready":
+			var receive: Button = _button(ui, ui.modal_footer, "オフィスで受取", func(): ui.close_panel(), "EquipmentReceive")
+			receive.add_theme_font_size_override("font_size", roundi(14 * float(ui.text_scale)))
+			M.button(receive, "quiet"); _right_align_footer_action(ui, receive)
 
 static func _add_footer_expansion(ui, game, expansion: Dictionary, status: String) -> void:
 	if not is_instance_valid(ui.modal_footer): return
@@ -420,7 +453,7 @@ static func _button(ui, host: Node, text: String, action: Callable, node_name: S
 	button.name = node_name
 	button.custom_minimum_size.y = 36
 	button.add_theme_font_override("font", UI.font(500))
-	button.add_theme_font_size_override("font_size", roundi(14.0 * float(ui.text_scale)))
+	button.add_theme_font_size_override("font_size", 14)
 	button.pressed.connect(action)
 	M.button(button, "secondary")
 	host.add_child(button)
@@ -438,6 +471,7 @@ static func _fit_panes(ui, body: VBoxContainer, panes: HBoxContainer) -> void:
 		panes.custom_minimum_size.y = clampf(available, 280.0, 430.0)
 
 static func _scale_text(node: Node, scale: float) -> void:
+	if bool(node.get_meta("equipment_scale_managed", false)): return
 	if node is Control and node.has_theme_font_size_override("font_size"):
 		var base_size: int
 		if node.has_meta("equipment_base_font_size"):
