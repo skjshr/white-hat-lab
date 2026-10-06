@@ -188,6 +188,8 @@ static func _normal_use(d, body: VBoxContainer, state: Dictionary, snap: Diction
 	var panel := frame(body, Color("f5f8fa"))
 	panel.name = "EdrBusinessVerification"
 	var controls := HFlowContainer.new(); controls.add_theme_constant_override("h_separation", 8); panel.add_child(controls)
+	if selected == "pc_b" and d._hotel_enabled():
+		button(d, controls, "白波フロントを開く", "EdrOpenHotel", func(): d._open_hotel_frontdesk())
 	button(d, controls, "端末から業務接続を確認", "EdrBusinessProbe_" + selected, func(): _business_probe(d, selected))
 	button(d, controls, "端末状態を再読込", "EdrRefresh_" + selected, func(): d._render_endpoint())
 	var observation: Dictionary = state.get("business_observations", {}).get(selected, {})
@@ -259,6 +261,15 @@ static func inventory(d, parent: VBoxContainer, snap: Dictionary, state: Diction
 				if str(observed.get("state",""))!=_business_state(snap,id):caption="↻ 再確認"
 			observations[id]={"label":caption,"response":response.get_slice("\n",0)}
 		business={"names":scenario.get("endpoint_business",{}),"observations":observations,"on_probe":func(id:String):_business_probe(d,id)}
+		if d._hotel_enabled():
+			var hotel:Dictionary=d.game.hotel_snapshot()
+			var folios:Array=hotel.get("folios",[])
+			var pending:=folios.filter(func(item):return str(item.get("status",""))!="received").size()
+			business.observations["pc_b"]={"label":"✓ 受付済み" if pending==0 and not folios.is_empty() else "未送信 %d件" % pending if not folios.is_empty() else "! 伝票を確認", "opens_app":true, "tooltip":"白波フロントで精算票を開く"}
+			business.on_probe=func(id:String):
+				if id=="pc_b":d._open_hotel_frontdesk()
+				else:_business_probe(d,id)
+			business.legend="点線: 過去の記録   実線 / ×: 接続設定   精算票から白波フロントへ"
 	InvestigationMap.render(d,parent,snap,open_device,open_record,query,business)
 
 static func recovery_device_record(snap: Dictionary, device_id: String) -> Dictionary:

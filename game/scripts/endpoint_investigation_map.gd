@@ -93,7 +93,7 @@ static func render(d, parent: VBoxContainer, snap: Dictionary, on_device: Callab
 		shown += 1
 	if shown == 0:
 		_text(root, "一致する記録はありません", factor, 13, MUTED)
-	_text(root, "点線: 過去の記録   実線 / ×: 現在の接続設定   業務の図を押して実測" if not business.is_empty() else "点線: 過去の記録の関係   ○ 接続許可 / × 隔離: 現在の端末設定", factor, 11, MUTED)
+	_text(root, str(business.get("legend", "点線: 過去の記録   実線 / ×: 現在の接続設定   業務の図を押して実測")) if not business.is_empty() else "点線: 過去の記録の関係   ○ 接続許可 / × 隔離: 現在の端末設定", factor, 11, MUTED)
 
 static func _record_groups(device: Dictionary, query: String) -> Array:
 	var result: Array = []
@@ -131,16 +131,16 @@ static func _lane(parent: VBoxContainer, device: Dictionary, groups: Array, fact
 	endpoint_column.add_theme_constant_override("separation",0)
 	columns.add_child(endpoint_column)
 	if business.get("names",{}).has(id):
-		var job:=_object(endpoint_column,"EdrBusinessProbe_"+id,94*factor,func():business.on_probe.call(id))
+		var observation:Dictionary=business.get("observations",{}).get(id,{})
+		var job:=_object(endpoint_column,("EdrBusinessOpen_" if bool(observation.get("opens_app",false)) else "EdrBusinessProbe_")+id,94*factor,func():business.on_probe.call(id))
 		var job_box:=_contents(job,factor)
 		var job_name:=str(business.names[id])
 		var glyph:=Glyph.add_to(job_box,"receipt" if job_name.contains("精算") or job_name.contains("請求") else "ledger",32*factor,MUTED)
 		glyph.size_flags_horizontal=Control.SIZE_SHRINK_CENTER
 		_text(job_box,job_name,factor,12,INK,600).horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
-		var observation:Dictionary=business.get("observations",{}).get(id,{})
 		var result:=str(observation.get("label","? 未測定"))
 		_text(job_box,result,factor,11,MUTED).horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
-		job.tooltip_text=job_name+"の接続を実測\n"+str(observation.get("response",""))
+		job.tooltip_text=str(observation.get("tooltip",job_name+"の接続を実測\n"+str(observation.get("response",""))))
 		_ignore_children(job_box)
 		var stem:=BusinessLink.new();stem.isolated=bool(device.get("isolated",false));stem.custom_minimum_size.y=22*factor;endpoint_column.add_child(stem)
 	var endpoint := _object(endpoint_column, "EdrDevice_" + id, 126 * factor, func(): on_device.call(id))

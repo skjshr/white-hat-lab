@@ -55,6 +55,11 @@ static func render(d, body: VBoxContainer, receipt: Dictionary, first_view: bool
 		board.setup(receipt, float(d.game.settings.get("text_scale", 1.0)))
 		evaluation.add_child(board)
 		_invoice(d, evaluation, receipt, sales, "ReceiptOutcome")
+		for site in receipt.get("hotel_workflow", {}).get("sites", []):
+			if str(site.get("status", "")) != "received": continue
+			var accepted := _text(d, "✓ %s号室 · 精算受付 %s · 残高 %s" % [str(site.get("room", "")), str(site.get("receipt", {}).get("number", "")), _yen(int(site.get("balance", 0)))], 14, UI.INK)
+			accepted.name = "ReceiptHotelAccepted"
+			evaluation.add_child(accepted)
 		_outcomes(d, evaluation, receipt)
 		var details: VBoxContainer = d._disclosure(evaluation, "評価の内訳・作業時間")
 		details.name = "ReceiptImpactDetails"

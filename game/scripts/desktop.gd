@@ -23,6 +23,7 @@ const BILLING_WORKSPACE = preload("res://scripts/os_billing_workspace.gd")
 const IDENTITY_CONSOLE = preload("res://scripts/os_identity_console.gd")
 const IDENTITY_URL := "https://identity.client.test/admin/client/console/"
 const EDR_URL := "https://edr.client.test/security/devices"
+const HOTEL_URL := "https://frontdesk.client.test/"
 const PORTAL_URL := "https://portal.client.test/apps/files/"
 const FIREWALL_URL := "https://gateway.client.test/firewall_rules.php"
 const BACKUP_URL := "http://backup.client.test:9898"
@@ -73,6 +74,7 @@ var browser_identity := ""
 var identity_ui: Dictionary = {}
 var edr_ui: Dictionary = {}
 var edr_render_signature := ""
+var hotel_render_signature := ""
 var portal_ui: Dictionary = {}
 var portal_render_signature := ""
 var firewall_ui: Dictionary = {}
@@ -968,6 +970,7 @@ func _state_changed() -> void:
 	if widgets.has("billing"): call_deferred("_refresh_billing_if_changed")
 	if widgets.has("advanced"): call_deferred("_refresh_advanced")
 	if _business_workspace_url(browser_url): call_deferred("_refresh_business_if_changed")
+	if _hotel_url(browser_url) and JSON.stringify(game.hotel_snapshot()) != hotel_render_signature: _render_hotel_frontdesk()
 	if is_instance_valid(brand_label): brand_label.text = _company_name()
 	if is_instance_valid(system_company): system_company.text=_company_name(); system_company.tooltip_text=_company_name()
 	if is_instance_valid(player_name_label): player_name_label.text = _player_display_name()
@@ -1363,6 +1366,9 @@ func _browser(parent: VBoxContainer) -> void:
 		[["スタッフ","https://portal.client.test/staff"],["取引先","https://portal.client.test/partner"],["公開リンク","https://portal.client.test/public"]]]
 	if _identity_v2(): sets[3] = [[UI.copy("identity_title", "Identity management"), IDENTITY_URL]]
 	if _edr_v2(): sets[4].append([UI.copy("edr_title", "Endpoint security"), EDR_URL])
+	if _hotel_enabled():
+		sets[4] = [["端末の調査", EDR_URL], ["白波フロント", HOTEL_URL]]
+		bookmarks.show()
 	if _firewall_v2():
 		sets[2] = [[UI.copy("fw_title"),FIREWALL_URL],[UI.copy("business_sales"),"https://intranet.client.test/sales"],[UI.copy("business_accounting"),"https://intranet.client.test/accounting"],[sets[2][1][0],"https://admin.client.test:8443"]]
 		bookmarks.show()
@@ -1402,6 +1408,7 @@ func _browser(parent: VBoxContainer) -> void:
 	location.text = "顧客サイト  /  "+browser_url.trim_prefix("https://").trim_prefix("http://") if not browser_url.is_empty() else "顧客サイト / URL"
 	if _identity_console_url(browser_url): _render_identity()
 	elif _edr_console_url(browser_url): _render_endpoint()
+	elif _hotel_url(browser_url): _render_hotel_frontdesk()
 	elif _portal_page_url(browser_url): _render_portal()
 	elif _firewall_console_url(browser_url): _render_firewall()
 	elif _backup_console_url(browser_url): _render_backup()
@@ -1411,7 +1418,7 @@ func _browser(parent: VBoxContainer) -> void:
 func _update_browser_title() -> void:
 	if not windows.has("browser"): return
 	var host: String=browser_url.trim_prefix("https://").trim_prefix("http://").get_slice("/",0)
-	var title: String={"identity.client.test":"Keycloak", "portal.client.test":"Nextcloud", "gateway.client.test":"pfSense", "edr.client.test":"Microsoft Defender", "backup.client.test:9898":"Backrest", "files01.client.test:9090":"Cockpit"}.get(host,host)
+	var title: String={"identity.client.test":"Keycloak", "portal.client.test":"Nextcloud", "gateway.client.test":"pfSense", "edr.client.test":"Microsoft Defender", "frontdesk.client.test":"白波フロント", "backup.client.test:9898":"Backrest", "files01.client.test:9090":"Cockpit"}.get(host,host)
 	windows.browser.title_text=title if not title.is_empty() else APPS.browser[0]
 	windows.browser.set_active(current_app=="browser")
 
@@ -1421,7 +1428,7 @@ func _browse() -> void:
 func show_guide_service(url: String) -> void:
 	# Show an existing management surface without issuing curl/console commands,
 	# recording observations or charging work time just to locate a control.
-	var renderers := {SAMBA_URL:_render_samba, BACKUP_URL:_render_backup, FIREWALL_URL:_render_firewall, IDENTITY_URL:_render_identity, EDR_URL:_render_endpoint, PORTAL_URL:_render_portal}
+	var renderers := {SAMBA_URL:_render_samba, BACKUP_URL:_render_backup, FIREWALL_URL:_render_firewall, IDENTITY_URL:_render_identity, EDR_URL:_render_endpoint, HOTEL_URL:_render_hotel_frontdesk, PORTAL_URL:_render_portal}
 	if not renderers.has(url): return
 	if windows.has("browser") and browser_url == url:
 		_show_app("browser"); return
@@ -1448,7 +1455,10 @@ func _browse_url(value: String, record_history := true) -> void:
 	var request_url := _business_request_url(browser_url) if _business_workspace_url(browser_url) else browser_url
 	command += '"'+request_url.replace('"','%22')+'"'
 	var result: String
-	if _business_workspace_url(browser_url):
+	if _hotel_url(browser_url):
+		# Opening the front-desk workspace reads saved work; only Send transacts.
+		result = ""
+	elif _business_workspace_url(browser_url):
 		result = str(game.business_read(request_url.get_slice("/api/business/",1),browser_url).get("response",""))
 	else:
 		result = "" if _samba_console_url(browser_url) else game.vm_run("restic snapshots") if _backup_console_url(browser_url) else JSON.stringify(game._vm().firewall_snapshot()) if _firewall_console_url(browser_url) else game.vm_run("identity users" if _identity_console_url(browser_url) else ("edr devices" if _edr_console_url(browser_url) else ("portal files" if _portal_console_url(browser_url) else command)))
@@ -1464,6 +1474,7 @@ func _browse_url(value: String, record_history := true) -> void:
 	var page: VBoxContainer = widgets.browser.page; _clear(page)
 	if _identity_console_url(browser_url): _render_identity()
 	elif _edr_console_url(browser_url): _render_endpoint()
+	elif _hotel_url(browser_url): _render_hotel_frontdesk()
 	elif _portal_page_url(browser_url): _render_portal()
 	elif _firewall_console_url(browser_url): _render_firewall()
 	elif _backup_console_url(browser_url): _render_backup()
@@ -1747,6 +1758,45 @@ func _edr_v2() -> bool:
 
 func _edr_console_url(value: String) -> bool:
 	return _edr_v2() and value.get_slice("#",0).get_slice("?",0).trim_suffix("/") == EDR_URL.trim_suffix("/")
+
+func _hotel_enabled() -> bool:
+	return game != null and bool(game.state.get("accepted", false)) and game._current_chapter() == 4 and int(game._scenario().get("hotel_workflow_version", 0)) == 1
+
+func _hotel_url(value: String) -> bool:
+	return _hotel_enabled() and value.get_slice("#", 0).get_slice("?", 0).trim_suffix("/") == HOTEL_URL.trim_suffix("/")
+
+func _open_hotel_frontdesk() -> void:
+	if not _hotel_enabled(): return
+	show_guide_service(HOTEL_URL)
+	_browser_scroll_top()
+
+func _open_endpoint_device(device_id: String) -> void:
+	if device_id not in ["pc_a", "pc_b"]: return
+	edr_ui.view = "devices"
+	edr_ui.device = device_id
+	show_guide_service(EDR_URL)
+	_render_endpoint()
+	_browser_scroll_top()
+
+func _browser_scroll_top() -> void:
+	if not widgets.has("browser") or not is_instance_valid(widgets.browser.get("page")): return
+	var scroll: Node = widgets.browser.page.get_parent()
+	if scroll is ScrollContainer: scroll.scroll_vertical = 0
+
+func _render_hotel_frontdesk() -> void:
+	if not widgets.has("browser") or not is_instance_valid(widgets.browser.get("page")): return
+	var page: VBoxContainer = widgets.browser.page
+	_clear(page)
+	hotel_render_signature = JSON.stringify(game.hotel_snapshot())
+	preload("res://scripts/hotel_frontdesk.gd").render(self, page)
+
+func _hotel_action(folio_id: String) -> Dictionary:
+	var was_refreshing := refreshing
+	refreshing = true
+	var result: Dictionary = game.hotel_action(folio_id)
+	refreshing = was_refreshing
+	_state_changed.call_deferred()
+	return result
 
 func _render_identity() -> void:
 	if not widgets.has("browser") or not is_instance_valid(widgets.browser.get("page")): return

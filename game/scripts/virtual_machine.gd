@@ -6,6 +6,7 @@ const EndpointRemediation = preload("res://scripts/endpoint_remediation.gd")
 const PortalStorage = preload("res://scripts/portal_storage.gd")
 const FirewallPolicy = preload("res://scripts/firewall_policy.gd")
 const BusinessWorkspace = preload("res://scripts/business_workspace.gd")
+const HotelFrontdesk = preload("res://scripts/hotel_frontdesk_model.gd")
 const BackupAuthorization = preload("res://scripts/backup_authorization.gd")
 ## Deterministic guest operating system. Files and service state are local game data.
 const PATHS := ["/etc/samba/smb.conf","/etc/restic/backup.conf","/etc/firewall/rules.conf","/etc/identity/users.conf","/etc/edr/policy.conf","/etc/share/portal.conf"]
@@ -231,6 +232,7 @@ func setup(chapter: int, saved: Dictionary = {}, scenario: Dictionary = {}) -> v
 		state.evidence_original = _edr_serialize_timeline()
 		state.fs["/var/log/evidence.log"] = state.evidence_original
 	if _chapter == 4:
+		HotelFrontdesk.initialize(state)
 		for probe in _active_probes():
 			if str(probe.get("id", "")) == "evidence-log":
 				var expected := str(state.get("evidence_original", EVIDENCE)).sha256_text()
@@ -2041,7 +2043,12 @@ func _evaluate_scenario() -> Array[bool]:
 		return [business_ok,clean,bool(_edr_evidence_status().get("valid",false)) and state.applied.get("logs","") == "keep" and state.applied.get("reset","") == "wait"]
 	var desired: Dictionary = scenario.get("desired", {})
 	var result: Array[bool] = []
-	for key in desired.keys():
+	var desired_keys: Array = desired.keys()
+	if _chapter == 4:
+		# JSON sorts object keys. Keep verdicts aligned with the authored EDR
+		# labels after reload instead of reporting logs=keep under the PC-A label.
+		desired_keys = ["pc_a", "pc_b", "logs", "reset"].filter(func(key): return desired.has(key))
+	for key in desired_keys:
 		var actual: Variant = state.applied.get(key, "")
 		if _firewall_model_v2() and key in ["business", "admin_public"]:
 			var business_check := FirewallPolicy.evaluate(state.applied, "lan", FirewallPolicy.STAFF_ADDRESS, FirewallPolicy.BUSINESS_ADDRESS, "tcp", 40000, 443)
@@ -2072,6 +2079,7 @@ func _evaluate_scenario() -> Array[bool]:
 		var evidence_ok: bool = state.fs.get("/evidence/original.log", "") == state.get("evidence_original", EVIDENCE) and state.fs.get("/var/log/evidence.log", "") == state.get("evidence_original", EVIDENCE)
 		if int(state.get("edr_model_version",1)) >= EDR_MODEL_VERSION: evidence_ok = evidence_ok and bool(_edr_evidence_status().get("valid",false))
 		result.append(evidence_ok)
+		if HotelFrontdesk.enabled(state): result.append(HotelFrontdesk.accepted(state))
 	return result
 
 func _aya_readonly_probe(command: String) -> bool:

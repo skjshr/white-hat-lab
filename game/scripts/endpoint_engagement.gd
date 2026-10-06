@@ -30,6 +30,10 @@ static func containment_specs(base: Dictionary, sites: int) -> Array:
 		scenario.endpoint_uncontained_rate = UNCONTAINED_RATE
 		scenario.endpoint_stop_rate = STOP_RATE
 		scenario.brief = "%s\nPC-Aは%s、PC-Bは%sに使用しています。対応作業中の未封じ込めは¥%d/分、正常端末の業務誤停止は¥%d/分の補償対象です。" % [str(base.get("brief", "")), str(roles.pc_a), str(roles.pc_b), UNCONTAINED_RATE, STOP_RATE]
+		if case_id == "service-4-case-0":
+			scenario.hotel_workflow_version = 1
+			scenario.checks.append("F-204精算受付確認")
+			scenario.brief += "\nフロントからの依頼: 204号室の未送信精算票 F-204 1件をPC-Bから再送し、受付番号を確認してください。PC-Aの予約業務は隔離を維持して引き継ぎます。ほかの3室は在室中のため精算不要です。"
 		result.append({"chapter":4, "case_id":case_id, "name":"拠点%d" % (index + 1), "scenario":scenario})
 	return result
 
