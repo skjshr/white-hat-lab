@@ -6,6 +6,7 @@ const Glyph = preload("res://scripts/service_glyph.gd")
 const WorkflowLinks = preload("res://scripts/endpoint_workflow_links.gd")
 const Workstation = preload("res://assets/ui/endpoint/workstation-v1.png")
 const Impact = preload("res://scripts/endpoint_engagement.gd")
+const InvestigationMap = preload("res://scripts/endpoint_investigation_map.gd")
 const NAV := Color("f3f2f1")
 const INK := Color("323130")
 const MUTED := Color("605e5c")
@@ -238,31 +239,13 @@ static func table_row(parent: Node, color:=Color.WHITE) -> HBoxContainer:
 	var row:=HBoxContainer.new();row.add_theme_constant_override("separation",14);panel.add_child(row)
 	return row
 
-static func inventory(d, parent: VBoxContainer, rows: Array, state: Dictionary, query: String) -> void:
+static func inventory(d, parent: VBoxContainer, snap: Dictionary, state: Dictionary, query: String) -> void:
 	d._clear(parent)
-	var head:=table_row(parent,Color("faf9f8"))
-	for key in ["edr_device","edr_status","edr_business","edr_management"]:
-		label(d,head,copy(key),12).size_flags_stretch_ratio=1.0
-	var found:=0
-	for device in rows:
-		var id:=str(device.id)
-		if not query.is_empty() and not device_name(id).to_lower().contains(query.to_lower()):continue
-		found+=1
-		var open:=button(d,parent,"","EdrDevice_"+id,func():
-			state["device"]=id;state["event_index"]=0;state["query"]="";state["event_type"]="all";state["details_open"]=true;state.erase("output");d._render_endpoint())
-		open.size_flags_horizontal=Control.SIZE_EXPAND_FILL;open.custom_minimum_size.y=46*scale(d)
-		var row_style:=UI.style(Color.WHITE,LINE,10,7,0);row_style.set_border_width_all(0);row_style.border_width_bottom=1
-		open.add_theme_stylebox_override("normal",row_style)
-		open.add_theme_stylebox_override("hover",UI.style(Color("f3f2f1"),Color.TRANSPARENT,10,7,0))
-		var row:=HBoxContainer.new();row.mouse_filter=Control.MOUSE_FILTER_IGNORE;row.add_theme_constant_override("separation",14);open.add_child(row)
-		row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT);row.offset_left=10;row.offset_right=-10
-		var device_cell:=Control.new();device_cell.mouse_filter=Control.MOUSE_FILTER_IGNORE;device_cell.size_flags_horizontal=Control.SIZE_EXPAND_FILL;row.add_child(device_cell)
-		var first:=HBoxContainer.new();first.mouse_filter=Control.MOUSE_FILTER_IGNORE;first.add_theme_constant_override("separation",10);device_cell.add_child(first);first.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		Glyph.add_to(first,"device",22,MUTED)
-		var title:=label(d,first,device_name(id),13,BLUE);title.mouse_filter=Control.MOUSE_FILTER_IGNORE;title.autowrap_mode=TextServer.AUTOWRAP_OFF
-		for value in [copy("edr_isolated" if device.isolated else "edr_connected"),copy("edr_available" if str(device.business_status)=="healthy" else "edr_blocked"),copy("edr_connected" if device.management_connected else "edr_blocked")]:
-			label(d,row,value,13).mouse_filter=Control.MOUSE_FILTER_IGNORE
-	if found==0:label(d,parent,copy("edr_no_results"),14,MUTED)
+	var open_device := func(id: String):_open_device(d,state,id)
+	var open_record := func(id: String,index: int):
+		_open_device(d,state,id,index)
+		_scroll_selected_event_details(d,d.widgets.browser.page,true)
+	InvestigationMap.render(d,parent,snap,open_device,open_record,query)
 
 static func recovery_device_record(snap: Dictionary, device_id: String) -> Dictionary:
 	for raw in snap.get("devices",[]):
@@ -287,7 +270,9 @@ static func recovery_scan_text(d, device: Dictionary, snap: Dictionary = {}) -> 
 	return rcopy("rmd_scan_threats", "%d threats" % findings.size())
 
 static func recovery_inventory(d, body: VBoxContainer, rows: Array, state: Dictionary, snap: Dictionary) -> void:
-	label(d,body,"業務と端末",24).name="EdrRecoveryInventoryTab"
+	var heading_row:=HFlowContainer.new();heading_row.add_theme_constant_override("h_separation",16);body.add_child(heading_row)
+	label(d,heading_row,"業務と端末",24).name="EdrRecoveryInventoryTab"
+	button(d,heading_row,"記録を比較","EdrCompareRecords",func():state["inventory_view"]="records";d._render_endpoint();_show_top.call_deferred(d))
 	var scenario: Dictionary = d.game._scenario()
 	if int(scenario.get("endpoint_engagement",0))==1:
 		var sites := HFlowContainer.new(); sites.name="EdrSiteChoices"
@@ -321,7 +306,7 @@ static func recovery_inventory(d, body: VBoxContainer, rows: Array, state: Dicti
 			result=str(observation.get("response","")).get_slice("\n",0)
 			if str(observation.get("state",""))!=_business_state(snap,id): result="変更前 · "+result
 		label(d,job_box,result,12,MUTED).horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
-		var open:=_object_button(d,layout,"EdrDevice_"+id,func():_open_recovery_device(d,state,id))
+		var open:=_object_button(d,layout,"EdrDevice_"+id,func():_open_device(d,state,id))
 		var device_box:=_object_content(open)
 		var image:=TextureRect.new();image.texture=Workstation;image.expand_mode=TextureRect.EXPAND_IGNORE_SIZE;image.stretch_mode=TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		image.custom_minimum_size.y=86*scale(d);device_box.add_child(image)
@@ -332,7 +317,7 @@ static func recovery_inventory(d, body: VBoxContainer, rows: Array, state: Dicti
 		for index in device.get("events",[]).size():
 			var item: Dictionary=device.events[index]
 			if str(item.get("type",""))=="outbound": event=item;trace_index=index;break
-		var evidence:=_object_button(d,layout,"EdrTrace_"+id,func():_open_recovery_device(d,state,id,trace_index))
+		var evidence:=_object_button(d,layout,"EdrTrace_"+id,func():_open_device(d,state,id,trace_index);_scroll_selected_event_details(d,d.widgets.browser.page,true))
 		var evidence_box:=_object_content(evidence)
 		Glyph.add_to(evidence_box,"network",28,MUTED)
 		label(d,evidence_box,"記録 "+str(event.get("time","—")),12,MUTED).horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
@@ -362,7 +347,7 @@ static func _ignore_object_children(parent: Control) -> void:
 	for child in parent.get_children():
 		if child is Control:_ignore_object_children(child)
 
-static func _open_recovery_device(d, state: Dictionary, id: String, event_index: int = 0) -> void:
+static func _open_device(d, state: Dictionary, id: String, event_index: int = 0) -> void:
 	state["device"]=id;state["event_index"]=event_index;state["query"]="";state["event_type"]="all"
 	state["details_open"]=true;state["recovery_tab"]="timeline";state.erase("file_id");state.erase("output")
 	d._render_endpoint()
@@ -578,15 +563,17 @@ static func devices(d, body: VBoxContainer, state: Dictionary, snap: Dictionary)
 	var selected := str(state.get("device", ""))
 	var rows: Array = snap.get("devices", [])
 	if selected.is_empty():
-		if bool(snap.get("recovery_enabled",false)):
+		if bool(snap.get("recovery_enabled",false)) and str(state.get("inventory_view","business"))!="records":
 			recovery_inventory(d,body,rows,state,snap)
 			return
-		label(d,body,copy("edr_devices"),24)
-		tabline(d,body,copy("edr_device")+"  ("+str(rows.size())+")","EdrInventoryTab")
+		var heading:=HFlowContainer.new();heading.add_theme_constant_override("h_separation",16);body.add_child(heading)
+		label(d,heading,"調査マップ",24).name="EdrInventoryTab"
+		if bool(snap.get("recovery_enabled",false)):
+			button(d,heading,"業務と端末","EdrBusinessMap",func():state["inventory_view"]="business";d._render_endpoint();_show_top.call_deferred(d))
 		var search:=LineEdit.new();search.name="EdrInventorySearch";search.placeholder_text=copy("edr_search");search.text=str(state.get("inventory_query",""));search.custom_minimum_size.x=260*scale(d);search.size_flags_horizontal=Control.SIZE_SHRINK_BEGIN;fluent_control(d,search);body.add_child(search)
 		var table:=VBoxContainer.new();table.name="EdrInventoryRows";table.add_theme_constant_override("separation",0);body.add_child(table)
-		search.text_changed.connect(func(value):state["inventory_query"]=value;inventory(d,table,rows,state,value))
-		inventory(d,table,rows,state,search.text)
+		search.text_changed.connect(func(value):state["inventory_query"]=value;inventory(d,table,snap,state,value))
+		inventory(d,table,snap,state,search.text)
 		return
 	var current: Dictionary = {}
 	for row in rows:
@@ -687,13 +674,16 @@ static func timeline_rows(d, parent: VBoxContainer, current: Dictionary, state: 
 	details.get_parent().add_theme_stylebox_override("panel",detail_style)
 	var detail_title:=HBoxContainer.new();detail_title.name="EdrDetailsHeading";details.add_child(detail_title)
 	label(d,detail_title,copy("experience_event_details"),18)
+	button(d,detail_title,"調査マップ","EdrBackMap",func():
+		state.erase("device");state["inventory_view"]="records";d._render_endpoint();_show_top.call_deferred(d))
+	button(d,detail_title,"端末へ","EdrEventDevice",func():_show_top(d))
 	var close:=button(d,detail_title,"×","EdrCloseDetails",func():state["details_open"]=false;timeline_rows(d,parent,current,state,recovery_snap))
 	close.tooltip_text=copy("portal_close");close.add_theme_stylebox_override("normal",UI.style(Color.WHITE,Color.TRANSPARENT,8,3,0))
 	var event:Dictionary=events[selected]
 	var fields:=VBoxContainer.new();fields.name="EdrEventDetails";fields.add_theme_constant_override("separation",10);details.add_child(fields)
 	for pair in [["edr_time","time"],["edr_event","type"],["edr_process","process"],["edr_publisher","publisher"],["edr_destination","remote_address"],["edr_details","detail"],["edr_change","change_ref"]]:
 		var field:=VBoxContainer.new();field.add_theme_constant_override("separation",2);fields.add_child(field)
-		label(d,field,copy(pair[0]),11,MUTED)
+		label(d,field,"関連先" if pair[1]=="remote_address" and str(event.get("type",""))=="file_read" else copy(pair[0]),11,MUTED)
 		var value:=str(event.get(pair[1],""))
 		label(d,field,value if not value.is_empty() else "—",13).name="EdrField_"+str(pair[1])
 	var event_file_id:=str(event.get("file_id",""))
@@ -701,10 +691,9 @@ static func timeline_rows(d, parent: VBoxContainer, current: Dictionary, state: 
 		var event_file:=recovery_file(recovery_snap,event_file_id)
 		if not event_file.is_empty():
 			button(d,fields,str(event_file.get("name",event_file_id)),"RecoveryEventFile_"+event_file_id,func():state["file_id"]=event_file_id;state["recovery_tab"]="files";d._render_endpoint())
-	entity_graph(d,details,current,event)
 
-static func _scroll_selected_event_details(d, timeline_parent: Control) -> void:
-	if float(d.windows.browser.size.x)>=1280*scale(d):return
+static func _scroll_selected_event_details(d, timeline_parent: Control, force := false) -> void:
+	if not force and float(d.windows.browser.size.x)>=1280*scale(d):return
 	if not d.widgets.has("browser") or not is_instance_valid(d.widgets.browser.page):return
 	var page: VBoxContainer=d.widgets.browser.page
 	var scroll: ScrollContainer=page.get_parent() as ScrollContainer
@@ -721,20 +710,6 @@ static func _scroll_selected_event_details(d, timeline_parent: Control) -> void:
 				current_scroll.scroll_vertical += roundi(current_heading.global_position.y - current_scroll.global_position.y)
 		,CONNECT_ONE_SHOT)
 	,CONNECT_ONE_SHOT)
-
-static func entity_graph(d, parent: VBoxContainer, device: Dictionary, event: Dictionary) -> void:
-	label(d,parent,copy("experience_related_entities"),12,MUTED)
-	var graph:=VBoxContainer.new();graph.name="EdrEntityGraph";graph.add_theme_constant_override("separation",0);parent.add_child(graph)
-	var entities: Array = [["device",device_name(str(device.id)),copy("edr_isolated" if device.isolated else "edr_connected")],["process",str(event.process),str(event.publisher)],["network",str(event.remote_address),str(event.type)]]
-	for index in entities.size():
-		if index>0:
-			var connector:=ColorRect.new();connector.color=Color("c8c6c4");connector.custom_minimum_size=Vector2(1,12);connector.size_flags_horizontal=Control.SIZE_SHRINK_CENTER;graph.add_child(connector)
-		var panel:=PanelContainer.new();panel.add_theme_stylebox_override("panel",UI.style(Color("faf9f8"),LINE,10,6,0));graph.add_child(panel)
-		var row:=HBoxContainer.new();row.add_theme_constant_override("separation",10);panel.add_child(row)
-		Glyph.add_to(row,str(entities[index][0]),24,BLUE)
-		var text:=VBoxContainer.new();text.size_flags_horizontal=Control.SIZE_EXPAND_FILL;row.add_child(text)
-		label(d,text,str(entities[index][1]),13)
-		label(d,text,str(entities[index][2]),11,MUTED)
 
 static func actions(d, body: VBoxContainer, snap: Dictionary) -> void:
 	label(d,body,copy("edr_actions"),24)
