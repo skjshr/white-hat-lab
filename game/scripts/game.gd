@@ -1652,7 +1652,7 @@ func advanced_action(action: String, args: Dictionary = {}) -> Dictionary:
 	if str(state.advanced.get("kind", "")) == "advanced-saas-response":
 		change_cost = maxi(0, int(result.get("cost", 0)))
 		var business_added := maxi(0, _saas_business_cost(state.advanced) - _saas_business_cost(before.get("advanced", {})))
-		_record_saas_costs(int(result.get("usage_cost", 0)), maxi(0, int(result.get("impact_cost", 0)) - business_added), business_added)
+		_record_saas_costs(int(result.get("usage_cost", 0)), maxi(0, int(result.get("impact_cost", 0)) - business_added), business_added, int(result.get("manual_cost", 0)))
 	_work_add(float(result.get("minutes", 0)), change_cost, true)
 	_sync_target()
 	if not save_game():
@@ -1700,11 +1700,16 @@ func _saas_business_cost(model: Dictionary) -> int:
 		return total
 	return maxi(0, int(model.get("session_case", {}).get("business", {}).get("loss_cost", 0)))
 
-func _record_saas_costs(usage: int, impact: int, business: int = 0) -> void:
+func _record_saas_costs(usage: int, impact: int, business: int = 0, manual: int = 0) -> void:
 	var costs: Dictionary = state.work.get("saas_costs", {})
-	costs["usage_cost"] = int(costs.get("usage_cost", 0)) + maxi(0, usage)
+	var manual_added := clampi(manual, 0, maxi(0, usage))
+	var assistant_added := maxi(0, usage) - manual_added
+	costs["usage_cost"] = int(costs.get("usage_cost", 0)) + assistant_added
 	costs["impact_cost"] = int(costs.get("impact_cost", 0)) + maxi(0, impact)
-	costs["assistant_runs"] = int(costs.get("assistant_runs", 0)) + (1 if usage > 0 else 0)
+	costs["assistant_runs"] = int(costs.get("assistant_runs", 0)) + (1 if assistant_added > 0 else 0)
+	if manual_added > 0:
+		costs["manual_cost"] = int(costs.get("manual_cost", 0)) + manual_added
+		costs["manual_runs"] = int(costs.get("manual_runs", 0)) + 1
 	if business > 0 or costs.has("business_cost"): costs["business_cost"] = int(costs.get("business_cost", 0)) + maxi(0, business)
 	state.work["saas_costs"] = costs
 

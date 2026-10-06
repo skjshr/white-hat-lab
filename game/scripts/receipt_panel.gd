@@ -255,10 +255,12 @@ static func _finance(d, host: VBoxContainer, receipt: Dictionary) -> void:
 	var change_cost := int(receipt.get("pentest_changes", {}).get("cost_total", 0))
 	var saas_costs: Dictionary = receipt.get("saas_outcome", {}).get("costs", {})
 	var assistant_cost := int(saas_costs.get("usage_cost", 0))
+	var manual_cost := int(saas_costs.get("manual_cost", 0))
 	var leak_cost := int(saas_costs.get("impact_cost", 0))
 	var business_cost := int(saas_costs.get("business_cost", 0))
-	_row(d, costs, "ReceiptOperatingCost", UI.copy("receipt_operating_cost"), operating-compensation-change_cost-assistant_cost-leak_cost-business_cost)
+	_row(d, costs, "ReceiptOperatingCost", UI.copy("receipt_operating_cost"), operating-compensation-change_cost-assistant_cost-manual_cost-leak_cost-business_cost)
 	if assistant_cost > 0: _row(d, costs, "ReceiptAssistantCost", "記録整理助手（%d回）" % int(saas_costs.get("assistant_runs", 0)), assistant_cost)
+	if manual_cost > 0: _row(d, costs, "ReceiptManualCost", "委託先の緊急手動受付（%d業務）" % int(saas_costs.get("manual_runs", 0)), manual_cost)
 	if leak_cost > 0: _row(d, costs, "ReceiptLeakCost", "流出記録の補償（延べ%d行）" % receipt.get("saas_outcome", {}).get("egress", {}).get("exported_rows", []).size(), leak_cost)
 	if business_cost > 0:
 		var business_label := "請求予約・委託先受渡の遅延補償" if str(receipt.get("saas_outcome", {}).get("model_version", "")) == "saas-partner-v1" else "請求予約・配車集計の遅延補償"

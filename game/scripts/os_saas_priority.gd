@@ -63,6 +63,7 @@ static func _board(d, parent: Node, n: Dictionary) -> void:
 	var run := _button(actions, "現在設定で受付確認済み" if current else "受付を再確認 · 3分" if not str(queue.get("receipt_id", "")).is_empty() else "業務を送付 · 3分", "PriorityRun", _send.bind(d, "run_queue", {"queue_id":id})); run.disabled = current
 	_button(actions, "範囲外要求を試験 · 2分", "PriorityProbe", _send.bind(d, "probe_queue", {"queue_id":id}))
 	_impact_band(parent, n, float(d.game.settings.get("text_scale", 1.0)))
+	if not n.get("recovery", {}).is_empty(): _recovery_actions(d, parent, n, queue)
 	var controls := U.row(parent); _label(controls, "範囲", 13, MUTED)
 	for scope in ["off", "linked", "all"]:
 		var text := "0件" if scope == "off" else "当該%d件" % int(queue.get("approved_count", 0)) if scope == "linked" else "全%d件" % int(queue.get("all_count", 0))
@@ -114,6 +115,20 @@ static func _impact_band(parent: Node, n: Dictionary, scale: float) -> void:
 		saved_clock.draw_line(center, center + Vector2(0, -4) * scale, ink, 1.5 * scale)
 		saved_clock.draw_line(center, center + Vector2(4, 2) * scale, ink, 1.5 * scale))
 	U.label(delayed, ("× " if delay > 0 else "") + "業務遅延補償 ¥%d" % delay, 14, ink, false)
+	if not n.get("recovery", {}).is_empty(): _label(band, "手動受付費 ¥%d" % int(n.recovery.get("manual_usage_cost", 0)), 14, MUTED)
+
+static func _recovery_actions(d, parent: Node, n: Dictionary, queue: Dictionary) -> void:
+	var recovery: Dictionary = n.get("recovery", {}); var row := U.row(parent)
+	var ready := str(recovery.get("connector_status", "stopped")) == "ready"
+	var rebuild := _button(row, "新連携 復旧済み · %d分" % int(recovery.get("rebuilt_minute", 0)) if ready else "新連携を復旧 · %d分" % int(recovery.get("rebuild_minutes", 6)), "PriorityRebuild", _send.bind(d, "rebuild_connector")); rebuild.disabled = ready
+	var available := int(recovery.get("manual_remaining", 0)) > 0
+	var used_here := str(recovery.get("manual_queue_id", "")) == str(queue.get("id", ""))
+	var title := "この業務を手動受付 · %d分 / ¥%d" % [int(recovery.get("manual_minutes", 2)), int(recovery.get("manual_cost", 900))]
+	if not available: title = "手動受付済み · %d分" % int(recovery.get("manual_used_minute", 0)) if used_here else "手動枠 使用済み"
+	elif not str(queue.get("receipt_id", "")).is_empty(): title = "受付済み / 手動不要"
+	var manual := _button(row, title, "PriorityManual", _send.bind(d, "manual_queue", {"queue_id":str(queue.get("id", ""))}))
+	manual.disabled = not available or not str(queue.get("receipt_id", "")).is_empty()
+	manual.tooltip_text = str(queue.get("label", "")) + "の受付だけを手動で運びます。新連携と旧背景同期の設定は変わりません。"
 
 static func _sources(n: Dictionary) -> Array:
 	return n.get("records", []).filter(func(record): return str(record.get("action", "")) not in ["organize_manual", "organize_assistant", "submit_report"])
@@ -134,7 +149,7 @@ static func _select_records(d, n: Dictionary) -> void:
 
 static func _record_name(record: Dictionary) -> String:
 	var action := str(record.get("action", "")); var queue := str(record.get("data", {}).get("queue_id", ""))
-	var label := str({"consent_review":"承認原本", "baseline_reference":"前回の原本", "run_business":"業務受付", "probe_queue":"範囲外試験", "configure_queue":"業務設定", "configure_policy":"業務設定", "configure_background":"背景同期設定", "scheduled_background_send":"背景の実通信", "probe_background":"背景の試験", "queue_overdue":"業務期限超過", "collect_audit":"監査原本"}.get(action, action))
+	var label := str({"consent_review":"承認原本", "baseline_reference":"前回の原本", "run_business":"業務受付", "manual_business":"手動の初回受付", "connector_incident":"共用連携の停止記録", "rebuild_connector":"新連携の復旧記録", "probe_queue":"範囲外試験", "configure_queue":"業務設定", "configure_policy":"業務設定", "configure_background":"背景同期設定", "scheduled_background_send":"背景の実通信", "probe_background":"背景の試験", "queue_overdue":"業務期限超過", "collect_audit":"監査原本"}.get(action, action))
 	return label + (" / " + str({"dispatch":"配送", "claims":"返金"}.get(queue, queue)) if not queue.is_empty() else "")
 
 static func _records(d, parent: Node, n: Dictionary) -> void:
@@ -189,6 +204,7 @@ static func _category(record: Dictionary) -> String:
 static func _stale(record: Dictionary, n: Dictionary) -> bool:
 	var data: Dictionary = record.get("data", {}); var action := str(record.get("action", ""))
 	if action in ["run_business", "probe_queue"]:
+		if not n.get("recovery", {}).is_empty() and str(data.get("connector_record_id", "")) != str(n.recovery.get("rebuild_record_id", "")): return true
 		for queue in n.get("queues", []):
 			if str(queue.get("id", "")) == str(data.get("queue_id", "")): return int(data.get("policy_revision", -1)) != int(queue.get("policy_revision", 0))
 	if action in ["probe_background", "scheduled_background_send"]: return int(data.get("background_revision", -1)) != int(n.get("background", {}).get("policy_revision", 0))

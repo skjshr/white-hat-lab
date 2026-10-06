@@ -9,6 +9,7 @@ const HANDOFF_MODEL := "saas-ai-handoff-v1"
 const CLIENT := "北斗物流"
 const TITLE := "緊急対応: 二つの業務の復旧順序"
 const BRIEF := "前回の委託先業務を受け継ぎ、返金照合と配送連絡の受付を復旧します。承認原本、宛先、業務ごとの締切と損失を確認してください。"
+const PRIORITY_ENGINE = preload("res://scripts/saas_priority.gd")
 
 static func _canonical(value: Variant) -> String:
 	return JSON.stringify(JSON.parse_string(JSON.stringify(value)), "", true)
@@ -183,7 +184,11 @@ static func _make_payload(row: Dictionary) -> Dictionary:
 			joined += str(receipt_key) + "=" + str(receipts[receipt_key])
 		receipt_id = joined
 	var prior := {"source_model":model,"source_round":int(info.get("round", 0)),"exported_rows":exported.size() if exported is Array else 0,"loss_cost":_business_loss(outcome, info),"receipt_id":receipt_id,"receipts":receipts,"grade":str(row.get("grade", "")),"satisfaction_after":int(row.get("satisfaction_after", -1))}
-	return {"source_contract_id":source_id,"source_day":source_day,"client":CLIENT,"round":round,"approved_originals":records,"prior_result":prior}
+	var generated := {"source_contract_id":source_id,"source_day":source_day,"client":CLIENT,"round":round,"approved_originals":records,"prior_result":prior}
+	if round >= 3:
+		var recovery_plan: Dictionary = PRIORITY_ENGINE.plan(round)
+		if not recovery_plan.is_empty(): generated.recovery_plan = recovery_plan.duplicate(true)
+	return generated
 
 static func _all_passed(row: Dictionary) -> bool:
 	var checks_value: Variant = row.get("checks", [])
@@ -290,6 +295,8 @@ static func _valid_payload(value: Variant) -> bool:
 	var payload_value: Dictionary = value
 	if str(payload_value.get("source_contract_id", "")).is_empty() or not _whole(payload_value.get("source_day", null)) or int(payload_value.source_day) < 1 or str(payload_value.get("client", "")) != CLIENT: return false
 	if not _whole(payload_value.get("round", null)) or int(payload_value.round) < 1 or not payload_value.get("prior_result", null) is Dictionary: return false
+	if payload_value.has("recovery_plan"):
+		if int(payload_value.round) < 3 or _canonical(payload_value.recovery_plan) != _canonical(PRIORITY_ENGINE.plan(int(payload_value.round))): return false
 	var originals: Variant = payload_value.get("approved_originals", null)
 	if not originals is Array or originals.is_empty() or originals.size() > 32: return false
 	var ids: Dictionary = {}; var consent_count := 0; var report_count := 0; var run_queues: Dictionary = {}; var source_model := str(payload_value.prior_result.get("source_model", ""))
@@ -315,7 +322,13 @@ static func _valid_payload(value: Variant) -> bool:
 static func matches_available(state: Dictionary, value: Variant, day: int) -> bool:
 	if not _valid_payload(value): return false
 	var current := payload(state, day)
-	return not current.is_empty() and _canonical(current) == _canonical(value)
+	if current.is_empty(): return false
+	var candidate: Dictionary = value.duplicate(true)
+	# Offers serialized before connector recovery was introduced remain valid
+	# under their original frozen terms. A payload that explicitly has a plan
+	# must match it exactly; only the absent legacy field is ignored.
+	if not candidate.has("recovery_plan"): current.erase("recovery_plan")
+	return _canonical(current) == _canonical(candidate)
 
 static func _latest_source_payload(state: Dictionary) -> Dictionary:
 	var history: Array = state.get("history", []).duplicate(true)
@@ -375,11 +388,16 @@ static func brief(source: Dictionary) -> String:
 	var round := maxi(1, int(source.get("round", 1)))
 	var claims_fast := round % 2 == 1
 	var claims_path := "minato/claims" if claims_fast else "minato/archive"
-	var claims_deadline := 6 if claims_fast else 14
+	var plan_value: Variant = source.get("recovery_plan", {})
+	var has_plan: bool = plan_value is Dictionary and not plan_value.is_empty()
+	var claims_deadline := int(plan_value.get("urgent_deadline", 6)) if has_plan and claims_fast else int(plan_value.get("other_deadline", 14)) if has_plan else (6 if claims_fast else 14)
 	var claims_loss := 4500 if claims_fast else 900
-	var dispatch_deadline := 14 if claims_fast else 6
+	var dispatch_deadline := int(plan_value.get("other_deadline", 14)) if has_plan and claims_fast else int(plan_value.get("urgent_deadline", 6)) if has_plan else (14 if claims_fast else 6)
 	var dispatch_loss := 900 if claims_fast else 4500
-	return BRIEF + " 第%d回。返金受付の締めは%d分、遅延補償¥%d、宛先 %s。出発便の連絡期限は%d分、遅延補償¥%d、宛先 minato/dispatch。" % [round,claims_deadline,claims_loss,claims_path,dispatch_deadline,dispatch_loss]
+	var text := BRIEF + " 第%d回。返金受付の締めは%d分、遅延補償¥%d、宛先 %s。出発便の連絡期限は%d分、遅延補償¥%d、宛先 minato/dispatch。" % [round,claims_deadline,claims_loss,claims_path,dispatch_deadline,dispatch_loss]
+	if has_plan:
+		text += " 共用連携が停止中です。復旧は%d分、手動受付は1業務%d分/¥%dです。" % [int(plan_value.get("rebuild_minutes", 0)),int(plan_value.get("manual_minutes", 0)),int(plan_value.get("manual_cost", 0))]
+	return text
 
 static func lead(game) -> Dictionary:
 	var state: Dictionary = game.state

@@ -2,6 +2,7 @@ extends SceneTree
 ## Pure saved-history tests for successive SaaS priority market offers.
 
 const FOLLOWUP = preload("res://scripts/saas_priority_followup.gd")
+const PRIORITY_ENGINE = preload("res://scripts/saas_priority.gd")
 const HANDOFF_CASE := "advanced-saas-ai-handoff"
 const PRIORITY_CASE := "advanced-saas-priority"
 const CLIENT := "北斗物流"
@@ -77,6 +78,24 @@ func run() -> void:
 		if str(original.get("id", "")) == "RUN-CLAIMS-1":
 			check(not original.get("data", {}).has("records") and not original.get("data", {}).has("events"), "source originals strip nested audit trees while preserving their real IDs")
 	check(str(FOLLOWUP.brief(second)).contains("minato/archive") and str(FOLLOWUP.brief(second)).contains("14分"), "even round changes the approved claims destination and deadline")
+	check(not second.has("recovery_plan"), "round two retains the original follow-up payload shape")
+
+	var round_two := priority_row("PRIORITY-CASE-02",5,2,"S",true,"PRIORITY-CASE-01")
+	var third_state := root_state([handoff,round_one,round_two],["HANDOFF-CASE-01","PRIORITY-CASE-01","PRIORITY-CASE-02"],6)
+	var third: Dictionary = FOLLOWUP.payload(third_state,6)
+	check(int(third.get("round",0)) == 3 and third.get("recovery_plan",{}) == PRIORITY_ENGINE.plan(3), "new round three offer freezes the engine-defined odd connector recovery plan")
+	check(FOLLOWUP.matches_available(third_state,third,6), "the frozen recovery plan matches its current round-three source")
+	var third_brief := str(FOLLOWUP.brief(third))
+	check(third_brief.contains("共用連携") and third_brief.contains("復旧は6分") and third_brief.contains("¥900") and third_brief.contains("返金受付の締めは6分") and third_brief.contains("出発便の連絡期限は20分") and not third_brief.contains("14分"), "round-three brief contains the actual deadlines without the old conflicting cutoff")
+	var legacy_third := third.duplicate(true); legacy_third.erase("recovery_plan")
+	check(FOLLOWUP.matches_available(third_state,legacy_third,6), "a previously frozen round-three offer without the new optional plan remains valid")
+	var altered_plan := third.duplicate(true); altered_plan.recovery_plan.urgent_deadline = 7
+	check(not FOLLOWUP.matches_available(third_state,altered_plan,6), "a payload with an altered explicit recovery plan is rejected")
+	var round_three := priority_row("PRIORITY-CASE-03",7,3,"S",true,"PRIORITY-CASE-02")
+	var fourth_state := root_state([handoff,round_one,round_two,round_three],["HANDOFF-CASE-01","PRIORITY-CASE-01","PRIORITY-CASE-02","PRIORITY-CASE-03"],8)
+	var fourth: Dictionary = FOLLOWUP.payload(fourth_state,8)
+	check(int(fourth.get("round",0)) == 4 and fourth.get("recovery_plan",{}) == PRIORITY_ENGINE.plan(4), "recovery planning continues into the next even round")
+	check(int(fourth.get("recovery_plan",{}).get("urgent_deadline",0)) == 12 and int(fourth.get("recovery_plan",{}).get("other_deadline",0)) == 22, "even recovery deadlines follow the model plan")
 
 	var unpassed := priority_row("PRIORITY-UNPASSED",3,1,"A",false)
 	var bad := root_state([unpassed],["PRIORITY-UNPASSED"],4)

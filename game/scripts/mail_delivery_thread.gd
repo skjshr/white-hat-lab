@@ -31,10 +31,16 @@ static func project(state: Dictionary, record: Dictionary) -> Dictionary:
 			reply.body = "二つの業務の受付と、承認範囲の確認結果を受領しました。"
 			for queue in saas.get("priority", {}).get("queues", []):
 				reply.body += "\n%s: %s、%d分に受付（締切%d分）。" % [str(queue.label),str(queue.get("receipt_id", "")),int(queue.get("received_minute", -1)),int(queue.get("deadline_minute", 0))]
+				if str(queue.get("receipt_channel", "")) == "manual": reply.body += " 手動受付で業務を先に続け、同じ受付を新連携でも確認しました。"
 				var loss := int(queue.get("loss_cost", 0))
 				reply.body += " 締切内に業務を続けられました。" if loss == 0 else " 遅延補償¥%dを計上しました。復旧後も記録を保管します。" % loss
 			var lost: int = saas.get("egress", {}).get("exported_rows", []).size()
 			reply.body += "\n承認外の送付は発生しませんでした。" if lost == 0 else "\n過剰送付の延べ%d行と補償¥%dを確認しました。" % [lost,int(saas.get("costs", {}).get("impact_cost", 0))]
+			var recovery: Dictionary = saas.get("priority", {}).get("recovery", {})
+			if not recovery.is_empty():
+				reply.body += "\n新連携の復旧と旧セッションの停止を確認しました。"
+				var manual_cost := int(saas.get("costs", {}).get("manual_cost", 0))
+				if manual_cost > 0: reply.body += " 緊急手動受付料¥%dを今回の経費に残します。" % manual_cost
 		if str(reply.case_id) == "advanced-saas-ai-handoff" and str(saas.get("model_version", "")) == "saas-ai-handoff-v1":
 			var business: Dictionary = saas.get("handoff", {}).get("business", {})
 			var lost: int = saas.get("egress", {}).get("exported_rows", []).size()

@@ -7,6 +7,20 @@ const KIND := "advanced-saas-response"
 const CLIENT := "北斗物流"
 const RECIPIENTS := ["minato/dispatch","minato/claims","minato/archive"]
 
+static func plan(round_number: int) -> Dictionary:
+	if round_number < 3: return {}
+	return {"version":"connector-recovery-v1","round":round_number,"rebuild_minutes":6,"manual_minutes":2,"manual_cost":900,"manual_limit":1,"urgent_deadline":6 if round_number % 2 == 1 else 12,"other_deadline":20 if round_number % 2 == 1 else 22}
+
+static func _valid_plan(value: Variant, round_number: int) -> bool:
+	var expected := plan(round_number)
+	if not value is Dictionary or expected.is_empty() or value.size() != expected.size(): return false
+	for key in expected:
+		if not value.has(key): return false
+		if key == "version":
+			if not value[key] is String or value[key] != expected[key]: return false
+		elif not _whole(value[key]) or int(value[key]) != int(expected[key]): return false
+	return true
+
 static func _result(ok: bool, changed: bool, minutes: int, usage: int, impact: int, message: String) -> Dictionary:
 	return {"ok":ok,"changed":changed,"observed":changed,"minutes":minutes,"cost":usage + impact,"usage_cost":usage,"impact_cost":impact,"message":message,"data":{}}
 
@@ -46,12 +60,20 @@ static func _make_queue(id: String, round_number: int) -> Dictionary:
 	for index in 3: extras.append({"id":"EXTRA-%s-%02d-%d" % [id,round_number,index + 1],"label":"対象外の配送連絡先" if dispatch else "対象外の返金記録"})
 	return {"id":id,"label":"配送連絡" if dispatch else "返金照合","approval_id":"AP-DISPATCH" if dispatch else "AP-CLAIMS","items":items,"extra_items":extras,"all_count":6 if dispatch else 5,"approved_count":items.size(),"approved_recipient":recipient,"deadline_minute":6 if urgent else 14,"late_cost":4500 if urgent else 900,"late":false,"loss_cost":0,"late_record_id":"","policy":{"scope":"all","recipient":"minato/dispatch"},"policy_revision":0,"receipt_id":"","received_minute":-1,"verified_revision":-1,"attempts":[],"last_attempt":{}}
 
-static func _create(round_number: int) -> Dictionary:
+static func _create(round_number: int, recovery_plan: Dictionary = {}) -> Dictionary:
 	var s := {"kind":KIND,"case_id":CASE_ID,"model_version":MODEL_VERSION,"revision":0,"world_revision":0,"elapsed_minutes":0,"sequence":0,"records":[],"audit":[],"invoice":{},"organization":{},"report":{"submitted":false,"version":0,"original":{},"latest":{},"supplements":[]},"last_result":{},"egress":{"exported_rows":[],"impact_cost":0},"priority":{"source":{},"round":round_number,"queues":[_make_queue("dispatch",round_number),_make_queue("claims",round_number)],"background":{"enabled":true,"recipient":"minato/shared","row_count":6,"policy_revision":0,"schedule":[],"last_attempt":{}}}}
+	if not recovery_plan.is_empty():
+		s.priority.recovery = {"version":str(recovery_plan.version),"plan":recovery_plan.duplicate(true),"connector_status":"stopped","rebuild_minutes":int(recovery_plan.rebuild_minutes),"rebuild_record_id":"","rebuilt_minute":-1,"manual_limit":1,"manual_queue_id":"","manual_remaining":1,"manual_minutes":int(recovery_plan.manual_minutes),"manual_cost":int(recovery_plan.manual_cost),"manual_usage_cost":0,"manual_record_id":"","manual_receipt_id":"","manual_used_minute":-1,"initial_record_id":""}
+		for q in s.priority.queues:
+			q.deadline_minute = int(recovery_plan.urgent_deadline) if int(q.late_cost) == 4500 else int(recovery_plan.other_deadline)
+			q.receipt_channel = ""
 	for q in s.priority.queues:
 		var approval := _record(s,"consent_review",200,str(q.approved_recipient),"%s: 対象%d件を %s へ%d分以内に受付。全名簿と他の送付口は対象外。" % [str(q.label),int(q.approved_count),str(q.approved_recipient),int(q.deadline_minute)],{"queue_id":str(q.id),"approved_sources":["shipment-status","linked-contacts"] if str(q.id) == "dispatch" else ["refund-requests","payment-ledger"],"approved_count":int(q.approved_count),"approved_ids":q.items.map(func(item): return str(item.id)),"approved_recipient":str(q.approved_recipient),"deadline_minute":int(q.deadline_minute),"late_cost":int(q.late_cost)})
 		approval.id = str(q.approval_id); s.audit.append(approval.duplicate(true))
 	for due in [8,16]: s.priority.background.schedule.append({"id":"PRIORITY-SYNC-%d" % due,"due_minute":due,"status":"scheduled","status_code":0,"rows":0,"record_id":""})
+	if s.priority.has("recovery"):
+		var incident := _record(s,"connector_incident",503,"minato/business-connector","2業務共用の通常連携が停止中です。旧セッションの一括同期は別経路で動作しています。",{"queues":["dispatch","claims"],"connector_status":"stopped","recovery_plan":recovery_plan.duplicate(true)})
+		s.priority.recovery.initial_record_id = str(incident.id)
 	return s
 
 static func create(case_id: String = CASE_ID) -> Dictionary:
@@ -60,6 +82,7 @@ static func create(case_id: String = CASE_ID) -> Dictionary:
 static func _valid_source(payload: Dictionary) -> bool:
 	if str(payload.get("source_contract_id", "")).is_empty() or not _whole(payload.get("source_day"),1) or not _whole(payload.get("round"),1) or str(payload.get("client", "")) != CLIENT: return false
 	if not payload.get("approved_originals") is Array or not payload.get("prior_result", {}) is Dictionary: return false
+	if payload.has("recovery_plan") and not _valid_plan(payload.recovery_plan,int(payload.round)): return false
 	var seen := {}; var kinds := {}
 	for value in payload.approved_originals:
 		if not value is Dictionary or not value.get("data") is Dictionary or int(value.get("status", 0)) != 200: return false
@@ -71,7 +94,7 @@ static func _valid_source(payload: Dictionary) -> bool:
 
 static func create_followup(payload: Dictionary) -> Dictionary:
 	if not _valid_source(payload): return {}
-	var s := _create(int(payload.round)); s.priority.source = payload.duplicate(true)
+	var s := _create(int(payload.round),payload.get("recovery_plan", {})); s.priority.source = payload.duplicate(true)
 	for original in payload.approved_originals:
 		var row := _record(s,"baseline_reference",200,"prior-case/" + str(payload.source_contract_id),"前回納品の原本。今回の承認・実測とは別の記録です。",{"source_contract_id":str(payload.source_contract_id),"source_day":int(payload.source_day),"source_record_id":str(original.id),"original":original.duplicate(true)})
 		row.id = "PRIOR-" + str(original.id); s.audit.append(row.duplicate(true))
@@ -86,6 +109,13 @@ static func _valid(s: Dictionary) -> bool:
 	if not s.get("records") is Array or not s.get("audit") is Array or not s.priority.get("queues") is Array or s.priority.queues.size() != 2 or not s.priority.get("background") is Dictionary: return false
 	if not _whole(s.priority.get("round"),1) or not s.priority.get("source") is Dictionary: return false
 	if not s.priority.source.is_empty() and not _valid_source(s.priority.source): return false
+	if s.priority.source.has("recovery_plan") and not s.priority.has("recovery"): return false
+	if s.priority.has("recovery"):
+		var recovery: Variant = s.priority.recovery
+		if not recovery is Dictionary or not _valid_plan(recovery.get("plan"),int(s.priority.round)) or str(recovery.get("version", "")) != "connector-recovery-v1": return false
+		if str(recovery.get("connector_status", "")) not in ["stopped","ready"] or str(recovery.get("manual_queue_id", "")) not in ["","dispatch","claims"]: return false
+		for key in ["manual_remaining","manual_usage_cost","manual_cost","manual_minutes","rebuild_minutes"]:
+			if not _whole(recovery.get(key)): return false
 	for q in s.priority.queues:
 		if not q is Dictionary or str(q.get("id", "")) not in ["dispatch","claims"] or not q.get("policy") is Dictionary or not q.get("items") is Array or not q.get("extra_items") is Array or not q.get("attempts") is Array: return false
 		if str(q.policy.get("scope", "")) not in ["off","linked","all"] or str(q.policy.get("recipient", "")) not in RECIPIENTS or not _whole(q.get("policy_revision")) or not _whole(q.get("loss_cost")): return false
@@ -151,7 +181,9 @@ static func _hash(ids: Array) -> String:
 	var sorted := ids.duplicate(); sorted.sort(); return "|".join(sorted)
 
 static func _queue_proof(s: Dictionary, q: Dictionary, action: String) -> Dictionary:
+	if s.priority.has("recovery") and str(s.priority.recovery.connector_status) != "ready": return {}
 	var row := _latest(s,action,str(q.id)); var data: Dictionary = row.get("data", {})
+	if s.priority.has("recovery") and str(data.get("connector_record_id", "")) != str(s.priority.recovery.rebuild_record_id): return {}
 	if int(data.get("policy_revision", -1)) != int(q.policy_revision) or int(row.get("status", 0)) != (200 if action == "run_business" else 403): return {}
 	if action == "run_business" and (str(data.get("receipt_id", "")).is_empty() or data.get("jobs", []).size() != int(q.approved_count)): return {}
 	return row
@@ -174,6 +206,10 @@ static func _required(s: Dictionary) -> Array:
 	var stop := _latest(s,"configure_background"); var proof := _background_proof(s); var audit := _latest(s,"collect_audit")
 	for row in [stop,proof,audit]:
 		if not row.is_empty(): ids.append(str(row.id))
+	if s.priority.has("recovery"):
+		for key in ["initial_record_id","rebuild_record_id","manual_record_id"]:
+			var id := str(s.priority.recovery.get(key, ""))
+			if not id.is_empty(): ids.append(id)
 	return ids
 
 static func _damage_captured(s: Dictionary, captured: Array) -> bool:
@@ -200,7 +236,7 @@ static func _report_valid(s: Dictionary, ids: Array) -> bool:
 
 static func act(state: Dictionary, action: String, args: Dictionary = {}) -> Dictionary:
 	if not _valid(state): return _error("緊急業務の保存状態を確認できません。")
-	var s := state.duplicate(true); var minutes := 0; var usage := 0; var ids: Array = []
+	var s := state.duplicate(true); var minutes := 0; var usage := 0; var manual_cost := 0; var ids: Array = []
 	var q := _queue(s,str(args.get("queue_id", ""))); var key := str(args.get("key", "")); var value: Variant = args.get("value")
 	match action:
 		"configure":
@@ -215,6 +251,14 @@ static func act(state: Dictionary, action: String, args: Dictionary = {}) -> Dic
 			if q.is_empty(): return _error("受付する業務を選んでください。")
 			if not str(q.receipt_id).is_empty() and int(q.verified_revision) == int(q.policy_revision): return _unchanged(state,"現在設定の受付確認済みです。受付番号は変わりません。")
 			minutes = 3
+		"rebuild_connector":
+			if not s.priority.has("recovery"): return _error("この案件に通常連携の再構築はありません。")
+			if str(s.priority.recovery.connector_status) == "ready": return _unchanged(state,"通常連携は再構築済みです。旧一括同期は別経路です。")
+			minutes = int(s.priority.recovery.rebuild_minutes)
+		"manual_queue":
+			if not s.priority.has("recovery") or q.is_empty(): return _error("応急受付する業務を選んでください。")
+			if not str(q.receipt_id).is_empty(): return _unchanged(state,"この業務は受付済みです。保存された受付控えを表示します。")
+			minutes = int(s.priority.recovery.manual_minutes)
 		"probe_queue":
 			if q.is_empty(): return _error("試験する業務を選んでください。")
 			minutes = 2
@@ -239,22 +283,54 @@ static func act(state: Dictionary, action: String, args: Dictionary = {}) -> Dic
 		"toggle_background":
 			var background: Dictionary = s.priority.background; background.enabled = bool(args.enabled); background.policy_revision = int(background.policy_revision) + 1; s.world_revision = int(s.world_revision) + 1
 			record = _record(s,"configure_background",200,str(background.recipient),"一括同期の設定を変更しました。通常業務の送付口は別設定です。",{"enabled":bool(background.enabled),"background_revision":int(background.policy_revision)})
+		"rebuild_connector":
+			var recovery: Dictionary = s.priority.recovery
+			recovery.connector_status = "ready"; recovery.rebuilt_minute = int(s.elapsed_minutes); s.world_revision = int(s.world_revision) + 1
+			record = _record(s,"rebuild_connector",200,"minato/business-connector","2業務の通常連携を再構築しました。旧一括同期の接続には変更を加えていません。",{"queues":["dispatch","claims"],"connector_status":"ready","background_enabled":bool(s.priority.background.enabled)})
+			recovery.rebuild_record_id = str(record.id)
+		"manual_queue":
+			var recovery: Dictionary = s.priority.recovery
+			var available := str(recovery.manual_queue_id).is_empty()
+			var permitted: bool = str(q.policy.scope) == "linked" and str(q.policy.recipient) == str(q.approved_recipient)
+			var allowed := available and permitted
+			var receipt := "RCPT-%s-%02d" % [str(q.id).to_upper(),int(s.priority.round)] if allowed else ""
+			var jobs: Array = q.items.duplicate(true) if allowed else []
+			for index in jobs.size(): jobs[index].status = "received"; jobs[index].recipient = str(q.approved_recipient); jobs[index].receipt_id = receipt + "-%d" % (index + 1)
+			if allowed: manual_cost = int(recovery.manual_cost); usage += manual_cost
+			record = _record(s,"manual_business",200 if allowed else 409 if not available else 403,str(q.policy.recipient),str(q.label) + ("を応急の手動経路で受け付けました。通常連携での再確認が必要です。" if allowed else "は手動受付枠が使用済みです。通常連携を復旧してください。" if not available else "の手動受付には対象だけの範囲と正規送付先が必要です。"),{"queue_id":str(q.id),"policy_revision":int(q.policy_revision),"receipt_id":receipt,"jobs":jobs,"scope":str(q.policy.scope),"recipient":str(q.policy.recipient),"receipt_channel":"manual","manual_cost":manual_cost})
+			q.attempts.append(record.duplicate(true)); q.last_attempt = record.duplicate(true)
+			if allowed:
+				q.receipt_id = receipt; q.received_minute = int(s.elapsed_minutes); q.items = jobs.duplicate(true); q.receipt_channel = "manual"
+				recovery.manual_queue_id = str(q.id); recovery.manual_remaining = 0; recovery.manual_usage_cost = manual_cost; recovery.manual_record_id = str(record.id); recovery.manual_receipt_id = receipt; recovery.manual_used_minute = int(s.elapsed_minutes)
+			else: result.ok = false
 		"run_queue":
-			var allowed: bool = str(q.policy.scope) != "off" and str(q.policy.recipient) == str(q.approved_recipient)
+			var connected: bool = not s.priority.has("recovery") or str(s.priority.recovery.connector_status) == "ready"
+			var allowed: bool = connected and str(q.policy.scope) != "off" and str(q.policy.recipient) == str(q.approved_recipient)
 			var verification_only := not str(q.receipt_id).is_empty()
-			var receipt := "RCPT-%s-%02d" % [str(q.id).to_upper(),int(s.priority.round)] if allowed else str(q.receipt_id)
+			var receipt := str(q.receipt_id) if verification_only else "RCPT-%s-%02d" % [str(q.id).to_upper(),int(s.priority.round)] if allowed else ""
 			var jobs: Array = q.items.duplicate(true) if allowed else []
 			for index in jobs.size(): jobs[index].status = "received"; jobs[index].recipient = str(q.approved_recipient); jobs[index].receipt_id = receipt + "-%d" % (index + 1)
 			var excess: Array = q.extra_items if allowed and not verification_only and str(q.policy.scope) == "all" else []
-			record = _record(s,"run_business",200 if allowed else 403,str(q.policy.recipient),str(q.label) + (("の現在設定を再確認しました。受付控えは保持されています。" if verification_only else "を受け付けました。") if allowed else "の受付に必要な範囲または送付先が一致しません。"),{"queue_id":str(q.id),"policy_revision":int(q.policy_revision),"receipt_id":receipt,"jobs":jobs,"scope":str(q.policy.scope),"recipient":str(q.policy.recipient),"verification_only":verification_only,"excess_rows":excess.size()})
+			var data := {"queue_id":str(q.id),"policy_revision":int(q.policy_revision),"receipt_id":receipt,"jobs":jobs,"scope":str(q.policy.scope),"recipient":str(q.policy.recipient),"verification_only":verification_only,"excess_rows":excess.size()}
+			if s.priority.has("recovery"):
+				data.initial_receipt_channel = str(q.receipt_channel) if verification_only else "connector" if allowed else ""
+				data.initial_received_minute = int(q.received_minute) if verification_only else int(s.elapsed_minutes) if allowed else -1
+				data.connector_record_id = str(s.priority.recovery.rebuild_record_id)
+			record = _record(s,"run_business",200 if allowed else 503 if not connected else 403,str(q.policy.recipient),str(q.label) + (("の現在設定を再確認しました。受付控えは保持されています。" if verification_only else "を受け付けました。") if allowed else "の通常連携が停止しています。" if not connected else "の受付に必要な範囲または送付先が一致しません。"),data)
 			q.attempts.append(record.duplicate(true)); q.last_attempt = record.duplicate(true)
 			if allowed:
-				if str(q.receipt_id).is_empty(): q.receipt_id = receipt; q.received_minute = int(s.elapsed_minutes); q.items = jobs.duplicate(true)
+				if str(q.receipt_id).is_empty():
+					q.receipt_id = receipt; q.received_minute = int(s.elapsed_minutes); q.items = jobs.duplicate(true)
+					if s.priority.has("recovery"): q.receipt_channel = "connector"
 				q.verified_revision = int(q.policy_revision); impact += _leak(s,excess,record,str(q.id))
 			else: q.verified_revision = -1; result.ok = false
 		"probe_queue":
+			var connected: bool = not s.priority.has("recovery") or str(s.priority.recovery.connector_status) == "ready"
 			var denied: bool = str(q.policy.scope) == "linked" and str(q.policy.recipient) == str(q.approved_recipient)
-			record = _record(s,"probe_queue",403 if denied else 200,str(q.approved_recipient),str(q.label) + "の承認外参照・送付のダミー試験です。",{"queue_id":str(q.id),"policy_revision":int(q.policy_revision),"scope":str(q.policy.scope),"recipient":str(q.policy.recipient),"approved_recipient":str(q.approved_recipient),"test_only":true})
+			var data := {"queue_id":str(q.id),"policy_revision":int(q.policy_revision),"scope":str(q.policy.scope),"recipient":str(q.policy.recipient),"approved_recipient":str(q.approved_recipient),"test_only":true}
+			if s.priority.has("recovery"): data.connector_record_id = str(s.priority.recovery.rebuild_record_id)
+			record = _record(s,"probe_queue",503 if not connected else 403 if denied else 200,str(q.approved_recipient),str(q.label) + ("の承認外参照・送付のダミー試験です。" if connected else "の通常連携が停止しているため境界試験ができません。"),data)
+			if not connected: result.ok = false
 		"probe_background":
 			var background: Dictionary = s.priority.background
 			record = _record(s,"probe_background",200 if bool(background.enabled) else 403,str(background.recipient),"一括同期送付口へのダミー試験です。名簿は送付しません。",{"background_revision":int(background.policy_revision),"enabled":bool(background.enabled),"test_only":true})
@@ -281,7 +357,8 @@ static func act(state: Dictionary, action: String, args: Dictionary = {}) -> Dic
 				s.report.submitted = true; s.report.version = int(original.version); s.report.latest = original.duplicate(true)
 			else:
 				record = _record(s,"submit_report",403,"incident-report","今回の承認・現在設定の受付と境界・一括同期停止の実測・損失監査が不足しています。",{"record_ids":ids.duplicate()}); result.ok = false
-	result.impact_cost = impact; result.cost = usage + impact; result.message = str(record.get("detail", "操作を記録しました。"))
+	result.usage_cost = usage; result.impact_cost = impact; result.cost = usage + impact; result.message = str(record.get("detail", "操作を記録しました。"))
+	if action == "manual_queue": result.manual_cost = manual_cost
 	result.data = {"record":record.duplicate(true),"record_id":str(record.get("id", "")),"usage_cost":usage,"impact_cost":impact,"elapsed_minutes":int(s.elapsed_minutes),"world_revision":int(s.world_revision)}
 	s.revision = int(s.revision) + 1; s.last_result = {"action":action,"ok":bool(result.ok),"changed":true,"minutes":minutes,"cost":int(result.cost),"message":str(result.message),"data":result.data.duplicate(true)}
 	result.state = s
