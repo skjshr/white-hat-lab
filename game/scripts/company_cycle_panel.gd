@@ -89,7 +89,7 @@ static func _opportunity(ui, g, body: VBoxContainer, item: Dictionary) -> void:
 		elif bool(g.state.get("career_mode", false)) and item.get("reasons", []).is_empty():
 			next = ui.open_panel.bind("door"); action_name = "CycleWait_" + id.validate_node_name(); action_title = "日締めと翌日の営業を確認"
 		else:
-			next = ui._open_cycle_route.bind("company_growth"); action_name = "CyclePrepare_" + id.validate_node_name(); action_title = "必要なスキル・成長を確認"
+			next = ui._prepare_customer_growth.bind(id); action_name = "CyclePrepare_" + id.validate_node_name(); action_title = "必要なスキル・成長を確認"
 	elif status == "ready":
 		next = ui._open_cycle_offer.bind(id); action_name = "CycleOpen_" + id.validate_node_name(); action_title = "この顧客の相談へ"
 	var board := ROUTE.new(); board.name = "CycleCustomerRoute"; board.setup(route_item, ui.text_scale, inspect, next); content.add_child(board)

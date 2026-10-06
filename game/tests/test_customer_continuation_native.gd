@@ -108,7 +108,7 @@ func continue_customer() -> bool:
 	if not expect(str(lead.status) == "locked" and HANDOFF.available(game.state), "earned handoff waits for ordinary next-day market slot"): return false
 	if not lead.get("reasons", []).is_empty():
 		var points := int(game.skill_points())
-		if not await press("CyclePrepare_" + str(lead.id).validate_node_name()) or not await press("LearnSkill_operations"): return false
+		if not await press("CyclePrepare_" + str(lead.id).validate_node_name()) or not await press("GrowthSelect_operations") or not await press("LearnSkill_operations"): return false
 		if not expect(int(game.state.skills.operations) == 1 and int(game.skill_points()) == points - 1, "earned skill point enables different customer service by real investment"): return false
 		if not await company(): return false
 	for _day in 9:

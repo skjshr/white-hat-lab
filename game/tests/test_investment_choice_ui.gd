@@ -1,7 +1,7 @@
 extends SceneTree
 ## Display fixtures for existing investment mechanics; no claimed gameplay earnings.
-## Equipment selection uses actual pointer events. Skill/equipment fixtures remain
-## isolated in the QA profile and are never purchased or saved as player progress.
+## Equipment selection uses actual pointer events. --growth-only resumes a genuine
+## checkpoint and allocates its earned points inside an isolated QA copy.
 var game
 var ui
 var failures: Array[String] = []
@@ -46,6 +46,7 @@ func click(id: String) -> void:
 	check(button != null and button.is_visible_in_tree() and not button.disabled, "available control " + id)
 	if button == null or not button.is_visible_in_tree() or button.disabled: return
 	var scroll := node("EquipmentSelectorScroll") as ScrollContainer
+	if scroll == null: scroll=ui.modal_scroll
 	for _attempt in 24:
 		if visible_rect(button).size.y >= 30: break
 		if scroll == null: break
@@ -120,6 +121,8 @@ func run() -> void:
 	ui = load("res://scripts/interface.gd").new(); root.add_child(ui); await frames()
 	game.set_settings({"resolution":"960x600" if narrow else "1440x900", "window_mode":"windowed", "text_scale":1.3 if narrow else 1.0, "volume":0}, false)
 	root.size = Vector2i(960,600) if narrow else Vector2i(1440,900); ui._set_text_scale(1.3 if narrow else 1.0)
+	if "--growth-only" in OS.get_cmdline_user_args():
+		await actual_growth(); return
 	check(ui._new_game() and game.choose_strategy("advisory"), "ordinary company before isolated display fixtures")
 	await frames(12)
 	await click("GuidedTutorialSkip")
@@ -161,6 +164,7 @@ func run() -> void:
 	await capture("03-growth-benefits-fixture")
 	var unlock_count := 0
 	for skill in game.skill_catalog():
+		await click("GrowthSelect_"+str(skill.id))
 		var next_label := node("SkillNext_" + str(skill.id)) as Label
 		check(next_label != null and next_label.text.contains(str(skill.next_effect)), "quantitative next benefit survives case unlocks " + str(skill.id))
 		await assert_fits(next_label, "next benefit " + str(skill.id))
@@ -177,3 +181,47 @@ func run() -> void:
 	print("INVESTMENT_CHOICE_UI assertions=", assertions, " failures=", failures.size(), " clicks=", clicks, " wheels=", wheels, " narrow=", narrow)
 	ui.queue_free(); await frames()
 	quit(0 if failures.is_empty() else 1)
+
+func actual_growth() -> void:
+	check(game.load_game() and game.current_done(), "resume genuine delivered checkpoint")
+	ui.set_meta("company_view","growth")
+	var focus := ""
+	for lead in game.company_cycle_view().opportunities:
+		if str(lead.client)=="つばさ文具": focus=str(lead.id)
+	ui.set_meta("cycle_customer",focus); ui.open_panel("company"); await frames(12)
+	var before := JSON.stringify(game.state)
+	var heading := node("GrowthHeading") as Label
+	check(heading != null and heading.size.y <= 36 * ui.text_scale,"investment heading stays horizontal at current text scale")
+	for skill in game.skill_catalog():
+		await click("GrowthSelect_"+str(skill.id))
+		check(node("SkillNext_"+str(skill.id)).text.contains(str(skill.next_effect)), "selected benefit comes from actual skill mechanics")
+		await assert_fits(node("LearnSkill_"+str(skill.id)),"actual skill allocation")
+		var board := node("SkillInvestmentBoard")
+		for caption in board.captions:
+			check(caption.get_minimum_size().y<=caption.size.y+1,"diagram caption fits its object")
+	check(JSON.stringify(game.state)==before,"comparison changes no player state")
+	await click("GrowthSelect_response")
+	var points := int(game.skill_points()); var balance := str(node("GrowthPointBalance").text)
+	var saved_path: String=game.save_path
+	game.save_path="user://missing-skill-investment-directory/checkpoint.json"
+	await click("LearnSkill_response")
+	check(JSON.stringify(game.state)==before,"failed persistence restores the entire progression and offer state")
+	check(int(game.skill_points())==points and int(game.state.skills.response)==0,"failed persistence spends no point or rank")
+	check(str(node("GrowthPointBalance").text)==balance and node("ManagementActionFeedback")!=null,"failed allocation remains retryable on same diagram")
+	game.save_path=saved_path
+	await click("LearnSkill_response")
+	check(int(game.state.skills.response)==1 and int(game.skill_points())==points-1,"one point raises actual rank once")
+	var target: Dictionary={}
+	for lead in game.company_cycle_view().opportunities:
+		if str(lead.id)==focus: target=lead
+	check(str(target.get("status",""))=="locked","one rank does not bypass a two-rank customer requirement")
+	check(game.load_game() and int(game.state.skills.response)==1,"intermediate allocation survives genuine save reload")
+	ui.open_panel("company"); await frames(12)
+	await click("LearnSkill_response")
+	for lead in game.company_cycle_view().opportunities:
+		if str(lead.id)==focus: target=lead
+	check(int(game.state.skills.response)==2 and str(target.status)=="ready","required rank opens actual consultation")
+	check(game.load_game() and int(game.state.skills.response)==2 and int(game.skill_points())==points-2,"final allocation and remaining points persist")
+	check(not game.state.get("accepted",false) or game.current_done(),"skill allocation never accepts or completes the next work")
+	print("SKILL_INVESTMENT_UI assertions=",assertions," failures=",failures.size()," narrow=",narrow)
+	ui.queue_free(); await frames(); quit(0 if failures.is_empty() else 1)

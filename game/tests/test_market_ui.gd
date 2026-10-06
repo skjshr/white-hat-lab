@@ -275,7 +275,9 @@ func run() -> void:
 	quit(0 if failures.is_empty() else 1)
 
 func professional_ui() -> void:
-	game.state.skills = {"advisory":2,"operations":0,"response":0}
+	# Current mixed-skill catalog boundary; retired firm-* work remains available
+	# to historical saves but must not be advertised as a new investment unlock.
+	game.state.skills = {"advisory":5,"operations":1,"response":0}
 	game.state.credit = 10000
 	game.state.market_day = -1
 	game.state.market_leads = []
@@ -285,22 +287,24 @@ func professional_ui() -> void:
 	root.size = Vector2i(960,600) if narrow else Vector2i(1920,1080)
 	ui.open_panel("company")
 	await frames(8)
+	ui.set_meta("growth_skill","operations"); ui._select_company_view("growth"); await frames(8)
 	var next: Node = node("SkillNext_operations")
-	check(next is Label and str(next.tooltip_text).contains(COPY.copy("firm_partner_rollout_title")), "company shows cross-skill unlock")
+	check(next is Label and str(next.tooltip_text).contains(COPY.copy("adv_pentest_title")), "company shows current cross-skill unlock")
+	check(next is Label and not str(next.tooltip_text).contains(COPY.copy("firm_partner_rollout_title")), "retired work is not advertised as a new unlock")
 	await capture("firm-skills")
 	ui.set("sales_view","catalog")
 	ui.open_panel("sales")
 	await frames(8)
 	var cross: Dictionary = {}
 	for offer in game.state.offers:
-		if str(offer.case_id) == "firm-partner-rollout": cross = offer; break
+		if str(offer.case_id) == "advanced-pentest": cross = offer; break
 	check(not cross.is_empty() and not bool(cross.get("unlocked",true)), "mixed contract starts locked")
 	await click_catalog(str(cross.id))
 	check(node("AcceptContract") is BaseButton and node("AcceptContract").disabled, "cross-skill quote cannot send")
-	check(game.contract_eligibility(cross).has(COPY.copy("firm_skill_requirement") % [COPY.copy("market_operations"),1,0]), "missing secondary skill explained")
+	check(game.contract_eligibility(cross).has(COPY.copy("firm_skill_requirement") % [COPY.copy("market_operations"),2,1]), "missing secondary skill explained")
 	await capture("firm-locked")
 	check(game.learn_skill("operations"), "learn supporting skill")
-	check("firm-partner-rollout" in game.state.market_leads, "new mixed work offered immediately")
+	check("advanced-pentest" in game.state.market_leads, "new mixed work offered immediately")
 	ui.board_selected_id = ""
 	ui.set("sales_view","inquiries")
 	ui.open_panel("sales")

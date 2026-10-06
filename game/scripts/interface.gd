@@ -1315,6 +1315,11 @@ func _open_cycle_route(route: String) -> void:
 		"shop": open_panel("shop")
 		_: board_selected_id = ""; open_panel("sales")
 
+func _prepare_customer_growth(id: String) -> void:
+	set_meta("cycle_customer",id)
+	if has_meta("growth_skill"): remove_meta("growth_skill")
+	_select_company_view("growth")
+
 func _open_mail_customer(client: String) -> void:
 	var g := _game()
 	if g == null: return
@@ -1342,7 +1347,7 @@ func _open_cycle_recovery(client: String) -> void:
 		var offer_id := str(item.get("recovery_offer_id", ""))
 		if not offer_id.is_empty():
 			board_selected_id = offer_id; board_filter = "all"; sales_view = "inquiries"; sales_stage = "all"; sales_search = client; open_panel("sales"); return
-		if str(item.get("recovery_status", "")) == "locked": _select_company_view("growth")
+		if str(item.get("recovery_status", "")) == "locked": _prepare_customer_growth(str(item.id))
 		else: open_panel("door")
 		return
 	_open_cycle_other_work()
@@ -1378,35 +1383,7 @@ func _select_company_view(view: String) -> void:
 	set_meta("company_view", view); open_panel("company")
 
 func _company_growth(g) -> void:
-	var level: Dictionary = g.company_level()
-	var details := modal_body
-	details.add_child(_label("Lv.%d   ·   保有pt %d" % [level.level,g.skill_points()],16,TEAL))
-	var unlock:=_label("次の解放: %s" % level.next_unlock,13,MUTED); unlock.tooltip_text="あと %d XP" % maxi(0,int(level.next_threshold)-int(level.xp)); details.add_child(unlock)
-	var xp := ProgressBar.new(); xp.value=float(level.progress)*100.0; xp.show_percentage=false; xp.custom_minimum_size.y=6; details.add_child(xp)
-	var branches := VBoxContainer.new(); branches.size_flags_vertical = Control.SIZE_SHRINK_BEGIN; branches.add_theme_constant_override("separation", 10); details.add_child(branches)
-	for skill in g.skill_catalog():
-		var card := PanelContainer.new(); card.size_flags_horizontal = Control.SIZE_EXPAND_FILL; card.size_flags_vertical = Control.SIZE_SHRINK_BEGIN; card.add_theme_stylebox_override("panel", M.surface(M.CANVAS, 12)); branches.add_child(card)
-		var row := HBoxContainer.new(); row.size_flags_vertical = Control.SIZE_SHRINK_BEGIN; row.add_theme_constant_override("separation", 18); card.add_child(row)
-		var column := VBoxContainer.new(); column.size_flags_vertical = Control.SIZE_SHRINK_CENTER; column.custom_minimum_size.x = 220; column.add_theme_constant_override("separation", 3); row.add_child(column)
-		var skill_title := _label(skill.title, 16, M.INK); skill_title.autowrap_mode = TextServer.AUTOWRAP_OFF; skill_title.clip_text = true; skill_title.tooltip_text = str(skill.title); column.add_child(skill_title)
-		column.add_child(_label("Lv.%d / %d" % [int(skill.rank),int(skill.max_rank)], 12, M.MUTED))
-		var stages:=HBoxContainer.new(); stages.size_flags_horizontal=Control.SIZE_EXPAND_FILL; stages.size_flags_vertical=Control.SIZE_SHRINK_CENTER; stages.custom_minimum_size.y=7; stages.add_theme_constant_override("separation",3); column.add_child(stages)
-		for i in 10:
-			var stage:=PanelContainer.new(); stage.custom_minimum_size=Vector2(12,7); stage.size_flags_horizontal=Control.SIZE_EXPAND_FILL; stage.size_flags_vertical=Control.SIZE_SHRINK_CENTER; stage.add_theme_stylebox_override("panel",M.surface(M.ACCENT if i < skill.rank else M.LINE,0)); stages.add_child(stage)
-		var effects := VBoxContainer.new(); effects.size_flags_horizontal=Control.SIZE_EXPAND_FILL; effects.size_flags_vertical=Control.SIZE_SHRINK_CENTER; effects.add_theme_constant_override("separation",4); row.add_child(effects)
-		effects.add_child(_label("現在: %s" % str(skill.get("current_effect", "未習得")), 12, M.INK))
-		var case_unlocks: Array = g.skill_case_unlocks(str(skill.id))
-		var next_effect := "次: %s" % (str(skill.get("next_effect", "最大ランク")) if skill.rank < int(skill.max_rank) else "最大ランク")
-		var next_label := _label(next_effect, 12, M.MUTED)
-		next_label.name = "SkillNext_" + str(skill.id)
-		next_label.tooltip_text = "\n".join(case_unlocks)
-		effects.add_child(next_label)
-		if not case_unlocks.is_empty():
-			var unlock_label := _label(UI.copy("firm_unlocks") % " / ".join(case_unlocks.slice(0,2)), 12, M.MUTED)
-			unlock_label.name = "SkillUnlocks_" + str(skill.id)
-			unlock_label.tooltip_text = "\n".join(case_unlocks)
-			effects.add_child(unlock_label)
-		var learn := _button("習得 / 1 pt", Callable(self, "_learn_skill").bind(skill.id)); learn.name = "LearnSkill_" + str(skill.id); learn.custom_minimum_size=Vector2(106,40); learn.size_flags_vertical=Control.SIZE_SHRINK_CENTER; learn.disabled = skill.rank >= int(skill.max_rank) or g.skill_points() <= 0 or str(g.state.strategy) == ""; M.button(learn, "primary"); row.add_child(learn)
+	preload("res://scripts/skill_investment_board.gd").build(self,g)
 
 func _company_care(g) -> void:
 	var portfolio: Dictionary = g.care_portfolio()
@@ -1592,7 +1569,9 @@ func _return_to_quote() -> void:
 
 func _learn_skill(id: String) -> void:
 	var g := _game()
-	if g != null and g.has_method("learn_skill") and g.learn_skill(id): open_panel("company")
+	if g == null: return
+	if g.learn_skill(id): open_panel("company")
+	else: _management_feedback("配分できませんでした。技能とポイントを保持しています。保存状態と残りポイントを確認し、再試行できます。")
 
 func _assign_colleague(kind: String) -> void:
 	var g := _game()

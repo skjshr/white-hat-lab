@@ -2229,10 +2229,14 @@ func skill_points() -> int:
 
 func learn_skill(id: String) -> bool:
 	if id not in ["operations","advisory","response"] or skill_points() <= 0 or int(state.skills.get(id, 0)) >= 10: return false
+	var previous_state: Dictionary = state.duplicate(true)
 	var previous_skills: Dictionary = state.skills.duplicate(true)
 	state.skills[id] = int(state.skills.get(id, 0)) + 1
 	if state.get("career_mode", false): _make_offers(previous_skills)
-	save_game(); changed.emit(); return true
+	if not save_game():
+		state = previous_state
+		return false
+	changed.emit(); return true
 
 func _update_growth() -> void:
 	state.peak_profit = maxi(int(state.get("peak_profit",0)),maxi(int(state.profit),int(state.credit)*100))
