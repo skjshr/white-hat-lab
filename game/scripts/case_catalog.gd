@@ -149,6 +149,8 @@ static func _add_endpoint_recovery() -> void:
 	_catalog.back().targets = preload("res://scripts/endpoint_engagement.gd").profiles(_catalog.back())
 
 static func _add_advanced_cases() -> void:
+	var ai_followup = preload("res://scripts/saas_ai_followup.gd")
+	_catalog.append({"id":ai_followup.CASE_ID,"title":ai_followup.TITLE,"client":ai_followup.CLIENT,"chapter":3,"category":"response","tier":1,"required_level":8,"required_skills":{"response":1},"brief":ai_followup.BRIEF,"service":"AI連携・公開前審査","evidence":[],"hints":[],"debrief":"資料参照と送付先の許可範囲を実測し、要約の社内受付と外部送信の記録を報告しました。","checks":[DISPLAY_COPY.copy("ai_preflight_check_read"),DISPLAY_COPY.copy("ai_preflight_check_write"),DISPLAY_COPY.copy("ai_preflight_check_business"),DISPLAY_COPY.copy("ai_preflight_check_policy"),DISPLAY_COPY.copy("ai_preflight_check_report")],"probes":[],"desired":{},"initial":{},"targets":[{"chapter":3,"case_id":ai_followup.CASE_ID,"name":"北斗物流・AI Gate"}],"reward":10000,"advanced_work_minutes":120,"work_family":"ai-preflight"})
 	_add_portal_pentest()
 	_add_advanced_case("advanced-hunt", "response", 4, 7, {"response":5,"advisory":2}, 26000, 260)
 	_add_advanced_case("advanced-pentest", "advisory", 2, 7, {"advisory":5,"operations":2}, 28000, 300)

@@ -1,7 +1,7 @@
 extends RefCounted
 ## Recurring inspection currently executes retained basic-service VMs. The
 ## independent specialist engines must not promise that different service.
-const UNSUPPORTED := ["advanced-hunt", "advanced-pentest", "advanced-pentest-relay", "advanced-recovery", "advanced-ddos", "advanced-api", "advanced-supplychain", "advanced-cloud", "advanced-saas-response", "advanced-saas-watch", "advanced-saas-sessions", "advanced-malware", "advanced-detection", "advanced-portal"]
+const UNSUPPORTED := ["advanced-hunt", "advanced-pentest", "advanced-pentest-relay", "advanced-recovery", "advanced-ddos", "advanced-api", "advanced-supplychain", "advanced-cloud", "advanced-saas-response", "advanced-saas-watch", "advanced-saas-sessions", "advanced-saas-ai-preflight", "advanced-malware", "advanced-detection", "advanced-portal"]
 const REASON := "この専門案件は継続保守の対象外です。標準または特急の単発契約を選んでください。"
 
 static func reason(offer: Dictionary) -> String:

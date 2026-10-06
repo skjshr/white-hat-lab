@@ -184,6 +184,7 @@ static func _advanced(game) -> Dictionary:
 	if str(game.state.get("advanced", {}).get("kind", "")) == "advanced-saas-response":
 		# Urgent containment and live business checks precede final paperwork.
 		var priority := ["controls", "revocation", "denial", "invoice", "billing", "aggregation", "dispatch", "business_jobs", "audit", "report", "consent"]
+		if str(game.state.get("advanced", {}).get("model_version", "")) == "saas-ai-preflight-v1": priority = ["policy", "read", "write", "business", "report"]
 		checks.sort_custom(func(a, b): return priority.find(str(a.get("id", ""))) < priority.find(str(b.get("id", ""))))
 	var failed: Dictionary = {}
 	for check in checks:
@@ -207,6 +208,8 @@ static func navigation_target(game, task: Dictionary) -> String:
 	return expected if str(task.get("target",""))==expected else ""
 
 static func advanced_work_target(game, objective_id: String) -> String:
+	if str(game.state.get("advanced", {}).get("model_version", "")) == "saas-ai-preflight-v1":
+		return str({"business":"AiTab_desk", "report":"AiTab_records"}.get(objective_id, "AiTab_wiring"))
 	var kind := str(game.state.get("advanced", {}).get("kind", game.state.get("contract",{}).get("case_id","")))
 	if str(game.state.get("advanced", {}).get("engagement", "")) == "relay-v1" and objective_id == "shipping": return "NetworkTab_shipping"
 	var targets: Dictionary=ADVANCED_WORK_TARGETS.get(kind,{})

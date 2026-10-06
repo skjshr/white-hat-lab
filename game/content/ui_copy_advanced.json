@@ -386,6 +386,11 @@
     "saas_partner_check_denial": "失効した接続の取得拒否を実測する",
     "saas_partner_check_billing": "請求BILL-004の受付を確認する",
     "saas_partner_check_dispatch": "委託先の送付接続を実測する",
-    "saas_partner_check_business": "請求予約と委託先受渡の実処理を確認する"
+    "saas_partner_check_business": "請求予約と委託先受渡の実処理を確認する",
+    "ai_preflight_check_read": "許可資料の参照と範囲外資料の拒否を実測する",
+    "ai_preflight_check_write": "社内受付の許可と外部送付の拒否を実測する",
+    "ai_preflight_check_business": "問い合わせ6件の要約SUM-001を社内で受け付ける",
+    "ai_preflight_check_policy": "本日の承認に沿う参照・送付方針を適用する",
+    "ai_preflight_check_report": "方針・実測・送信履歴の原記録を報告する"
   }
 }

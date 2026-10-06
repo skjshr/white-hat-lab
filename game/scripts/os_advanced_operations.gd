@@ -7,6 +7,7 @@ const NETWORK = preload("res://scripts/os_network_pentest_workspace.gd")
 const RECOVERY = preload("res://scripts/os_recovery_workspace.gd")
 const SPECIALIST = preload("res://scripts/os_specialist_workspaces.gd")
 const SAAS = preload("res://scripts/os_saas_response.gd")
+const AI_PREFLIGHT = preload("res://scripts/os_ai_preflight.gd")
 
 static func _kind(d) -> String:
 	return str(d.game.state.get("advanced",{}).get("kind",d.game.state.get("contract",{}).get("case_id","")))
@@ -18,6 +19,8 @@ static func build(d,parent: VBoxContainer) -> void:
 		var state: Label = d._label("高度案件の作業対象なし",16); state.name="AdvancedUnassigned"; parent.add_child(state)
 		var open: Button = d._button("案件を開く",d._contracts); open.name="AdvancedOpenContracts"; parent.add_child(open)
 		return
+	if str(model.get("model_version", "")) == "saas-ai-preflight-v1":
+		AI_PREFLIGHT.build(d, parent); return
 	match _kind(d):
 		"advanced-portal": PENTEST_PORTAL.build(d,parent)
 		"advanced-hunt": HUNT.build(d,parent)
@@ -36,6 +39,7 @@ static func refresh(d) -> void:
 		return
 	if d.widgets.advanced.get("pentest",false): PENTEST_PORTAL.refresh(d); return
 	match str(d.widgets.advanced.get("family","")):
+		"advanced-saas-ai-preflight": AI_PREFLIGHT.refresh(d)
 		"advanced-hunt": HUNT.refresh(d)
 		"advanced-pentest": NETWORK.refresh(d)
 		"advanced-recovery": RECOVERY.refresh(d)

@@ -53,7 +53,7 @@ static func _unsupported_reason(game) -> String:
 	var case_id := str(contract.get("case_id", ""))
 	var definition := CASES.by_id(case_id)
 	if case_id.is_empty() or definition.is_empty(): return "通常案件として確認できないため中止できません。"
-	if case_id not in ["advanced-saas-response", "advanced-saas-watch", "advanced-saas-sessions"] and (bool(definition.get("advanced_work_minutes", 0)) or case_id.begins_with("advanced-") or case_id.begins_with("composite-")):
+	if case_id not in ["advanced-saas-response", "advanced-saas-watch", "advanced-saas-sessions", "advanced-saas-ai-preflight"] and (bool(definition.get("advanced_work_minutes", 0)) or case_id.begins_with("advanced-") or case_id.begins_with("composite-")):
 		return "専門・複合案件はこの中止手順の対象外です。"
 	var requirement: Variant = contract.get("supply_requirement", definition.get("supply_requirement", {}))
 	if requirement is Dictionary and not requirement.is_empty(): return "設備・資材を伴う案件は専用の注文手順で処理してください。"
