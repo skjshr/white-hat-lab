@@ -26,6 +26,7 @@ const HOTEL_HANDOFF = preload("res://scripts/hotel_handoff.gd")
 const SAAS_WATCH = preload("res://scripts/company_saas_watch.gd")
 const SAAS_PARTNER = preload("res://scripts/saas_partner_followup.gd")
 const SAAS_AI = preload("res://scripts/saas_ai_followup.gd")
+const SAAS_AI_HANDOFF = preload("res://scripts/saas_ai_handoff_followup.gd")
 const BUSINESS_START_MINUTE := 9 * 60
 const BUSINESS_END_MINUTE := 18 * 60
 const DELIVERY_WAIT_SECONDS := 30.0
@@ -498,6 +499,10 @@ func _advanced_mission() -> Dictionary:
 		result.service = "AI連携・公開前審査"
 		result.target_title = "北斗物流・AI Gate"
 		result.debrief = "資料参照と送付先の許可範囲を実測し、要約の社内受付と外部送信の記録を報告しました。"
+	if case_id == SAAS_AI_HANDOFF.CASE_ID:
+		result.service = "AI連携・委託先業務"
+		result.target_title = "北斗物流・ミナト配送"
+		result.debrief = "AI-401の配送連絡、範囲外の拒否、受付期限と前回記録の引継ぎを確認しました。"
 	return result
 
 func _specialist_reward(chapter: int, base: int, category_override: String = "") -> int:
@@ -1132,7 +1137,7 @@ func rollback_configuration() -> bool:
 func case_review() -> Dictionary:
 	if str(state.get("contract", {}).get("case_id", "")) == "advanced-portal" and advanced_active():
 		return _portal_case_review()
-	if str(state.get("contract", {}).get("case_id", "")) in ["advanced-saas-response", "advanced-saas-watch", "advanced-saas-sessions", SAAS_AI.CASE_ID] and advanced_active():
+	if str(state.get("contract", {}).get("case_id", "")) in ["advanced-saas-response", "advanced-saas-watch", "advanced-saas-sessions", SAAS_AI.CASE_ID, SAAS_AI_HANDOFF.CASE_ID] and advanced_active():
 		return _saas_case_review()
 	var total := maxi(1, state.get("targets", []).size())
 	var recorded_sites := 0
@@ -1176,6 +1181,9 @@ func _saas_case_review() -> Dictionary:
 	if str(state.advanced.get("model_version", "")) == SAAS_AI.MODEL:
 		business = state.advanced.get("ai_preflight", {}).get("business", {})
 		objectives = [{"id":"evidence","title":"公開前審査の報告","detail":"方針と模擬ジョブの原記録","done":reported},{"id":"retest","title":"許可範囲と要約受付","detail":"範囲外の拒否とSUM-001の受付","done":verified},{"id":"prevention","title":"外部送信の予防","detail":"持出し 延べ%d行" % lost,"done":lost == 0},{"id":"continuity","title":"要約受付の締切","detail":"業務遅延の補償 ¥%d" % business_loss,"done":business_loss == 0 and str(business.get("status", "")) == "completed"},{"id":"deadline","title":"期限内の納品","detail":"契約の作業期限","done":on_time}]
+	if str(state.advanced.get("model_version", "")) == SAAS_AI_HANDOFF.MODEL:
+		business = state.advanced.get("handoff", {}).get("business", {})
+		objectives = [{"id":"evidence","title":"前回承認と今回記録","detail":"AI-301・正常実行・報告原本","done":reported},{"id":"retest","title":"配送先別の制御","detail":"範囲外拒否と委託先連絡の実測","done":verified},{"id":"prevention","title":"配送情報の保全","detail":"持出し 延べ%d行" % lost,"done":lost == 0},{"id":"continuity","title":"3便連絡の期限","detail":"補償 ¥%d" % business_loss,"done":business_loss == 0 and str(business.get("status", "")) == "completed"},{"id":"deadline","title":"期限内の納品","detail":"契約の作業期限","done":on_time}]
 	return {"available":not current_done(),"can_capture":false,"recorded":reported,"current_recorded":reported,"recorded_sites":1 if reported else 0,"total_sites":1,"score":score,"grade":"S" if score == 3 and lost == 0 and business_loss == 0 else "A" if score == 3 else "B" if score == 2 else "C","bonus":roundi(int(status.get("estimated_fee", 0))*0.05) if reported and verified and lost == 0 and business_loss == 0 else 0,"objectives":objectives,"record_path":""}
 
 func _portal_case_review() -> Dictionary:
@@ -1565,12 +1573,13 @@ func incident_active() -> bool:
 	return advanced_active() and str(state.advanced.get("kind", "")) == "advanced-portal" and bool(state.advanced.get("exercise", {}).get("active", false))
 
 func _advanced_case_id(case_id: String) -> bool:
-	return case_id in ["advanced-hunt","advanced-pentest","advanced-pentest-relay","advanced-recovery","advanced-ddos","advanced-api","advanced-supplychain","advanced-cloud","advanced-saas-response","advanced-saas-watch","advanced-saas-sessions",SAAS_AI.CASE_ID,"advanced-malware","advanced-detection","advanced-portal"]
+	return case_id in ["advanced-hunt","advanced-pentest","advanced-pentest-relay","advanced-recovery","advanced-ddos","advanced-api","advanced-supplychain","advanced-cloud","advanced-saas-response","advanced-saas-watch","advanced-saas-sessions",SAAS_AI.CASE_ID,SAAS_AI_HANDOFF.CASE_ID,"advanced-malware","advanced-detection","advanced-portal"]
 
 func _advanced_engine(case_id: String = ""):
 	var id := case_id if not case_id.is_empty() else str(state.get("contract", {}).get("case_id", ""))
 	if id == "advanced-portal": return load("res://scripts/pentest_portal.gd")
 	if id == SAAS_AI.CASE_ID: return load("res://scripts/saas_ai_preflight.gd")
+	if id == SAAS_AI_HANDOFF.CASE_ID: return load("res://scripts/saas_ai_handoff.gd")
 	if id in ["advanced-saas-response", "advanced-saas-watch", "advanced-saas-sessions"]: return load("res://scripts/saas_response.gd")
 	if id in ["advanced-cloud","advanced-malware","advanced-detection"]: return load("res://scripts/advanced_threats.gd")
 	if id in ["advanced-ddos","advanced-api","advanced-supplychain"]: return load("res://scripts/advanced_assurance.gd")
@@ -1673,6 +1682,8 @@ func _store_vm(before: Array, previous_mutation: int) -> bool:
 func _saas_business_cost(model: Dictionary) -> int:
 	if str(model.get("model_version", "")) == SAAS_AI.MODEL:
 		return maxi(0, int(model.get("ai_preflight", {}).get("business", {}).get("loss_cost", 0)))
+	if str(model.get("model_version", "")) == SAAS_AI_HANDOFF.MODEL:
+		return maxi(0, int(model.get("handoff", {}).get("business", {}).get("loss_cost", 0)))
 	return maxi(0, int(model.get("session_case", {}).get("business", {}).get("loss_cost", 0)))
 
 func _record_saas_costs(usage: int, impact: int, business: int = 0) -> void:
@@ -1687,7 +1698,7 @@ func _saas_outcome() -> Dictionary:
 	var model: Dictionary = state.get("advanced", {})
 	if str(model.get("kind", "")) != "advanced-saas-response": return {}
 	var outcome := {"costs":state.work.get("saas_costs", {}).duplicate(true)}
-	for key in ["model_version", "elapsed_minutes", "egress", "invoice", "report", "records", "organization", "watch_source", "threat_app_id", "session_case", "ai_preflight"]:
+	for key in ["model_version", "elapsed_minutes", "egress", "invoice", "report", "records", "organization", "watch_source", "threat_app_id", "session_case", "ai_preflight", "handoff"]:
 		if model.has(key): outcome[key] = model[key].duplicate(true) if model[key] is Dictionary or model[key] is Array else model[key]
 	return outcome
 
@@ -2493,7 +2504,7 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 	var previous_endpoint_offers: Dictionary = {}
 	var previous_saas_offers: Dictionary = {}
 	for previous_offer in state.get("offers", []):
-		if previous_offer is Dictionary and str(previous_offer.get("case_id", "")) in [SAAS_PARTNER.CASE_ID, SAAS_AI.CASE_ID]:
+		if previous_offer is Dictionary and str(previous_offer.get("case_id", "")) in [SAAS_PARTNER.CASE_ID, SAAS_AI.CASE_ID, SAAS_AI_HANDOFF.CASE_ID]:
 			previous_saas_offers[str(previous_offer.get("id", ""))] = previous_offer.duplicate(true)
 		if previous_offer is Dictionary and ENDPOINT_ENGAGEMENT.containment_case(str(previous_offer.get("case_id", ""))):
 			previous_endpoint_offers[str(previous_offer.get("id", ""))] = previous_offer.duplicate(true)
@@ -2501,6 +2512,7 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 	var level := int(company_level().level)
 	for selected in CASES.all():
 		if str(selected.id) == SAAS_AI.CASE_ID and SAAS_AI.payload(state, int(state.day)).is_empty(): continue
+		if str(selected.id) == SAAS_AI_HANDOFF.CASE_ID and SAAS_AI_HANDOFF.payload(state, int(state.day)).is_empty(): continue
 		if str(selected.id) == "advanced-saas-watch" and saas_incidents.is_empty(): continue
 		if str(selected.id) == BRANCH_HANDOFF.CASE_ID and not BRANCH_HANDOFF.available(state): continue
 		if HOTEL_HANDOFF.is_case(str(selected.id)) and hotel_recoveries.is_empty(): continue
@@ -2536,6 +2548,12 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 			var previous: Dictionary = previous_saas_offers.get(str(state.offers[-1].id), {})
 			var ai_payload: Dictionary = previous.get("saas_ai_payload", {}) if not previous.is_empty() else SAAS_AI.payload(state, int(state.day))
 			state.offers[-1].saas_ai_payload = ai_payload.duplicate(true)
+		if str(selected.id) == SAAS_AI_HANDOFF.CASE_ID:
+			var previous_handoff: Dictionary = previous_saas_offers.get(str(state.offers[-1].id), {})
+			var handoff_payload: Dictionary = previous_handoff.get("saas_ai_handoff_payload", {}) if not previous_handoff.is_empty() else SAAS_AI_HANDOFF.payload(state, int(state.day))
+			state.offers[-1].saas_ai_handoff_payload = handoff_payload.duplicate(true)
+			state.offers[-1].brief = SAAS_AI_HANDOFF.brief(handoff_payload)
+			state.offers[-1].target_specs = [{"chapter":3,"case_id":SAAS_AI_HANDOFF.CASE_ID,"name":"北斗物流・ミナト配送"}]
 		if str(selected.id) == "advanced-saas-watch":
 			var incident: Dictionary = saas_incidents[0]
 			state.offers[-1].saas_watch_source_contract_id = str(incident.source_contract_id)
@@ -2614,19 +2632,21 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 	var existing_leads: Array = state.get("market_leads", []) if int(state.get("market_day", -1)) == int(state.day) else []
 	var partner_pending := candidate_payload_available(state.offers)
 	var ai_pending: bool = state.offers.any(func(offer): return str(offer.get("case_id", "")) == SAAS_AI.CASE_ID and SAAS_AI.matches_available(state, offer.get("saas_ai_payload", {}), int(state.day)))
+	var ai_handoff_pending: bool = state.offers.any(func(offer): return str(offer.get("case_id", "")) == SAAS_AI_HANDOFF.CASE_ID and SAAS_AI_HANDOFF.matches_available(state, offer.get("saas_ai_handoff_payload", {}), int(state.day)))
 	if not existing_leads.is_empty(): existing_leads = existing_leads.filter(func(raw_id): return not canceled_today_cases.has(str(raw_id)))
 	if not existing_leads.is_empty():
 		existing_leads = existing_leads.filter(func(raw_id):
 			var lead_id := str(raw_id)
 			var lead_category := str(offer_category_by_case.get(lead_id, ""))
-			return (lead_id == SAAS_PARTNER.CASE_ID and partner_pending) or (lead_id == SAAS_AI.CASE_ID and ai_pending) or not completed_cases.has(lead_id) or care_replacement_cases.has(lead_id) or quoted_case_ids.has(lead_id) or int(fresh_category_counts.get(lead_category, 0)) == 0)
+			return (lead_id == SAAS_PARTNER.CASE_ID and partner_pending) or (lead_id == SAAS_AI.CASE_ID and ai_pending) or (lead_id == SAAS_AI_HANDOFF.CASE_ID and ai_handoff_pending) or not completed_cases.has(lead_id) or care_replacement_cases.has(lead_id) or quoted_case_ids.has(lead_id) or int(fresh_category_counts.get(lead_category, 0)) == 0)
 	for candidate in state.offers:
 		var case_id := str(candidate.get("case_id", ""))
 		var retired := bool(candidate.get("retired_from_new_offers", false))
 		var care_replacement := care_replacement_cases.has(case_id)
-		var completed_allowed := (case_id == SAAS_PARTNER.CASE_ID and partner_pending) or (case_id == SAAS_AI.CASE_ID and ai_pending) or not completed_cases.has(case_id) or care_replacement or quoted_case_ids.has(case_id) or case_id in recovery_cases or int(fresh_category_counts.get(str(candidate.get("category", "")), 0)) == 0
+		var completed_allowed := (case_id == SAAS_PARTNER.CASE_ID and partner_pending) or (case_id == SAAS_AI.CASE_ID and ai_pending) or (case_id == SAAS_AI_HANDOFF.CASE_ID and ai_handoff_pending) or not completed_cases.has(case_id) or care_replacement or quoted_case_ids.has(case_id) or case_id in recovery_cases or int(fresh_category_counts.get(str(candidate.get("category", "")), 0)) == 0
 		if candidate.has("saas_partner_payload") and not SAAS_PARTNER.matches_available(state, candidate.saas_partner_payload, int(state.day)): completed_allowed = false
 		if case_id == SAAS_AI.CASE_ID and not SAAS_AI.matches_available(state, candidate.get("saas_ai_payload", {}), int(state.day)): completed_allowed = false
+		if case_id == SAAS_AI_HANDOFF.CASE_ID and not SAAS_AI_HANDOFF.matches_available(state, candidate.get("saas_ai_handoff_payload", {}), int(state.day)): completed_allowed = false
 		# Preserve a lead already shown this day, including a quoted/awaiting
 		# retired case. Retirement only affects fresh market generation.
 		if bool(candidate.get("unlocked", false)) and not canceled_today.has(str(candidate.get("id", ""))) and case_id not in carried_cases and completed_allowed and (not retired or case_id in existing_leads): candidate_offers.append(candidate)
@@ -2709,6 +2729,7 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 	if not saas_incidents.is_empty(): relationship_priorities.push_front("advanced-saas-watch")
 	if partner_pending: relationship_priorities.push_front(SAAS_PARTNER.CASE_ID)
 	if ai_pending: relationship_priorities.push_front(SAAS_AI.CASE_ID)
+	if ai_handoff_pending: relationship_priorities.push_front(SAAS_AI_HANDOFF.CASE_ID)
 	state.market_leads = MARKET_DEMAND.prioritize_relationships(candidate_offers, state.market_leads, relationship_priorities, protected_leads, int(state.day))
 	state.market_day=int(state.day)
 	var lead_set: Dictionary = {}
@@ -2751,6 +2772,10 @@ func company_cycle_view() -> Dictionary:
 	if not ai_lead.is_empty():
 		opportunities = opportunities.filter(func(item): return str(item.get("client", "")) != SAAS_AI.CLIENT)
 		opportunities.append(ai_lead)
+	var ai_handoff_lead: Dictionary = SAAS_AI_HANDOFF.lead(self)
+	if not ai_handoff_lead.is_empty():
+		opportunities = opportunities.filter(func(item): return str(item.get("client", "")) != SAAS_AI_HANDOFF.CLIENT)
+		opportunities.append(ai_handoff_lead)
 	for lead in opportunities:
 		if str(lead.get("case_id", "")) == BRANCH_HANDOFF.CASE_ID and str(lead.get("status", "")) not in ["paused", "fulfilled"] and not BRANCH_HANDOFF.available(state):
 			lead.status = "locked"; lead.handoff_unavailable = true
@@ -2876,6 +2901,8 @@ func choose_contract(id: String) -> bool:
 		if offer.id == id and offer.unlocked and _case_skills_met(offer,state.skills) and bool(offer.get("market_available", true)) and int(state.credit) >= int(offer.required_credit) and int(company_level().level) >= int(offer.get("required_level",1)):
 			if str(offer.get("case_id", "")) == SAAS_AI.CASE_ID and not SAAS_AI.matches_available(state, offer.get("saas_ai_payload", {}), int(state.day)):
 				state = previous_state; _assignments = previous_assignments; _machine = previous_machine; _machine_key = previous_machine_key; return false
+			if str(offer.get("case_id", "")) == SAAS_AI_HANDOFF.CASE_ID and not SAAS_AI_HANDOFF.matches_available(state, offer.get("saas_ai_handoff_payload", {}), int(state.day)):
+				state = previous_state; _assignments = previous_assignments; _machine = previous_machine; _machine_key = previous_machine_key; return false
 			if offer.has("saas_partner_payload") and not SAAS_PARTNER.matches_available(state, offer.saas_partner_payload, int(state.day)):
 				state = previous_state; _assignments = previous_assignments; _machine = previous_machine; _machine_key = previous_machine_key; return false
 			var handoff_scenario: Dictionary = {}
@@ -2937,6 +2964,10 @@ func choose_contract(id: String) -> bool:
 					state = previous_state; _assignments = previous_assignments; _machine = previous_machine; _machine_key = previous_machine_key; return false
 			if selected_case_id == SAAS_AI.CASE_ID:
 				state.advanced = _advanced_engine(selected_case_id).create_followup(offer.get("saas_ai_payload", {}))
+				if state.advanced.is_empty():
+					state = previous_state; _assignments = previous_assignments; _machine = previous_machine; _machine_key = previous_machine_key; return false
+			if selected_case_id == SAAS_AI_HANDOFF.CASE_ID:
+				state.advanced = _advanced_engine(selected_case_id).create_followup(offer.get("saas_ai_handoff_payload", {}))
 				if state.advanced.is_empty():
 					state = previous_state; _assignments = previous_assignments; _machine = previous_machine; _machine_key = previous_machine_key; return false
 			if selected_case_id == "advanced-saas-watch":
@@ -3058,6 +3089,7 @@ func deliver() -> bool:
 	for job in saas_outcome.get("session_case", {}).get("business", {}).get("jobs", []):
 		if int(job.get("loss_amount", 0)) > 0: saas_business_satisfaction_delta -= 3
 	if str(saas_outcome.get("model_version", "")) == SAAS_AI.MODEL and int(saas_outcome.get("ai_preflight", {}).get("business", {}).get("loss_cost", 0)) > 0: saas_business_satisfaction_delta -= 3
+	if str(saas_outcome.get("model_version", "")) == SAAS_AI_HANDOFF.MODEL and int(saas_outcome.get("handoff", {}).get("business", {}).get("loss_cost", 0)) > 0: saas_business_satisfaction_delta -= 3
 	var satisfaction_delta := quality_satisfaction_delta + price_satisfaction_delta + endpoint_satisfaction_delta + saas_satisfaction_delta + saas_business_satisfaction_delta
 	relation.satisfaction = clampi(satisfaction_before + satisfaction_delta, 0, 100)
 	relation.completed_count = int(relation.get("completed_count",0)) + 1
@@ -3087,7 +3119,7 @@ func deliver() -> bool:
 	if not saas_outcome.is_empty():
 		state.last_receipt.saas_outcome = saas_outcome.duplicate(true)
 		state.last_receipt.saas_satisfaction_delta = saas_satisfaction_delta
-		if saas_outcome.get("session_case", {}).has("business") or saas_outcome.get("ai_preflight", {}).has("business"): state.last_receipt.saas_business_satisfaction_delta = saas_business_satisfaction_delta
+		if saas_outcome.get("session_case", {}).has("business") or saas_outcome.get("ai_preflight", {}).has("business") or saas_outcome.get("handoff", {}).has("business"): state.last_receipt.saas_business_satisfaction_delta = saas_business_satisfaction_delta
 	if str(state.get("advanced", {}).get("kind", "")) == "advanced-pentest" and not state.advanced.get("world", {}).get("remediation", {}).get("requests", []).is_empty():
 		state.last_receipt.pentest_changes = {"cost_total":int(state.work.get("pentest_change_cost", 0)),"requests":state.advanced.world.remediation.requests.duplicate(true),"revision":int(state.advanced.world.get("change_revision", 0)),"retests":state.advanced.world.get("retests", {}).duplicate(true)}
 		if str(state.advanced.get("engagement", "")) == "relay-v1":

@@ -391,6 +391,11 @@
     "ai_preflight_check_write": "社内受付の許可と外部送付の拒否を実測する",
     "ai_preflight_check_business": "問い合わせ6件の要約SUM-001を社内で受け付ける",
     "ai_preflight_check_policy": "本日の承認に沿う参照・送付方針を適用する",
-    "ai_preflight_check_report": "方針・実測・送信履歴の原記録を報告する"
+    "ai_preflight_check_report": "方針・実測・送信履歴の原記録を報告する",
+    "ai_handoff_check_read": "対象便に関係のない連絡先を参照できない",
+    "ai_handoff_check_write": "承認外の/archiveへの送付を拒否する",
+    "ai_handoff_check_business": "配送障害連絡3便を/dispatchで受け付ける",
+    "ai_handoff_check_policy": "対象3便の資料と正規送付先だけを許可する",
+    "ai_handoff_check_report": "承認・実受付・送付履歴を原記録で報告する"
   }
 }
