@@ -6,6 +6,7 @@ const HUNT = preload("res://scripts/os_hunt_workspace.gd")
 const NETWORK = preload("res://scripts/os_network_pentest_workspace.gd")
 const RECOVERY = preload("res://scripts/os_recovery_workspace.gd")
 const SPECIALIST = preload("res://scripts/os_specialist_workspaces.gd")
+const SAAS = preload("res://scripts/os_saas_response.gd")
 
 static func _kind(d) -> String:
 	return str(d.game.state.get("advanced",{}).get("kind",d.game.state.get("contract",{}).get("case_id","")))
@@ -22,6 +23,7 @@ static func build(d,parent: VBoxContainer) -> void:
 		"advanced-hunt": HUNT.build(d,parent)
 		"advanced-pentest": NETWORK.build(d,parent)
 		"advanced-recovery": RECOVERY.build(d,parent)
+		"advanced-saas-response": SAAS.build(d,parent)
 		_: SPECIALIST.build(d,parent)
 
 static func refresh(d) -> void:
@@ -37,4 +39,5 @@ static func refresh(d) -> void:
 		"advanced-hunt": HUNT.refresh(d)
 		"advanced-pentest": NETWORK.refresh(d)
 		"advanced-recovery": RECOVERY.refresh(d)
+		"advanced-saas-response": SAAS.refresh(d)
 		_: SPECIALIST.refresh(d)

@@ -53,7 +53,7 @@ static func _unsupported_reason(game) -> String:
 	var case_id := str(contract.get("case_id", ""))
 	var definition := CASES.by_id(case_id)
 	if case_id.is_empty() or definition.is_empty(): return "通常案件として確認できないため中止できません。"
-	if bool(definition.get("advanced_work_minutes", 0)) or case_id.begins_with("advanced-") or case_id.begins_with("composite-"):
+	if case_id != "advanced-saas-response" and (bool(definition.get("advanced_work_minutes", 0)) or case_id.begins_with("advanced-") or case_id.begins_with("composite-")):
 		return "専門・複合案件はこの中止手順の対象外です。"
 	var requirement: Variant = contract.get("supply_requirement", definition.get("supply_requirement", {}))
 	if requirement is Dictionary and not requirement.is_empty(): return "設備・資材を伴う案件は専用の注文手順で処理してください。"
@@ -128,6 +128,8 @@ static func cancel(game) -> bool:
 	var record := {"kind":"cancellation","id":id,"case_id":str(state.contract.get("case_id", "")),"title":str(view.title),"client":client,"day":day,"plan":str(state.contract_plan),"fee_forgone":int(view.fee_forgone),"costs":costs,"cash_cost":costs,"cash_before":int(view.cash_before),"cash_after":int(view.cash_after),"expense":costs,"material_cost":0,"profit":-costs,"cash_delta":-costs,"late":bool(view.late),"satisfaction_before":satisfaction_before,"satisfaction_after":satisfaction_after,"credit_before":credit_before,"credit_after":credit_after,"rating":"cancelled","archived_context":id}
 	var endpoint_impact: Dictionary = saved_context.get("work", {}).get("endpoint_impact", {})
 	if not endpoint_impact.is_empty(): record.endpoint_impact = endpoint_impact.duplicate(true)
+	var saas_outcome: Dictionary = game._saas_outcome()
+	if not saas_outcome.is_empty(): record.saas_outcome = saas_outcome.duplicate(true)
 	state.contract_closeouts[id] = {"kind":"cancellation","id":id,"day":day,"context":saved_context,"vm_states":archive_vm,"record":record.duplicate(true)}
 	state.cash = int(state.get("cash", 0)) - costs
 	state.profit = int(state.get("profit", 0)) - costs

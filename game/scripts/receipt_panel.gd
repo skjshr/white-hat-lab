@@ -242,13 +242,19 @@ static func _finance(d, host: VBoxContainer, receipt: Dictionary) -> void:
 	var baseline := int(receipt.get("baseline_bonus", 0))
 	if baseline != 0:
 		var label := "証拠付き報告・再検証評価" if str(receipt.get("case_id", "")) == "advanced-portal" else UI.copy("billing_baseline_bonus")
+		if str(receipt.get("case_id", "")) == "advanced-saas-response": label = "流出予防ボーナス"
 		_row(d, income, "ReceiptEvidenceBonus", label, baseline)
 	var material := int(receipt.get("material_cost", 0))
 	if bool(receipt.get("material_billable", false)) and material > 0: _row(d, income, "ReceiptMaterialBillable", UI.copy("receipt_hardware_sales"), material)
 	var operating := int(receipt.get("cost", 0)) - material
 	var compensation := preload("res://scripts/endpoint_engagement.gd").total_cost(receipt.get("endpoint_impact",{}))
 	var change_cost := int(receipt.get("pentest_changes", {}).get("cost_total", 0))
-	_row(d, costs, "ReceiptOperatingCost", UI.copy("receipt_operating_cost"), operating-compensation-change_cost)
+	var saas_costs: Dictionary = receipt.get("saas_outcome", {}).get("costs", {})
+	var assistant_cost := int(saas_costs.get("usage_cost", 0))
+	var leak_cost := int(saas_costs.get("impact_cost", 0))
+	_row(d, costs, "ReceiptOperatingCost", UI.copy("receipt_operating_cost"), operating-compensation-change_cost-assistant_cost-leak_cost)
+	if assistant_cost > 0: _row(d, costs, "ReceiptAssistantCost", "記録整理助手（%d回）" % int(saas_costs.get("assistant_runs", 0)), assistant_cost)
+	if leak_cost > 0: _row(d, costs, "ReceiptLeakCost", "流出記録の補償（延べ%d行）" % receipt.get("saas_outcome", {}).get("egress", {}).get("exported_rows", []).size(), leak_cost)
 	if change_cost > 0: _row(d, costs, "ReceiptPentestChangeCost", "顧客変更作業費（%d件）" % receipt.pentest_changes.get("requests", []).size(), change_cost)
 	if compensation > 0: _row(d, costs, "ReceiptCompensationCost", "未封じ込め・業務誤停止の補償" if receipt.get("endpoint_impact",{}).values().any(func(item):return item.has("uncontained_minutes")) else "業務停止・不審送信の補償", compensation)
 	if material > 0: _row(d, costs, "ReceiptMaterialCost", UI.copy("stock_material_cost"), material)
@@ -276,6 +282,7 @@ static func _evaluation(d, host: VBoxContainer, receipt: Dictionary) -> void:
 	if receipt.has("quality_satisfaction_delta"): _pair(d, growth, UI.copy("receipt_quality_delta"), "%+d" % int(receipt.quality_satisfaction_delta))
 	if receipt.has("price_satisfaction_delta"): _pair(d, growth, UI.copy("receipt_price_delta"), "%+d" % int(receipt.price_satisfaction_delta))
 	if receipt.has("endpoint_satisfaction_delta"): _pair(d, growth, "業務誤停止による評価", "%+d" % int(receipt.endpoint_satisfaction_delta))
+	if receipt.has("saas_satisfaction_delta"): _pair(d, growth, "記録された流出による評価", "%+d" % int(receipt.saas_satisfaction_delta))
 	if receipt.has("level_before") and receipt.has("level_after"):
 		_pair(d, growth, UI.copy("receipt_level"), "%d → %d" % [int(receipt.level_before), int(receipt.level_after)])
 	if receipt.has("xp_gain"): _pair(d, growth, UI.copy("receipt_xp"), "+%d" % int(receipt.xp_gain))

@@ -26,6 +26,14 @@ static func project(state: Dictionary, record: Dictionary) -> Dictionary:
 				if str(probe.get("id",""))=="staff-write" and bool(probe.get("recorded",false)) and bool(probe.get("passed",false)) and str(probe.get("command","" )).contains("/srv/data/report.txt") and str(probe.get("result",""))=="putting file report.txt: OK": reply.report_write_confirmed=true
 	if confirmed:
 		reply.body = "対応内容の受取を確認しました。"
+		var saas: Dictionary = own.get("saas_outcome", {})
+		if str(reply.case_id) == "advanced-saas-response" and not saas.is_empty():
+			var lost: int = saas.get("egress", {}).get("exported_rows", []).size()
+			var invoice: Dictionary = saas.get("invoice", {})
+			reply.body = "連携の同意と発行済み接続の取消、既存接続からの取得拒否を確認しました。"
+			reply.body += "\n予定同期による持出しはありませんでした。" if lost == 0 else "\n外部へ持ち出された延べ%d行の記録は消せません。補償費用¥%dと影響報告を受領しました。" % [lost, int(saas.get("costs", {}).get("impact_cost", 0))]
+			reply.body += "\n請求 %s / 受付 %s を確認しました。" % [str(invoice.get("id", "")), str(invoice.get("receipt_id", ""))]
+			if invoice.get("attempts", []).any(func(attempt): return int(attempt.get("status", 0)) >= 400): reply.body += "\n途中で未受付になった請求も、同じ原票から復旧できています。"
 		var pentest_changes: Dictionary = own.get("pentest_changes", {})
 		if str(reply.case_id) == "advanced-pentest" and not pentest_changes.get("requests", []).is_empty():
 			var requests: Array = pentest_changes.requests

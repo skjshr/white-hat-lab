@@ -367,6 +367,11 @@
     "adv_relay_check_report": "漏えいから内部データ取得までの原記録を提出する",
     "adv_relay_check_config": "変更後の配置設定が公開されていない",
     "adv_relay_check_credential": "漏えいした資格情報で接続できない",
-    "adv_relay_check_shipping": "変更後に出荷待ちSHP-041の受付を確認する"
+    "adv_relay_check_shipping": "変更後に出荷待ちSHP-041の受付を確認する",
+    "saas_check_report": "両連携の申請と監査原本を報告する",
+    "saas_check_controls": "対象連携の同意と発行済み接続を取り消す",
+    "saas_check_denial": "現在の設定で対象接続の取得拒否を実測する",
+    "saas_check_invoice": "現在の設定で請求BILL-001の受付を確認する",
+    "saas_check_audit": "同期と持出しの監査記録を保全する"
   }
 }

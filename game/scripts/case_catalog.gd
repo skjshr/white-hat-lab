@@ -158,6 +158,7 @@ static func _add_advanced_cases() -> void:
 	_add_advanced_case("advanced-api", "advisory", 5, 7, {"advisory":5}, 34000, 260)
 	_add_advanced_case("advanced-supplychain", "advisory", 1, 10, {"advisory":6,"response":5}, 40000, 340)
 	_add_advanced_case("advanced-cloud", "operations", 3, 7, {"response":5,"operations":2}, 30000, 240)
+	_catalog.append({"id":"advanced-saas-response","title":"緊急: SaaS連携の漏洩警報","client":"北斗物流","chapter":3,"category":"response","tier":1,"required_level":3,"required_skills":{"response":1},"brief":"SaaS事業者から連携トークンの漏洩警報が届きました。当社データの流出はまだ未確認です。請求連携と資料ビューアの承認・発行済み接続を照合し、持出しの有無と停止を確認してください。本日の請求BILL-001を受け付けるまでが契約です。","service":"SaaS緊急対応","evidence":[],"hints":[],"debrief":"流出の実記録と接続の停止、通常請求の受付を確認しました。","checks":[DISPLAY_COPY.copy("adv_check_summary")],"probes":[],"desired":{},"initial":{},"targets":[{"chapter":3,"case_id":"advanced-saas-response","name":"北斗物流・SaaS連携"}],"reward":9000,"advanced_work_minutes":120,"work_family":"saas-response"})
 	_add_advanced_case("advanced-malware", "response", 4, 10, {"response":7}, 36000, 300)
 	_add_advanced_case("advanced-detection", "operations", 4, 8, {"operations":6,"advisory":3}, 42000, 360)
 

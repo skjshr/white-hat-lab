@@ -92,12 +92,14 @@ Godot --path game --script res://tests/test_service_monitor_ui.gd -- --qa-profil
 
 次は、同じ共有案件の変更を顧客側のCSV編集・版履歴・会計業務の操作でも比較し、サービスごとの造形だけでなく業務上の影響が連続して読めるかを優先してプレイする。今回の9対象は縦スクロールが必要なので、測定対象を業務の利用者・操作へまとめる案もその実プレイ結果から選ぶ。
 
-## 2026-10-06 次期緊急案件・AI導入（未実装）
+## 2026-10-06 SaaS対応・模擬AIと次期調査
 
-**SaaS乗っ取りを次の実装単位とする案。** [MandiantのSaaS防御資料](https://cloud.google.com/blog/topics/threat-intelligence/defense-against-shinyhunters-cybercrime-saas)（2026-01-30公開、同月に観測された活動を背景）は、資格情報だけでなく既存セッションやOAuth認可の取消を初動に含める。ゲームでは「接続トークン漏洩→対象セッション取消→正常請求再送→顧客結果」の一巡に絞る。事前の権限制限・監査保存が調査範囲に効き、パスワード変更だけでは残る接続と、全連携停止で止まる請求を比較して判断する。以下を含め、この節は未実装の検討事項である。
+**実装済み：架空SaaS連携の対応案件。** [MandiantのSaaS防御資料](https://cloud.google.com/blog/topics/threat-intelligence/defense-against-shinyhunters-cybercrime-saas)（2026-01-30公開、同月に観測された活動を背景）を参考に、既存セッションとOAuth同意を別々に確認・取消できる縦切りを追加した。承認済みの請求アプリと未承認の資料アプリを比較し、監査記録、現行接続の拒否、同じ請求書の受付番号を保った再確認、顧客向け結果を一巡できる。報告原本は不変で、後続の流出には追補報告が必要になる。拒否できた同期だけでは再提出を要求しない。同期は作業12・18・24分時点に各3行のコピーを送り、1行あたり¥500の架空費用（最大9行）を計上する。毎回同じ台帳行を同期するため、流出数は固有レコード数でなく送信されたコピー数である。これはゲーム内の架空案件・金額・業務影響で、実在SaaSへの接続、外部通信、実サービスの課金は行わない。
 
-**公開機器の緊急防御。** [CISA公式KEVデータ](https://raw.githubusercontent.com/cisagov/kev-data/develop/known_exploited_vulnerabilities.json)は確認時点で2026-10-04配信版。実悪用が確認された脆弱性の継続登録資料で、年間の発生率調査ではない。公開範囲・業務依存・保守時間を見て対象を優先し、発生前の制限と更新、発生直後の証拠保全、復旧後の業務再測定をつなぐ。実在の脆弱性や組織を再現せず、架空機器の状態と停止費用で判断を表す。
+**今後の調査：公開機器の緊急防御。** [CISA公式KEVデータ](https://raw.githubusercontent.com/cisagov/kev-data/develop/known_exploited_vulnerabilities.json)は確認時点で2026-10-04配信版。実悪用が確認された脆弱性の継続登録資料で、年間の発生率調査ではない。公開範囲・業務依存・保守時間を見て対象を優先し、発生前の制限と更新、発生直後の証拠保全、復旧後の業務再測定をつなぐ。実在の脆弱性や組織を再現せず、架空機器の状態と停止費用で判断を表す。
 
-**復旧基盤を守る案件。** [M-Trends 2026](https://cloud.google.com/blog/topics/threat-intelligence/m-trends-2026?hl=en)（英語ページ2026-03-23公開、分析対象は2025年のMandiant調査）と[破壊攻撃への準備資料](https://cloud.google.com/blog/topics/threat-intelligence/preparation-hardening-destructive-attacks)（2026-03-06公開、03-13追記）を参考にする。事前のバックアップ分離・復元試験への投資を、初動で守れる保存世代と復旧時間へ残す。最新だが未検証の世代と、古い検証済み世代を比較し、失った受注の再処理までを成果にする。資料の統計をゲーム内の発生確率へ直接置き換えない。
+**今後の調査：復旧基盤を守る案件。** [M-Trends 2026](https://cloud.google.com/blog/topics/threat-intelligence/m-trends-2026?hl=en)（英語ページ2026-03-23公開、分析対象は2025年のMandiant調査）と[破壊攻撃への準備資料](https://cloud.google.com/blog/topics/threat-intelligence/preparation-hardening-destructive-attacks)（2026-03-06公開、03-13追記）を参考にする。事前のバックアップ分離・復元試験への投資を、初動で守れる保存世代と復旧時間へ残す。最新だが未検証の世代と、古い検証済み世代を比較し、失った受注の再処理までを成果にする。資料の統計をゲーム内の発生確率へ直接置き換えない。
 
-**AI導入と権限。** [MandiantのAI特別報告](https://cloud.google.com/security/resources/ai-risk-and-resilience-2026)（2026年9月公開、2026年の現場事例を含む）と[Security Copilotの能力・制約](https://learn.microsoft.com/en-us/copilot/security/security-copilot-application-card-agents)（2026-08-09更新）を参考に、次サイクルではまず観測ID付きの記録整理を技能解放とゲーム内投資として検討する。参照した記録と不足を示し、未観測の秘密や正解は取得しない。将来の対応助手も読取範囲・実行権限・消費上限を持たせ、停止時は履歴を保全して限定再試行できる構成を候補とする。[公式の容量課金方式](https://learn.microsoft.com/en-us/copilot/security/faq-security-copilot)は経営上の比較の参考にとどめる。正式な解放Lv・価格は未決定で、実サービス利用・有料契約・外部AI依存は追加しない。
+**実装済み：記録整理の模擬AI。** Lv3かつ調査復旧Lv1の会社が任意購入できる。購入は架空の会社資金¥3,000、助手の1回実行は¥300・2分。手動整理は無料・5分。同じ記録IDの組み合わせを再表示しても追加費用・時間は発生しない。助手は画面で選んだ取得済み記録だけを時系列整理し、未取得情報や新しい証拠を生成せず、設定変更・請求受付・自律対応も行わない。外部AIやネットワークサービスを呼ばず、学習・追加課金もない。金額・技能条件・結果はシミュレーション上の会社運営用である。
+
+**今後の調査：AIの実行権限。** [MandiantのAI特別報告](https://cloud.google.com/security/resources/ai-risk-and-resilience-2026)（2026年9月公開、2026年の現場事例を含む）と[Security Copilotの能力・制約](https://learn.microsoft.com/en-us/copilot/security/security-copilot-application-card-agents)（2026-08-09更新）を参考に、将来の対応助手に読取範囲・実行権限・消費上限を持たせ、停止時に履歴を保全して限定再試行できる構成を調査する。[公式の容量課金方式](https://learn.microsoft.com/en-us/copilot/security/faq-security-copilot)は経営上の比較の参考にとどめる。自律的な設定変更・封じ込め・顧客対応や実サービス連携は未実装。

@@ -56,6 +56,7 @@ static func build(ui, g) -> void:
 		var unlocks: Array=g.skill_case_unlocks(selected); next.tooltip_text="\n".join(unlocks)
 		if not unlocks.is_empty():
 			var unlocked: Label=ui._label("新しい候補: "+" / ".join(unlocks.slice(0,2)),13,M.MUTED); unlocked.name="SkillUnlocks_"+selected; unlocked.tooltip_text="\n".join(unlocks); ui.modal_body.add_child(unlocked)
+		if selected == "response": _assistant_entry(ui, g)
 		for lead in candidates(g,selected,focus):
 			var needed := int(lead.required_skills[selected]); var missing := maxi(0,needed-int(skill.rank))
 			var row := HFlowContainer.new(); ui.modal_body.add_child(row)
@@ -65,6 +66,19 @@ static func build(ui, g) -> void:
 			condition.tooltip_text=" / ".join(lead.get("reasons",[]))
 			var open: Button=ui._button("相談・見積へ" if str(lead.status)=="ready" else "相談の条件へ",ui._open_cycle_offer.bind(str(lead.id)) if str(lead.status)=="ready" else func():ui.set_meta("cycle_customer",str(lead.id));ui._select_company_view("overview"))
 			open.name="GrowthOpen_"+str(lead.id).validate_node_name(); M.button(open,"secondary"); row.add_child(open)
+
+static func _assistant_entry(ui, g) -> void:
+	var status: Dictionary = g.record_assistant_status()
+	var row := HFlowContainer.new(); row.name = "GrowthRecordAssistant"; row.add_theme_constant_override("h_separation", 10); ui.modal_body.add_child(row)
+	var title: Label = ui._label("模擬AI · 記録整理助手", 15, M.INK); row.add_child(title)
+	var buy: Button = ui._button("✓ 導入済み" if bool(status.owned) else "導入 ¥%d" % int(status.purchase_cost), func():
+		g.buy_record_assistant()
+		ui._select_company_view("growth"))
+	buy.name = "BuyRecordAssistant"; buy.disabled = not bool(status.can_purchase); buy.tooltip_text = str(status.reason); M.button(buy, "secondary"); row.add_child(buy)
+	var terms: Label = ui._label("手動%d分 → 助手%d分 · 使用経費¥%d / 回" % [int(status.manual_minutes), int(status.assistant_minutes), int(status.run_cost)], 13, M.MUTED)
+	terms.name = "RecordAssistantTerms"; terms.tooltip_text = "取得済みの記録を観測ID付きで整理。使用経費は納品・中止時に精算します。手動でも対応できます。"; ui.modal_body.add_child(terms)
+	if not bool(status.owned) and not str(status.reason).is_empty():
+		var reason: Label = ui._label(str(status.reason), 13, M.MUTED); reason.name = "RecordAssistantRequirement"; ui.modal_body.add_child(reason)
 
 func setup(skills: Array, g, focus: String, selected: String, scale: float, small: bool, choose: Callable, open: Callable) -> void:
 	name="SkillInvestmentBoard"; catalog=skills.duplicate(true); chosen=selected; points=g.skill_points(); factor=scale

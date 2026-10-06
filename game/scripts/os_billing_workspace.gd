@@ -393,7 +393,13 @@ static func _invoicedetail(d, parent: Node, invoice: Dictionary, payments: Array
 	form.add_child(lines)
 	_line_item(d, lines, copy("fee", "Service fee"), _number(invoice.get("fee", 0)))
 	_line_item(d, lines, copy("quality_bonus", "Quality bonus"), _number(int(invoice.get("bonus", 0)) - int(invoice.get("baseline_bonus", 0))))
-	if int(invoice.get("baseline_bonus", 0)) > 0: _line_item(d, lines, copy("baseline_bonus", "Baseline bonus"), _number(invoice.get("baseline_bonus", 0)))
+	if int(invoice.get("baseline_bonus", 0)) > 0:
+		var bonus_label := copy("baseline_bonus", "Baseline bonus")
+		for delivery in d.game.state.get("history", []):
+			if str(delivery.get("id", "")) == str(invoice.get("contract_id", "")) and str(delivery.get("case_id", "")) == "advanced-saas-response":
+				bonus_label = "流出予防ボーナス"
+				break
+		_line_item(d, lines, bonus_label, _number(invoice.get("baseline_bonus", 0)))
 	var material_cost := int(invoice.get("material_cost", 0))
 	if bool(invoice.get("material_billable", false)) and material_cost > 0:
 		_line_item(d, lines, copy("hardware_line", "Customer equipment"), _number(material_cost))

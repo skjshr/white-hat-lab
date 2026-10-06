@@ -1124,6 +1124,8 @@ func rollback_configuration() -> bool:
 func case_review() -> Dictionary:
 	if str(state.get("contract", {}).get("case_id", "")) == "advanced-portal" and advanced_active():
 		return _portal_case_review()
+	if str(state.get("contract", {}).get("case_id", "")) == "advanced-saas-response" and advanced_active():
+		return _saas_case_review()
 	var total := maxi(1, state.get("targets", []).size())
 	var recorded_sites := 0
 	var current_recorded := false
@@ -1150,6 +1152,16 @@ func case_review() -> Dictionary:
 	objectives.append({"id":"safe","title":"安全な作業","detail":"再起動・リセット失敗なし","done":safe})
 	objectives.append({"id":"deadline","title":"期限内の納品","detail":"納期内完了","done":on_time})
 	return {"available":available,"can_capture":available and int(state.get("target_index",0)) < state.targets.size() and not bool(state.targets[int(state.get("target_index",0))].get("baseline_locked",false)) and bool(_vm().state.get("connected",false)),"recorded":recorded,"current_recorded":current_recorded,"recorded_sites":recorded_sites,"total_sites":total,"score":score,"grade":grade,"bonus":bonus,"objectives":objectives,"record_path":"/home/operator/baseline-report.txt"}
+
+func _saas_case_review() -> Dictionary:
+	var checks: Array = _advanced_engine().checks(state.advanced)
+	var reported := bool(state.advanced.get("report", {}).get("submitted", false))
+	var verified := not checks.is_empty() and checks.all(func(row): return bool(row.get("passed", false)))
+	var lost: int = state.advanced.get("egress", {}).get("exported_rows", []).size()
+	var status := work_status()
+	var on_time := float(status.get("elapsed_minutes", status.get("minutes", 0))) <= float(status.get("budget", 0))
+	var score := int(reported) + int(verified) + int(on_time)
+	return {"available":not current_done(),"can_capture":false,"recorded":reported,"current_recorded":reported,"recorded_sites":1 if reported else 0,"total_sites":1,"score":score,"grade":"S" if score == 3 and lost == 0 else "A" if score == 3 else "B" if score == 2 else "C","bonus":roundi(int(status.get("estimated_fee", 0))*0.05) if reported and verified and lost == 0 else 0,"objectives":[{"id":"evidence","title":"申請と監査の報告","detail":"保存した原記録","done":reported},{"id":"retest","title":"封じ込めと請求復旧","detail":"現在の接続と実受付","done":verified},{"id":"prevention","title":"流出前の防止","detail":"持出し 延べ%d行" % lost,"done":lost == 0},{"id":"deadline","title":"期限内の納品","detail":"契約の作業期限","done":on_time}],"record_path":""}
 
 func _portal_case_review() -> Dictionary:
 	# A tester preserves HTTP evidence, not a customer's server configuration.
@@ -1516,15 +1528,22 @@ func _service_monitor_models(vm_state: Dictionary) -> Dictionary:
 func advanced_active() -> bool:
 	return bool(state.get("accepted", false)) and _advanced_case_id(str(state.get("contract", {}).get("case_id", ""))) and state.get("advanced", {}) is Dictionary and not state.advanced.is_empty()
 
+func record_assistant_status() -> Dictionary:
+	return preload("res://scripts/company_record_assistant.gd").status(self)
+
+func buy_record_assistant() -> bool:
+	return preload("res://scripts/company_record_assistant.gd").purchase(self)
+
 func incident_active() -> bool:
 	return advanced_active() and str(state.advanced.get("kind", "")) == "advanced-portal" and bool(state.advanced.get("exercise", {}).get("active", false))
 
 func _advanced_case_id(case_id: String) -> bool:
-	return case_id in ["advanced-hunt","advanced-pentest","advanced-pentest-relay","advanced-recovery","advanced-ddos","advanced-api","advanced-supplychain","advanced-cloud","advanced-malware","advanced-detection","advanced-portal"]
+	return case_id in ["advanced-hunt","advanced-pentest","advanced-pentest-relay","advanced-recovery","advanced-ddos","advanced-api","advanced-supplychain","advanced-cloud","advanced-saas-response","advanced-malware","advanced-detection","advanced-portal"]
 
 func _advanced_engine(case_id: String = ""):
 	var id := case_id if not case_id.is_empty() else str(state.get("contract", {}).get("case_id", ""))
 	if id == "advanced-portal": return load("res://scripts/pentest_portal.gd")
+	if id == "advanced-saas-response": return load("res://scripts/saas_response.gd")
 	if id in ["advanced-cloud","advanced-malware","advanced-detection"]: return load("res://scripts/advanced_threats.gd")
 	if id in ["advanced-ddos","advanced-api","advanced-supplychain"]: return load("res://scripts/advanced_assurance.gd")
 	return load("res://scripts/advanced_operations.gd")
@@ -1550,6 +1569,8 @@ func advanced_action(action: String, args: Dictionary = {}) -> Dictionary:
 		var unavailable := {"ok":false,"changed":false,"minutes":0,"result_key":"adv_unavailable","result_args":[]}
 		unavailable.message = _advanced_result_message(unavailable)
 		return unavailable
+	if str(state.advanced.get("kind", "")) == "advanced-saas-response" and action == "organize_records" and str(args.get("mode", "")) == "assistant" and not bool(record_assistant_status().owned):
+		return {"ok":false,"changed":false,"minutes":0,"cost":0,"message":"記録整理助手を導入すると利用できます。手動整理も選べます。"}
 	var before := state.duplicate(true)
 	var before_assignments := _assignments.duplicate(true)
 	var before_machine = _machine
@@ -1581,6 +1602,9 @@ func advanced_action(action: String, args: Dictionary = {}) -> Dictionary:
 	var change_cost := maxi(0, int(result.get("cost", 0))) if action == "request_change" and str(state.advanced.get("kind", "")) == "advanced-pentest" else 0
 	if change_cost > 0:
 		state.work["pentest_change_cost"] = int(state.work.get("pentest_change_cost", 0)) + change_cost
+	if str(state.advanced.get("kind", "")) == "advanced-saas-response":
+		change_cost = maxi(0, int(result.get("cost", 0)))
+		_record_saas_costs(int(result.get("usage_cost", 0)), int(result.get("impact_cost", 0)))
 	_work_add(float(result.get("minutes", 0)), change_cost, true)
 	_sync_target()
 	if not save_game():
@@ -1617,12 +1641,35 @@ func _store_vm(before: Array, previous_mutation: int) -> bool:
 	if saved: changed.emit()
 	return saved
 
+func _record_saas_costs(usage: int, impact: int) -> void:
+	var costs: Dictionary = state.work.get("saas_costs", {})
+	costs["usage_cost"] = int(costs.get("usage_cost", 0)) + maxi(0, usage)
+	costs["impact_cost"] = int(costs.get("impact_cost", 0)) + maxi(0, impact)
+	costs["assistant_runs"] = int(costs.get("assistant_runs", 0)) + (1 if usage > 0 else 0)
+	state.work["saas_costs"] = costs
+
+func _saas_outcome() -> Dictionary:
+	var model: Dictionary = state.get("advanced", {})
+	if str(model.get("kind", "")) != "advanced-saas-response": return {}
+	var outcome := {"costs":state.work.get("saas_costs", {}).duplicate(true)}
+	for key in ["model_version", "elapsed_minutes", "egress", "invoice", "report", "records", "organization"]:
+		if model.has(key): outcome[key] = model[key].duplicate(true) if model[key] is Dictionary or model[key] is Array else model[key]
+	return outcome
+
 func _work_add(minutes: float, cost: int = 0, advance_clock := true) -> void:
 	if not state.has("work") or not state.accepted: return
 	var added := maxf(0.0, minutes)
 	ENDPOINT_ENGAGEMENT.advance(self, added)
 	state.work.minutes = float(state.work.get("minutes", 0.0)) + added
 	state.work.incident_cost = int(state.work.get("incident_cost", 0)) + cost
+	if advanced_active() and not current_done() and str(state.advanced.get("kind", "")) == "advanced-saas-response":
+		# The engine already advances explicit SaaS actions. Charge only time
+		# added elsewhere (for example acceptance verification), in this save.
+		var remaining := maxf(0.0, float(state.work.minutes) - float(state.advanced.get("elapsed_minutes", 0)))
+		if remaining > 0:
+			var impact: int = _advanced_engine().advance(state.advanced, remaining)
+			state.work.incident_cost = int(state.work.incident_cost) + impact
+			_record_saas_costs(0, impact)
 	if advance_clock:state.clock_minutes = maxi(BUSINESS_START_MINUTE, int(state.get("clock_minutes", BUSINESS_START_MINUTE)) + int(round(added)))
 
 func action_minutes(kind: String, base_minutes: float) -> float:
@@ -2333,7 +2380,7 @@ func company_level() -> Dictionary:
 	level = clampi(level-1,1,LEVEL_XP.size())
 	var floor_xp: int = LEVEL_XP[level-1]
 	var next_xp: int = LEVEL_XP[level] if level < LEVEL_XP.size() else floor_xp
-	var unlocks := {2:"新規初級案件・スキルポイント獲得",4:"スキルポイント",5:"中級の専門案件",7:"追加の中級案件",8:"2拠点の契約",10:"上級の専門案件",12:"追加の上級案件",15:"3拠点の契約",20:"会社ランク最高位"}
+	var unlocks := {2:"新規初級案件・スキルポイント獲得",3:"SaaS緊急対応・記録整理助手（調査復旧1）",4:"スキルポイント",5:"中級の専門案件",7:"追加の中級案件",8:"2拠点の契約",10:"上級の専門案件",12:"追加の上級案件",15:"3拠点の契約",20:"会社ランク最高位"}
 	var next_unlock := "最高レベル達成"
 	for at in unlocks:
 		if level < int(at): next_unlock = "Lv.%d  %s" % [at,unlocks[at]]; break
@@ -2895,7 +2942,9 @@ func deliver() -> bool:
 	var endpoint_impact: Dictionary = state.work.get("endpoint_impact", {})
 	var endpoint_satisfaction_delta := ENDPOINT_ENGAGEMENT.satisfaction_delta(endpoint_impact)
 	var endpoint_containment := endpoint_impact.values().any(func(item): return item is Dictionary and item.has("uncontained_minutes"))
-	var satisfaction_delta := quality_satisfaction_delta + price_satisfaction_delta + endpoint_satisfaction_delta
+	var saas_outcome := _saas_outcome()
+	var saas_satisfaction_delta := -mini(9, saas_outcome.get("egress", {}).get("exported_rows", []).size())
+	var satisfaction_delta := quality_satisfaction_delta + price_satisfaction_delta + endpoint_satisfaction_delta + saas_satisfaction_delta
 	relation.satisfaction = clampi(satisfaction_before + satisfaction_delta, 0, 100)
 	relation.completed_count = int(relation.get("completed_count",0)) + 1
 	relation.last_quality = str(status.quality); relation.last_day = int(state.day)
@@ -2921,6 +2970,9 @@ func deliver() -> bool:
 	if state.care_agreements.has(client): renewal_outcome = "active" if bool(state.care_agreements[client].get("active",false)) else "suspended"
 	state.last_receipt = {"day":int(state.day),"client":mission().client,"title":mission().title,"fee":fee,"bonus":bonus,"baseline_bonus":baseline_bonus,"quality_score":int(review.get("score",0)),"grade":str(review.get("grade","C")),"baseline_sites":int(review.get("recorded_sites",0)),"baseline_total_sites":int(review.get("total_sites",1)),"cost":int(status.costs),"material_cost":material_cost,"material_billable":invoiced and material_cost > 0,"hardware_serial":str(_customer_hardware().get("serial","")),"net":net,"minutes":status.minutes,"elapsed_minutes":status.get("elapsed_minutes",status.minutes),"budget":status.budget,"rating":status.quality,"credit_gain":int(state.credit)-credit_before,"credit_before":credit_before,"credit_after":state.credit,"checks":state.checks.duplicate(true),"plan":state.contract_plan,"level_before":level_before,"level_after":int(company_level().level),"xp_gain":maxi(net,0),"satisfaction_before":satisfaction_before,"satisfaction_after":int(relation.satisfaction),"renewal_outcome":renewal_outcome,"price_satisfaction_delta":price_satisfaction_delta,"quality_satisfaction_delta":quality_satisfaction_delta,"agreed_fee":agreed_fee,"reference_fee":reference_fee}
 	state.last_receipt.case_id = str(state.contract.get("case_id", ""))
+	if not saas_outcome.is_empty():
+		state.last_receipt.saas_outcome = saas_outcome.duplicate(true)
+		state.last_receipt.saas_satisfaction_delta = saas_satisfaction_delta
 	if str(state.get("advanced", {}).get("kind", "")) == "advanced-pentest" and not state.advanced.get("world", {}).get("remediation", {}).get("requests", []).is_empty():
 		state.last_receipt.pentest_changes = {"cost_total":int(state.work.get("pentest_change_cost", 0)),"requests":state.advanced.world.remediation.requests.duplicate(true),"revision":int(state.advanced.world.get("change_revision", 0)),"retests":state.advanced.world.get("retests", {}).duplicate(true)}
 		if str(state.advanced.get("engagement", "")) == "relay-v1":
@@ -2948,6 +3000,9 @@ func deliver() -> bool:
 	# Keep this delivery's existing observations after dispatch contexts retire.
 	state.history[-1].delivery_results = state.last_receipt.delivery_results.duplicate(true)
 	if state.last_receipt.has("pentest_changes"): state.history[-1].pentest_changes = state.last_receipt.pentest_changes.duplicate(true)
+	if state.last_receipt.has("saas_outcome"):
+		state.history[-1].saas_outcome = state.last_receipt.saas_outcome.duplicate(true)
+		state.history[-1].saas_satisfaction_delta = saas_satisfaction_delta
 	if state.last_receipt.has("endpoint_impact"): state.history[-1].endpoint_impact = state.last_receipt.endpoint_impact.duplicate(true)
 	if endpoint_containment: state.history[-1].endpoint_satisfaction_delta = endpoint_satisfaction_delta
 	if state.last_receipt.has("hotel_workflow"): state.history[-1].hotel_workflow = state.last_receipt.hotel_workflow.duplicate(true)
