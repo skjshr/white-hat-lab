@@ -21,6 +21,8 @@ const SERVICE_MONITOR_VM = preload("res://scripts/virtual_machine.gd")
 const BUSINESS_TRANSACTIONS = preload("res://scripts/business_transactions.gd")
 const BUSINESS_DATA = preload("res://scripts/business_workspace.gd")
 const HOTEL_FRONTDESK = preload("res://scripts/hotel_frontdesk_model.gd")
+const HOTEL_RECOVERY = preload("res://scripts/hotel_recovery.gd")
+const HOTEL_HANDOFF = preload("res://scripts/hotel_handoff.gd")
 const BUSINESS_START_MINUTE := 9 * 60
 const BUSINESS_END_MINUTE := 18 * 60
 const DELIVERY_WAIT_SECONDS := 30.0
@@ -1802,7 +1804,8 @@ func business_read(resource: String = "orders", request_url: String = "") -> Dic
 	return _business_response(result)
 
 func hotel_snapshot() -> Dictionary:
-	if not bool(state.get("accepted", false)) or _current_chapter() != 4 or int(_scenario().get("hotel_workflow_version", 0)) != 1: return {"enabled":false}
+	var version := int(_scenario().get("hotel_workflow_version", 0))
+	if not bool(state.get("accepted", false)) or _current_chapter() != 4 or version not in [1, 2]: return {"enabled":false}
 	# Acceptance owns initial materialization. Never construct/repair a VM merely
 	# to draw the front desk, including a save whose customer file is now missing.
 	var key := _vm_key()
@@ -1810,17 +1813,24 @@ func hotel_snapshot() -> Dictionary:
 	var result: Dictionary = HOTEL_FRONTDESK.snapshot(saved)
 	result.client = str(state.get("contract", {}).get("client", result.get("client", "白波ホテル")))
 	result.connected = bool(result.get("connected", false)) and _customer_hardware_connected()
-	result.can_send = not current_done()
+	result.workflow_version = version
+	result.can_send = not current_done() and version == 1
 	result.outcome = HOTEL_FRONTDESK.outcome(saved)
+	if version == 2:
+		result.reservation = HOTEL_RECOVERY.snapshot(saved)
+		result.reservation.connected = bool(result.connected)
+		result.reservation.can_send = not current_done()
 	return result
 
 func hotel_action(folio_id: String) -> Dictionary:
 	if not bool(state.get("accepted", false)) or current_done() or _current_chapter() != 4: return HOTEL_FRONTDESK.rejected(409, "contract_unavailable")
-	if int(_scenario().get("hotel_workflow_version", 0)) != 1: return HOTEL_FRONTDESK.rejected(404, "unsupported_workflow")
+	var version := int(_scenario().get("hotel_workflow_version", 0))
+	if version not in [1, 2]: return HOTEL_FRONTDESK.rejected(404, "unsupported_workflow")
+	if version == 2 and folio_id != "R-204-NEXT": return HOTEL_FRONTDESK.rejected(409, "prior_folio_read_only")
 	if not _customer_hardware_connected(): return HOTEL_FRONTDESK.rejected(503, "hardware_unavailable")
 	if not (_machine != null and _machine_key == _vm_key()) and not state.get("vm_states", {}).has(_vm_key()): return HOTEL_FRONTDESK.rejected(422, "data_unavailable")
 	var machine = _vm()
-	var plan: Dictionary = HOTEL_FRONTDESK.plan(machine.state, folio_id, int(state.day), business_clock())
+	var plan: Dictionary = HOTEL_RECOVERY.plan(machine.state, folio_id, int(state.day), business_clock()) if version == 2 else HOTEL_FRONTDESK.plan(machine.state, folio_id, int(state.day), business_clock())
 	if not bool(plan.get("changed", false)): return plan
 	var previous := state.duplicate(true)
 	var previous_assignments := _assignments.duplicate(true)
@@ -1829,8 +1839,9 @@ func hotel_action(folio_id: String) -> Dictionary:
 	# The three working minutes belong to the applied endpoint state before
 	# this send completes, just as ordinary EDR commands account their work.
 	_work_add(float(plan.get("minutes", 3.0)))
-	machine.state.fs[HOTEL_FRONTDESK.PATH] = str(plan.file)
-	machine.state.hotel_journal = plan.journal.duplicate(true)
+	machine.state.fs[str(plan.get("path", HOTEL_FRONTDESK.PATH))] = str(plan.file)
+	if version == 2: machine.state.reservation_journal = plan.journal.duplicate(true)
+	else: machine.state.hotel_journal = plan.journal.duplicate(true)
 	machine._touch("hotel " + folio_id + " response " + str(plan.code))
 	state.vm_states[_vm_key()] = machine.export_state()
 	if bool(plan.ok) and not bool(plan.get("duplicate", false)):
@@ -2385,6 +2396,9 @@ func continue_business() -> bool:
 	changed.emit(); return true
 
 func _make_offers(previous_skills: Dictionary = {}) -> void:
+	var new_market_day := int(state.get("market_day", -1)) != int(state.day)
+	if new_market_day: COMPANY_CYCLE.refresh_hotel_recoveries(state, int(state.day))
+	var hotel_recoveries: Array = COMPANY_CYCLE.hotel_recovery_available(state, int(state.day))
 	# Refreshing the same day's board must not replace previously offered terms.
 	# Only a new offer ID receives a newly authored containment scenario.
 	var previous_endpoint_offers: Dictionary = {}
@@ -2395,6 +2409,7 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 	var level := int(company_level().level)
 	for selected in CASES.all():
 		if str(selected.id) == BRANCH_HANDOFF.CASE_ID and not BRANCH_HANDOFF.available(state): continue
+		if HOTEL_HANDOFF.is_case(str(selected.id)) and hotel_recoveries.is_empty(): continue
 		var tier := int(selected.tier)
 		var category: String = selected.category
 		var required_skills := _case_skill_requirements(selected)
@@ -2415,6 +2430,11 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 		var supply_cost := int(CUSTOMER_STOCK.product(str(supply_requirement.get("sku",CUSTOMER_STOCK.SKU))).get("unit_cost",CUSTOMER_STOCK.UNIT_COST)) if not supply_requirement.is_empty() else 0
 		state.offers.append({"id":"career-%d-%s" % [state.day,selected.id],"case_id":selected.id,"chapter":selected.chapter,"title":selected.title,"client":selected.client,"brief":selected.brief,"service":selected.service,"category":category,"grade":tier,"targets":sites,"target_specs":target_specs.duplicate(true),"reward":reward,"base_reward":reward,"required_credit":0,"required_level":needed_level,"required_rank":required_rank,"required_skills":required_skills,"work_family":str(selected.get("work_family","chapter-"+str(selected.chapter))),"supply_requirement":supply_requirement,"estimated_cost":700+supply_cost,"estimated_budget":estimated_budget,"deadline_text":_clock_text(BUSINESS_START_MINUTE+estimated_budget),"unlocked":_case_skills_met(selected,state.skills) and level>=needed_level,"market_available":false,"market_day":int(state.day),"retired_from_new_offers":bool(selected.get("retired_from_new_offers",false))})
 		state.offers[-1].advanced_work_minutes = int(selected.get("advanced_work_minutes", 0))
+		if HOTEL_HANDOFF.is_case(str(selected.id)):
+			var recovery: Dictionary = hotel_recoveries[0]
+			state.offers[-1].hotel_recovery_source_contract_id = str(recovery.source_contract_id)
+			state.offers[-1].target_specs = [{"chapter":4,"case_id":HOTEL_HANDOFF.CASE_ID,"name":"予約端末・PC-A","scenario":HOTEL_HANDOFF.scenario(recovery.handoff, int(state.day))}]
+			state.offers[-1].retired_from_new_offers = false
 		if selected.has("engagement_brief"): state.offers[-1].brief = str(selected.engagement_brief)
 		if ENDPOINT_ENGAGEMENT.containment_case(str(selected.id)):
 			var generated: Dictionary = state.offers[-1]
@@ -2559,6 +2579,7 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 	var protected_leads: Array = quoted_case_ids.keys()
 	protected_leads.append_array(carried_cases)
 	var relationship_priorities: Array = COMPANY_CYCLE.priority_case_ids(self); relationship_priorities.append_array(recovery_cases)
+	if not hotel_recoveries.is_empty(): relationship_priorities.push_front(HOTEL_HANDOFF.CASE_ID)
 	state.market_leads = MARKET_DEMAND.prioritize_relationships(candidate_offers, state.market_leads, relationship_priorities, protected_leads, int(state.day))
 	state.market_day=int(state.day)
 	var lead_set: Dictionary = {}
@@ -2712,6 +2733,13 @@ func choose_contract(id: String) -> bool:
 	for offer in state.offers:
 		if offer.id == id and offer.unlocked and _case_skills_met(offer,state.skills) and bool(offer.get("market_available", true)) and int(state.credit) >= int(offer.required_credit) and int(company_level().level) >= int(offer.get("required_level",1)):
 			var handoff_scenario: Dictionary = {}
+			if HOTEL_HANDOFF.is_case(str(offer.get("case_id", ""))):
+				var recovery_source := str(offer.get("hotel_recovery_source_contract_id", ""))
+				var recovery: Dictionary = state.get("company_cycle", {}).get("hotel_recoveries", {}).get(recovery_source, {})
+				handoff_scenario = HOTEL_HANDOFF.scenario(recovery.get("handoff", {}), int(state.day))
+				if handoff_scenario.is_empty() or str(recovery.get("status", "")) != "pending":
+					state = previous_state; _assignments = previous_assignments; _machine = previous_machine; _machine_key = previous_machine_key
+					return false
 			if str(offer.get("case_id", "")) == BRANCH_HANDOFF.CASE_ID:
 				handoff_scenario = BRANCH_HANDOFF.scenario(state, CASES.by_id(BRANCH_HANDOFF.CASE_ID))
 				if handoff_scenario.is_empty():
@@ -2738,6 +2766,8 @@ func choose_contract(id: String) -> bool:
 					if not save_game(): state = previous_state; _assignments = previous_assignments
 				return false
 			if plan_id == "care" and not _agree_care(str(offer.get("client", ""))): state = previous_state; _assignments = previous_assignments; _machine = previous_machine; _machine_key = previous_machine_key; return false
+			if HOTEL_HANDOFF.is_case(str(offer.get("case_id", ""))) and not COMPANY_CYCLE.mark_hotel_recovery_working(state, str(offer.get("hotel_recovery_source_contract_id", "")), id, int(state.day)):
+				state = previous_state; _assignments = previous_assignments; _machine = previous_machine; _machine_key = previous_machine_key; return false
 			state.chapter = int(offer.chapter); state.current_contract_id = id; state.awaiting_contract = false
 			state.contract = offer.duplicate(true); state.contract.agreed_fee = quoted_fee; state.contract.agreed_budget = float(quote.budget); state.contract.reference_fee = int(quote.reference_fee); state.contract.budget_limit = int(quote.budget_limit); state.contract.market_label = str(quote.market_label); state.contract.price_reaction = str(quote.price_reaction); state.targets = []; state.target_index = 0
 			state.contract.billing_version = 1; state.contract.payment_days = int(BILLING.terms(offer).days)
@@ -2751,7 +2781,7 @@ func choose_contract(id: String) -> bool:
 			var selected_case_id := str(offer.get("case_id", ""))
 			if not handoff_scenario.is_empty():
 				state.targets[0].scenario = handoff_scenario
-				state.contract.handoff = handoff_scenario.handoff.duplicate(true)
+				if handoff_scenario.has("handoff"): state.contract.handoff = handoff_scenario.handoff.duplicate(true)
 			state.advanced = _advanced_engine(selected_case_id).create(selected_case_id) if _advanced_case_id(selected_case_id) else {}
 			if not state.advanced.is_empty(): state.targets[0].advanced = state.advanced.duplicate(true)
 			_prepare_linked_identity_contract()
@@ -2760,7 +2790,7 @@ func choose_contract(id: String) -> bool:
 			# and loaded contracts have no marker and never acquire a new folio.
 			for index in state.targets.size():
 				var hotel_scenario: Dictionary = state.targets[index].get("scenario", {})
-				if int(hotel_scenario.get("hotel_workflow_version", 0)) != 1: continue
+				if int(hotel_scenario.get("hotel_workflow_version", 0)) not in [1, 2]: continue
 				var hotel_vm = SERVICE_MONITOR_VM.new()
 				hotel_vm.setup(4, {}, hotel_scenario)
 				state.vm_states[_vm_key(index)] = hotel_vm.export_state()
@@ -2892,6 +2922,8 @@ func deliver() -> bool:
 	if endpoint_containment: state.last_receipt.endpoint_satisfaction_delta = endpoint_satisfaction_delta
 	var hotel_outcome := _hotel_workflow_outcome()
 	if not hotel_outcome.is_empty(): state.last_receipt.hotel_workflow = hotel_outcome
+	if HOTEL_HANDOFF.is_case(str(state.contract.get("case_id", ""))):
+		state.last_receipt.hotel_recovery_source_contract_id = str(state.contract.get("hotel_recovery_source_contract_id", ""))
 	state.last_receipt.delivery_results = _delivery_results()
 	if invoiced:
 		var draft: Dictionary = BILLING.create_draft(state, id, state.contract, state.last_receipt)
@@ -2910,6 +2942,7 @@ func deliver() -> bool:
 	if state.last_receipt.has("endpoint_impact"): state.history[-1].endpoint_impact = state.last_receipt.endpoint_impact.duplicate(true)
 	if endpoint_containment: state.history[-1].endpoint_satisfaction_delta = endpoint_satisfaction_delta
 	if state.last_receipt.has("hotel_workflow"): state.history[-1].hotel_workflow = state.last_receipt.hotel_workflow.duplicate(true)
+	if state.last_receipt.has("hotel_recovery_source_contract_id"): state.history[-1].hotel_recovery_source_contract_id = state.last_receipt.hotel_recovery_source_contract_id
 	state.history[-1].request_mail = preload("res://scripts/mail_request_record.gd").capture(mission(),str(state.contract.get("case_id","")),str(mission().get("id","" )).begins_with("service-4-case-") and int(_vm().state.get("edr_model_version",1))>=2)
 	state.clients[id] = {"title":mission().title,"debrief":mission().debrief,"config":_vm().state.get("applied", {}).duplicate(true),"evidence":mission().evidence.duplicate(true),"checks":state.checks.duplicate(true)}
 	COMPANY_CYCLE.record_delivery(self, id, state.last_receipt)

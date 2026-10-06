@@ -979,7 +979,7 @@ func _contract_detail(offer: Dictionary) -> void:
 			job.add_child(title)
 	if endpoint_quote:
 		var rates:=HFlowContainer.new();rates.name="QuoteEndpointCompensation";rates.add_theme_constant_override("h_separation",16);body.add_child(rates)
-		for text in (["未封じ込め ¥%d / 分" % int(endpoint_terms.get("endpoint_uncontained_rate",100)), "業務誤停止 ¥%d / 分" % int(endpoint_terms.get("endpoint_stop_rate",50))] if business_quote else ["不審送信 ¥%d / 分" % ENDPOINT_ENGAGEMENT.SEND_RATE, "制作・入稿の停止 ¥%d / 分" % ENDPOINT_ENGAGEMENT.STOP_RATE]):
+		for text in (["未封じ込め ¥%d / 分" % int(endpoint_terms.get("endpoint_uncontained_rate",100)), "業務誤停止 ¥%d / 分" % int(endpoint_terms.get("endpoint_stop_rate",50))] if business_quote else ["不審送信 ¥%d / 分" % ENDPOINT_ENGAGEMENT.SEND_RATE, ("予約業務の停止" if int(endpoint_terms.get("hotel_workflow_version", 0)) == 2 else "制作・入稿の停止") + " ¥%d / 分" % ENDPOINT_ENGAGEMENT.STOP_RATE]):
 			var rate:=_label(text,13,INK);rate.autowrap_mode=TextServer.AUTOWRAP_OFF;rates.add_child(rate)
 	if not offer.unlocked:
 		var eligibility := _label(" / ".join(PackedStringArray(reasons)),14,WARNING)

@@ -3,12 +3,13 @@ extends RefCounted
 ## Customer follow-up work is earned by a new, verified delivery. This module
 ## never issues payment, changes eligibility, or reconstructs historical quality.
 const CATALOG := preload("res://scripts/case_catalog.gd")
+const HOTEL_HANDOFF := preload("res://scripts/hotel_handoff.gd")
 const FAMILIES := ["permissions", "backup", "network", "identity", "endpoint", "external_sharing"]
 const EVENT_LIMIT := 100
 
 static func ensure(state: Dictionary) -> void:
 	if not state.has("company_cycle"):
-		state.company_cycle = {"version":1,"leads":{},"events":[],"processed_deliveries":{},"completed_cases":{}}
+		state.company_cycle = {"version":1,"leads":{},"events":[],"processed_deliveries":{},"completed_cases":{},"hotel_recoveries":{}}
 
 static func _whole(value: Variant, minimum: int = 0) -> bool:
 	return (value is int or value is float) and is_finite(float(value)) and float(value) == floor(float(value)) and float(value) >= minimum
@@ -18,6 +19,7 @@ static func validate(value: Variant) -> bool:
 	if not value.get("leads", null) is Dictionary or not value.get("events", null) is Array or not value.get("processed_deliveries", null) is Dictionary: return false
 	for field in ["completed_cases", "earned_goals"]:
 		if value.has(field) and not value[field] is Dictionary: return false
+	if value.has("hotel_recoveries") and not value.hotel_recoveries is Dictionary: return false
 	for field in ["processed_deliveries", "completed_cases"]:
 		for key in value.get(field, {}):
 			if not key is String or key.is_empty() or not value[field][key] is bool: return false
@@ -45,6 +47,19 @@ static func validate(value: Variant) -> bool:
 	for key in value.get("earned_goals", {}):
 		var goal: Variant = value.earned_goals[key]
 		if not key is String or not goal is Dictionary or not _whole(goal.get("day", null), 1) or not goal.get("title", null) is String: return false
+	for source_id in value.get("hotel_recoveries", {}):
+		var recovery: Variant = value.hotel_recoveries[source_id]
+		if not source_id is String or source_id.is_empty() or not recovery is Dictionary: return false
+		for field in ["source_contract_id", "client", "case_id", "status", "accepted_contract_id"]:
+			if not recovery.get(field, null) is String: return false
+		if str(recovery.source_contract_id) != source_id or str(recovery.client) != HOTEL_HANDOFF.CLIENT or str(recovery.case_id) != HOTEL_HANDOFF.CASE_ID: return false
+		if str(recovery.status) not in ["pending", "working", "fulfilled"] or not recovery.get("handoff", null) is Dictionary or not HOTEL_HANDOFF.valid_handoff(recovery.handoff): return false
+		for field in ["source_day", "created_day", "available_day"]:
+			if not _whole(recovery.get(field, null), 1): return false
+		if int(recovery.available_day) <= int(recovery.source_day): return false
+		if str(recovery.status) == "working" and str(recovery.accepted_contract_id).is_empty(): return false
+		if str(recovery.status) == "fulfilled" and str(recovery.accepted_contract_id).is_empty(): return false
+		if recovery.has("fulfilled_day") and not _whole(recovery.fulfilled_day, 1): return false
 	return true
 
 static func _completed_cases(state: Dictionary) -> Dictionary:
@@ -69,7 +84,7 @@ static func _candidate(state: Dictionary, client: String, family: String, source
 	var choices: Array = []
 	for item in CATALOG.all():
 		if not item is Dictionary: continue
-		if str(item.get("client", "")) != client or bool(item.get("retired_from_new_offers", false)): continue
+		if str(item.get("client", "")) != client or bool(item.get("retired_from_new_offers", false)) or bool(item.get("hotel_recovery_only", false)): continue
 		var id := str(item.get("id", ""))
 		if id.is_empty() or id == source_id or completed.has(id): continue
 		if str(item.get("work_family", "")) == family: continue
@@ -115,6 +130,9 @@ static func record_delivery(game, contract_id: String, receipt: Dictionary) -> D
 	if not case_id.is_empty(): cycle.completed_cases[case_id] = true
 	var satisfaction := clampi(int(receipt.satisfaction_after), 0, 100)
 	var day := int(receipt.get("day", game.state.get("day", 1)))
+	if HOTEL_HANDOFF.is_case(case_id):
+		var hotel_result := record_hotel_recovery_delivery(game.state, contract_id, receipt)
+		return {"changed":true,"event":hotel_result.get("event", {}),"lead":{}}
 	var good := rating == "on_time" and satisfaction >= 40
 	var lead: Dictionary = cycle.leads.get(client, {})
 	if not lead.is_empty(): lead.last_outcome = {"contract_id":contract_id,"rating":rating,"satisfaction":satisfaction,"day":day}
@@ -131,6 +149,11 @@ static func record_delivery(game, contract_id: String, receipt: Dictionary) -> D
 				lead.status = "pending"
 				event = _event(cycle, "resumed", contract_id, client, str(lead.case_id), day, "期限内の納品と顧客満足の回復を受け、指名相談が再開しました。")
 			return {"changed":true,"event":event,"lead":lead.duplicate(true)}
+	# The hotel-specific follow-up is created at the next day boundary from the
+	# immutable delivered history and retained VM. Do not substitute a generic,
+	# unrelated service lead for this proof-bound handoff.
+	if not HOTEL_HANDOFF.capture_source(game.state, contract_id).is_empty():
+		return {"changed":true,"event":event,"lead":lead.duplicate(true)}
 	var source: Dictionary = CATALOG.by_id(case_id) if not case_id.is_empty() else {}
 	var candidate := _candidate(game.state, client, _source_family(game.state, source), case_id)
 	if candidate.is_empty(): return {"changed":true,"event":event,"lead":lead.duplicate(true)}
@@ -141,10 +164,92 @@ static func record_delivery(game, contract_id: String, receipt: Dictionary) -> D
 	event = _event(cycle, "requested" if good else "paused", contract_id, client, str(candidate.id), day, reason if good else "次の指名相談は保留中です。通常の依頼で納品と顧客との関係を改善できます。")
 	return {"changed":true,"event":event,"lead":lead.duplicate(true)}
 
+## Called by Game._make_offers only. Backfill is grounded in a completed
+## delivery row plus the retained source VM; rendering and loading stay pure.
+static func refresh_hotel_recoveries(state: Dictionary, day: int) -> bool:
+	if not validate(state.get("company_cycle", {})): return false
+	var cycle: Dictionary = state.company_cycle
+	if not cycle.has("hotel_recoveries") or not cycle.hotel_recoveries is Dictionary: cycle.hotel_recoveries = {}
+	var changed := false
+	for row in state.get("history", []):
+		if not row is Dictionary: continue
+		var source_id := str(row.get("id", ""))
+		if source_id.is_empty() or cycle.hotel_recoveries.has(source_id): continue
+		var source_day := int(row.get("day", 0))
+		if source_day < 1 or day <= source_day: continue
+		var handoff := HOTEL_HANDOFF.capture_source(state, source_id)
+		if handoff.is_empty(): continue
+		cycle.hotel_recoveries[source_id] = {"source_contract_id":source_id,"client":HOTEL_HANDOFF.CLIENT,"case_id":HOTEL_HANDOFF.CASE_ID,"source_day":source_day,"created_day":day,"available_day":source_day + 1,"status":"pending","accepted_contract_id":"","handoff":handoff.duplicate(true)}
+		_event(cycle, "hotel_recovery_requested", source_id, HOTEL_HANDOFF.CLIENT, HOTEL_HANDOFF.CASE_ID, day, "前回のF-204受付と証拠原本を確認し、予約端末の復旧相談を翌営業日に追加しました。")
+		changed = true
+	return changed
+
+static func hotel_recovery_records(state: Dictionary, day: int) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	var cycle: Variant = state.get("company_cycle", {})
+	if not validate(cycle): return result
+	var records: Dictionary = cycle.get("hotel_recoveries", {}) if cycle.get("hotel_recoveries", {}) is Dictionary else {}
+	var ids: Array = records.keys(); ids.sort()
+	for source_id in ids:
+		var record: Variant = records[source_id]
+		if not record is Dictionary: continue
+		var row: Dictionary = record.duplicate(true)
+		row.available = str(row.get("status", "")) == "pending" and int(row.get("available_day", 0)) <= day
+		row.waiting = str(row.get("status", "")) == "pending" and not bool(row.available)
+		result.append(row)
+	return result
+
+static func hotel_recovery_available(state: Dictionary, day: int) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	for record in hotel_recovery_records(state, day):
+		if bool(record.get("available", false)): result.append(record.duplicate(true))
+	return result
+
+static func mark_hotel_recovery_working(state: Dictionary, source_contract_id: String, accepted_contract_id: String, day: int) -> bool:
+	if not validate(state.get("company_cycle", {})) or accepted_contract_id.is_empty(): return false
+	var records: Dictionary = state.company_cycle.get("hotel_recoveries", {})
+	if not records.has(source_contract_id): return false
+	var record: Dictionary = records[source_contract_id]
+	if str(record.get("status", "")) != "pending" or int(record.get("available_day", 0)) > day or not HOTEL_HANDOFF.valid_handoff(record.get("handoff", {})): return false
+	record.status = "working"; record.accepted_contract_id = accepted_contract_id
+	return true
+
+static func record_hotel_recovery_delivery(state: Dictionary, contract_id: String, receipt: Dictionary) -> Dictionary:
+	var source_id := str(receipt.get("hotel_recovery_source_contract_id", state.get("contract", {}).get("hotel_recovery_source_contract_id", "")))
+	if source_id.is_empty(): return {"changed":false,"event":{}}
+	if not validate(state.get("company_cycle", {})): return {"changed":false,"event":{}}
+	var records: Dictionary = state.company_cycle.get("hotel_recoveries", {})
+	if not records.has(source_id): return {"changed":false,"event":{}}
+	var record: Dictionary = records[source_id]
+	if str(record.get("status", "")) != "working" or str(record.get("accepted_contract_id", "")) != contract_id or str(receipt.get("case_id", "")) != HOTEL_HANDOFF.CASE_ID: return {"changed":false,"event":{}}
+	var checks: Array = receipt.get("checks", []) if receipt.get("checks", []) is Array else []
+	if checks.is_empty() or not checks.all(func(row): return row is Dictionary and bool(row.get("passed", false))): return {"changed":false,"event":{}}
+	record.status = "fulfilled"; record.fulfilled_day = int(receipt.get("day", state.get("day", 1)))
+	var event := _event(state.company_cycle, "hotel_recovery_fulfilled", contract_id, HOTEL_HANDOFF.CLIENT, HOTEL_HANDOFF.CASE_ID, int(receipt.get("day", state.get("day", 1))), "予約端末の復旧と前回記録の引継ぎを納品しました。")
+	return {"changed":true,"event":event.duplicate(true)}
+
 static func record_cancellation(state: Dictionary, contract_id: String, receipt: Dictionary) -> bool:
 	ensure(state)
 	if contract_id.is_empty() or str(receipt.get("kind", "")) != "cancellation" or not validate(state.company_cycle): return false
 	var cycle: Dictionary = state.company_cycle
+	# Keep the proof-bound source archive and release the accepted recovery for a
+	# fresh next-day quote. This must not pause or overwrite the generic lead.
+	var hotel_source := str(receipt.get("hotel_recovery_source_contract_id", state.get("contract", {}).get("hotel_recovery_source_contract_id", "")))
+	var hotel_records: Dictionary = cycle.get("hotel_recoveries", {})
+	if hotel_source.is_empty():
+		for source_key in hotel_records:
+			var candidate: Variant = hotel_records[source_key]
+			if candidate is Dictionary and str(candidate.get("status", "")) == "working" and str(candidate.get("accepted_contract_id", "")) == contract_id:
+				hotel_source = str(source_key)
+				break
+	if not hotel_source.is_empty() and hotel_records.has(hotel_source):
+		var hotel_record: Dictionary = hotel_records[hotel_source]
+		if str(hotel_record.get("status", "")) == "working" and str(hotel_record.get("accepted_contract_id", "")) == contract_id:
+			hotel_record.status = "pending"
+			hotel_record.available_day = int(receipt.get("day", state.get("day", 1))) + 1
+			hotel_record.accepted_contract_id = ""
+			_event(cycle, "hotel_recovery_cancelled", contract_id, HOTEL_HANDOFF.CLIENT, HOTEL_HANDOFF.CASE_ID, int(receipt.get("day", state.get("day", 1))), "予約端末の復旧案件を中止しました。引継ぎ元を保全し、翌営業日に再見積できます。")
+			return true
 	var client := str(receipt.get("client", ""))
 	if client.is_empty(): return true
 	var lead: Dictionary = cycle.leads.get(client, {})
@@ -204,6 +309,18 @@ static func recovery_work(state: Dictionary, offers: Array, blocked_cases: Array
 			if int(a.get("required_level", 1)) != int(b.get("required_level", 1)): return int(a.get("required_level", 1)) < int(b.get("required_level", 1))
 			return str(a.case_id) < str(b.case_id))
 		if not eligible.is_empty(): chosen[str(client)] = eligible[0].duplicate(true)
+	# A hotel recovery is an independently earned opportunity, not the generic
+	# one-per-client relationship lead. Keep it under a source-specific key so
+	# both can coexist without overwriting that lead.
+	for recovery in hotel_recovery_available(state, int(state.get("day", 1))):
+		var source_id := str(recovery.get("source_contract_id", ""))
+		for offer in offers:
+			if not offer is Dictionary or str(offer.get("case_id", "")) != HOTEL_HANDOFF.CASE_ID or str(offer.get("client", "")) != HOTEL_HANDOFF.CLIENT: continue
+			if offer.has("hotel_recovery_source_contract_id") and str(offer.hotel_recovery_source_contract_id) != source_id: continue
+			var selected: Dictionary = offer.duplicate(true)
+			selected.hotel_recovery_source_contract_id = source_id
+			chosen["hotel:" + source_id] = selected
+			break
 	return chosen
 
 static func view(game) -> Dictionary:
@@ -259,4 +376,83 @@ static func view(game) -> Dictionary:
 			lead.recovery_goal = "この顧客への期限内納品と顧客満足度40以上で指名相談を再開します。" + next_step
 			recoveries.append({"client":str(client),"case_id":str(lead.case_id),"goal":str(lead.recovery_goal),"recovery_case_id":str(lead.recovery_case_id),"recovery_offer_id":str(lead.recovery_offer_id),"status":str(lead.recovery_status),"required_level":int(lead.required_level),"required_skills":lead.required_skills.duplicate(true),"satisfaction":int(game.state.get("customer_relations", {}).get(client, {}).get("satisfaction", lead.get("source_satisfaction", 0)))})
 		leads.append(lead)
-	return {"leads":leads,"events":cycle.get("events", []).duplicate(true),"relationship_recovery":recoveries}
+	# One current hotel recovery shares the existing client row. This projection
+	# never changes the saved generic lead; after today's fulfillment expires,
+	# that original relationship entry becomes visible again.
+	var day := int(game.state.get("day", 1))
+	for hotel in hotel_recovery_records(game.state, day):
+		var hotel_status := str(hotel.get("status", ""))
+		var fulfilled_today := hotel_status == "fulfilled" and int(hotel.get("fulfilled_day", 0)) == day
+		if hotel_status == "fulfilled" and not fulfilled_today: continue
+		if hotel_status not in ["pending", "working", "fulfilled"]: continue
+		var source_id := str(hotel.get("source_contract_id", ""))
+		var source_row: Dictionary = {}
+		for history_row in game.state.get("history", []):
+			if history_row is Dictionary and str(history_row.get("id", "")) == source_id:
+				source_row = history_row
+				break
+		var projected_id := "hotel-recovery:" + source_id
+		var recovery_lead: Dictionary = {
+			"id":projected_id,
+			"client":HOTEL_HANDOFF.CLIENT,
+			"case_id":HOTEL_HANDOFF.CASE_ID,
+			"title":"白波ホテル 予約端末の復旧と次便取込",
+			"work_family":"hotel_reservation_recovery",
+			"source_contract_id":source_id,
+			"source_case_id":HOTEL_HANDOFF.SOURCE_CASE_ID,
+			"source_title":str(source_row.get("title", "前回の予約端末隔離")),
+			"source_day":int(hotel.get("source_day", 0)),
+			"source_rating":str(source_row.get("rating", "")),
+			"source_satisfaction":int(source_row.get("satisfaction_after", -1)),
+			"reason":"前回のF-204受付記録と証拠原本を確認し、予約端末の復旧相談が届きました。",
+			"required_level":5,
+			"required_skills":{"response":2},
+			"hotel_recovery_status":hotel_status,
+			"hotel_recovery_stage":"completed" if fulfilled_today else ("working" if hotel_status == "working" else ("ready" if bool(hotel.get("available", false)) else "waiting")),
+			"market_available":false,
+			"offer_id":"",
+			"reasons":[],
+			"locked_reason":"",
+			"last_outcome":{"satisfaction":int(game.state.get("customer_relations", {}).get(HOTEL_HANDOFF.CLIENT, {}).get("satisfaction", -1)),"day":day}
+		}
+		if fulfilled_today:
+			recovery_lead.status = "fulfilled"
+			recovery_lead.route_state = "fulfilled"
+		elif hotel_status == "working":
+			recovery_lead.status = "paused"
+			recovery_lead.recovery_status = "working"
+			recovery_lead.recovery_working_id = str(hotel.get("accepted_contract_id", ""))
+			var working_context: Dictionary = game.state.get("contract_contexts", {}).get(str(recovery_lead.recovery_working_id), {})
+			recovery_lead.recovery_working_title = str(working_context.get("contract", {}).get("title", recovery_lead.title))
+			recovery_lead.recovery_offer_id = ""
+			recovery_lead.recovery_offer = {}
+		elif bool(hotel.get("available", false)):
+			var recovery_offer: Dictionary = {}
+			for offer in game.state.get("offers", []):
+				if offer is Dictionary and HOTEL_HANDOFF.is_case(str(offer.get("case_id", ""))) and str(offer.get("hotel_recovery_source_contract_id", "")) == source_id:
+					recovery_offer = offer
+					break
+			if recovery_offer.is_empty():
+				recovery_lead.status = "locked"
+				recovery_lead.locked_reason = "翌日の相談枠がまだ提示されていません。"
+			else:
+				recovery_lead.id = str(recovery_offer.get("id", projected_id))
+				recovery_lead.offer_id = recovery_lead.id
+				recovery_lead.market_available = bool(recovery_offer.get("market_available", false))
+				recovery_lead.status = "ready" if recovery_lead.market_available else "locked"
+				recovery_lead.reasons = _eligibility(game, recovery_lead)
+				recovery_lead.locked_reason = " / ".join(recovery_lead.reasons) if not recovery_lead.reasons.is_empty() else "今日の相談枠は提示済みです。"
+				recovery_lead.recovery_status = "available"
+				recovery_lead.recovery_offer_id = recovery_lead.id
+				recovery_lead.recovery_offer = recovery_offer.duplicate(true)
+		else:
+			recovery_lead.status = "locked"
+			recovery_lead.locked_reason = "翌営業日に予約端末の復旧相談を受注できます。"
+		var replaced := false
+		for index in leads.size():
+			if str(leads[index].get("client", "")) == HOTEL_HANDOFF.CLIENT:
+				leads[index] = recovery_lead
+				replaced = true
+				break
+		if not replaced: leads.append(recovery_lead)
+	return {"leads":leads,"events":cycle.get("events", []).duplicate(true),"relationship_recovery":recoveries,"hotel_recoveries":hotel_recovery_records(game.state, int(game.state.get("day", 1)))}

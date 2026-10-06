@@ -280,7 +280,7 @@ static func _route(d, parent: Node, snap: Dictionary) -> void:
 	elif bool(snap.get("isolated", false)): state = "現在: PC-Bに隔離を適用中"
 	_label(d, parent, state, 12, RED if bool(snap.get("isolated", false)) else MUTED).name = "HotelCurrentConnection"
 
-static func _receipt(d, parent: Node, snap: Dictionary, room: Dictionary, folio: Dictionary) -> PanelContainer:
+static func _receipt(d, parent: Node, snap: Dictionary, room: Dictionary, folio: Dictionary, archive: bool = false) -> PanelContainer:
 	var factor := _scale(d)
 	var sheet := ReceiptPaper.new()
 	sheet.factor = factor
@@ -350,6 +350,7 @@ static func _receipt(d, parent: Node, snap: Dictionary, room: Dictionary, folio:
 	stamp.name = "HotelFolioStamp"
 	stamp.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	if not received and not attempt.is_empty(): _label(d, body, "前回の送信結果 / 精算票は保持しています", 11, MUTED)
+	if archive: return sheet
 	_rule(body)
 	_route(d, body, snap)
 	var actions := HFlowContainer.new()
@@ -370,6 +371,213 @@ static func _layout(d, root: Control, split: BoxContainer, rack: Control, sheet:
 	var grid := rack.find_child("HotelRoomGrid", true, false) as GridContainer
 	if grid != null: grid.columns = 1 if rack.size.x / _scale(d) < 292 else 2
 
+static func _select_tab(d, tab: String) -> void:
+	d.business_ui["hotel_tab"] = tab
+	d._save_session(false)
+	d._render_hotel_frontdesk()
+
+static func _reservation_attempt(d, reservation: Dictionary) -> Dictionary:
+	var id := str(reservation.get("id", ""))
+	var feedback: Dictionary = d.business_ui.get("hotel_action_feedback", {})
+	if str(feedback.get("folio_id", "")) == id: return feedback.get("result", {})
+	var last: Dictionary = reservation.get("last_attempt", {})
+	return last if str(last.get("id", "")) == id else {}
+
+static func _reservation_error(code: int) -> String:
+	match code:
+		403: return "× 取込拒否\nHTTP 403"
+		503: return "× 取込先を利用できません\nHTTP 503"
+		507: return "× 保存できません\nHTTP 507"
+		422: return "× 予約データを読み取れません\nHTTP 422"
+		409: return "× 取り込めません\nHTTP 409"
+	return "× 取込未完了" + ("\nHTTP %d" % code if code > 0 else "")
+
+static func _show_reservation_ticket(d) -> void:
+	var ticket: Control = d.widgets.browser.page.find_child("HotelReservationTicket", true, false)
+	if ticket == null: return
+	var scroll: Node = ticket.get_parent()
+	while scroll != null and not scroll is ScrollContainer: scroll = scroll.get_parent()
+	if scroll is ScrollContainer: scroll.ensure_control_visible(ticket)
+
+static func _calendar(d, parent: Node, snap: Dictionary, reservation: Dictionary) -> VBoxContainer:
+	var factor := _scale(d)
+	var calendar := VBoxContainer.new()
+	calendar.name = "HotelReservationCalendar"
+	calendar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	calendar.size_flags_stretch_ratio = 1.2
+	calendar.add_theme_constant_override("separation", roundi(10 * factor))
+	parent.add_child(calendar)
+	_label(d, calendar, "2F / 予約台帳", 15, TEAL, 600)
+	var grid := GridContainer.new()
+	grid.columns = 4
+	grid.add_theme_constant_override("h_separation", 0)
+	grid.add_theme_constant_override("v_separation", 0)
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	calendar.add_child(grid)
+	var arrival := int(reservation.get("arrival_day", 0))
+	var nights := maxi(1, int(reservation.get("nights", 1)))
+	var days := [arrival - 1, arrival, arrival + nights]
+	for heading in ["客室", "営業日 %d" % days[0], "営業日 %d" % days[1], "営業日 %d" % days[2]]:
+		var cell := _calendar_cell(d, grid, true)
+		var text := _label(d, cell, heading, 11, PAPER, 500)
+		text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	for room in snap.get("rooms", []):
+		var room_id := _room_id(room)
+		var number := _calendar_cell(d, grid)
+		number.custom_minimum_size.x = 44 * factor
+		var room_label := _label(d, number, room_id, 15, TEAL, 600)
+		room_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		room_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		for day in days:
+			var occupied := str(reservation.get("status", "")) == "imported" and room_id == str(reservation.get("room", "")) and int(day) == arrival
+			if occupied:
+				var booking := _button(d, grid, "", "HotelReservationCell_" + room_id, func(): _show_reservation_ticket(d))
+				booking.custom_minimum_size = Vector2(78, 58) * factor
+				booking.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+				booking.tooltip_text = "%s · %s" % [str(reservation.get("id", "")), str(reservation.get("bookingno", ""))]
+				var selected := UI.style(SELECTED, TEAL, 6, 6, 0)
+				selected.border_width_left = 4
+				booking.add_theme_stylebox_override("normal", selected)
+				var inset := MarginContainer.new()
+				inset.mouse_filter = Control.MOUSE_FILTER_IGNORE
+				booking.add_child(inset)
+				inset.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+				for side in ["left", "right", "top", "bottom"]: inset.add_theme_constant_override("margin_" + side, roundi(6 * factor))
+				var booked := _label(d, inset, "%s\n✓ %d泊 →" % [str(reservation.get("guest", "")), nights], 12, TEAL, 500)
+				booked.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+				booked.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			else:
+				var cell := _calendar_cell(d, grid)
+				cell.custom_minimum_size = Vector2(78, 58) * factor
+				var empty := _label(d, cell, "—", 13, LINE)
+				empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+				empty.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	return calendar
+
+static func _calendar_cell(d, parent: Node, heading: bool = false) -> PanelContainer:
+	var cell := PanelContainer.new()
+	cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cell.add_theme_stylebox_override("panel", UI.style(TEAL if heading else PAPER, LINE, roundi(6 * _scale(d)), roundi(8 * _scale(d)), 0))
+	parent.add_child(cell)
+	return cell
+
+static func _reservation_route(d, parent: Node, reservation: Dictionary) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", roundi(10 * _scale(d)))
+	parent.add_child(row)
+	var left := _label(d, row, "PC-A", 13, TEAL, 600)
+	left.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	left.autowrap_mode = TextServer.AUTOWRAP_OFF
+	var route := Route.new()
+	route.factor = _scale(d)
+	route.blocked = bool(reservation.get("isolated", false))
+	route.disconnected = not bool(reservation.get("connected", false)) or not bool(reservation.get("business_available", false))
+	route.custom_minimum_size = Vector2(50, 24) * _scale(d)
+	route.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(route)
+	var right := _label(d, row, "予約台帳", 13, TEAL, 600)
+	right.size_flags_horizontal = Control.SIZE_SHRINK_END
+	right.autowrap_mode = TextServer.AUTOWRAP_OFF
+	var state := "現在: PC-A接続中 / 業務ファイル利用可"
+	if not bool(reservation.get("connected", false)): state = "現在: 顧客環境に未接続"
+	elif bool(reservation.get("isolated", false)): state = "現在: PC-Aに隔離を適用中"
+	elif not bool(reservation.get("business_available", false)): state = "現在: 業務ファイルを利用できません"
+	_label(d, parent, state, 12, RED if route.blocked or route.disconnected else MUTED).name = "HotelReservationCurrentState"
+
+static func _reservation_ticket(d, parent: Node, reservation: Dictionary) -> VBoxContainer:
+	var factor := _scale(d)
+	var imported := str(reservation.get("status", "")) == "imported"
+	var tray := VBoxContainer.new()
+	tray.name = "HotelReservationTray"
+	tray.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tray.size_flags_stretch_ratio = 1.0
+	tray.add_theme_constant_override("separation", roundi(10 * factor))
+	parent.add_child(tray)
+	_label(d, tray, "受信トレイ · %d件" % (0 if imported else 1), 15, TEAL, 600).name = "HotelReservationInboxCount"
+	var sheet := ReceiptPaper.new()
+	sheet.name = "HotelReservationTicket"
+	sheet.factor = factor
+	sheet.add_theme_stylebox_override("panel", UI.style(Color.TRANSPARENT, Color.TRANSPARENT, roundi(18 * factor), roundi(19 * factor), 0))
+	tray.add_child(sheet)
+	var body := VBoxContainer.new()
+	body.add_theme_constant_override("separation", roundi(8 * factor))
+	sheet.add_child(body)
+	_label(d, body, "同期控え" if imported else "未同期の予約票", 18, TEAL, 600)
+	_label(d, body, str(reservation.get("id", "")), 12, MUTED).name = "HotelReservationId"
+	_rule(body)
+	_label(d, body, "%s号室   %s" % [str(reservation.get("room", "")), str(reservation.get("guest", ""))], 19, TEAL, 600)
+	var arrival := int(reservation.get("arrival_day", 0))
+	var nights := int(reservation.get("nights", 1))
+	_label(d, body, "営業日 %d → %d  /  %d泊" % [arrival, arrival + nights, nights], 14)
+	var attempt := _reservation_attempt(d, reservation)
+	var stamp_text := "未同期"
+	var stamp_color := MUTED
+	if imported:
+		stamp_text = "✓ 同期済み\n" + str(reservation.get("bookingno", ""))
+		stamp_color = GREEN
+	elif not attempt.is_empty():
+		stamp_text = _reservation_error(int(attempt.get("code", 0)))
+		stamp_color = RED
+	var seal := ResultSeal.new()
+	seal.factor = factor
+	seal.ink = stamp_color
+	seal.attempted = imported or not attempt.is_empty()
+	seal.add_theme_stylebox_override("panel", UI.style(Color.TRANSPARENT, Color.TRANSPARENT, roundi(12 * factor), roundi(8 * factor), 0))
+	body.add_child(seal)
+	var stamp := _label(d, seal, stamp_text, 14, stamp_color, 600)
+	stamp.name = "HotelReservationStamp"
+	stamp.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	if not imported and not attempt.is_empty(): _label(d, body, "前回の取込結果 / 予約票を保持", 11, MUTED)
+	_rule(body)
+	_reservation_route(d, body, reservation)
+	var actions := HFlowContainer.new()
+	actions.add_theme_constant_override("h_separation", roundi(8 * factor))
+	actions.add_theme_constant_override("v_separation", roundi(7 * factor))
+	body.add_child(actions)
+	var submit := _button(d, actions, "✓ 同期済み" if imported else ("同じ予約を再試行" if not attempt.is_empty() else "予約を取り込む"), "HotelImportReservation", func(): _send(d, str(reservation.get("id", ""))), true)
+	submit.disabled = imported or not bool(reservation.get("can_send", false))
+	_button(d, actions, "PC-AをEDRで確認", "HotelOpenEndpoint", func(): d._open_endpoint_device("pc_a"))
+	return tray
+
+static func _reservation_layout(d, root: Control, split: BoxContainer, tray: Control) -> void:
+	if not is_instance_valid(root) or not is_instance_valid(split): return
+	var narrow := root.size.x / _scale(d) < 850
+	split.vertical = narrow
+	split.move_child(tray, 0 if narrow else 1)
+
+static func _recovery_view(d, body: Node, root: Control, snap: Dictionary) -> void:
+	var tab := str(d.business_ui.get("hotel_tab", "reservations"))
+	var tabs := HFlowContainer.new()
+	tabs.add_theme_constant_override("h_separation", roundi(8 * _scale(d)))
+	tabs.add_theme_constant_override("v_separation", roundi(6 * _scale(d)))
+	body.add_child(tabs)
+	_button(d, tabs, "予約台帳", "HotelTabReservations", func(): _select_tab(d, "reservations"), tab != "folios")
+	_button(d, tabs, "精算控え", "HotelTabFolios", func(): _select_tab(d, "folios"), tab == "folios")
+	if tab == "folios":
+		var folio: Dictionary = {}
+		var room: Dictionary = {}
+		for entry in snap.get("folios", []):
+			if str(entry.get("id", "")) == "F-204": folio = entry
+		for entry in snap.get("rooms", []):
+			if _room_id(entry) == str(folio.get("room", "")): room = entry
+		if folio.is_empty(): _label(d, body, "精算控えを読み取れません", 15, RED)
+		else: _receipt(d, body, snap, room, folio, true)
+		return
+	var reservation: Dictionary = snap.get("reservation", {})
+	if not bool(reservation.get("enabled", false)) or str(reservation.get("id", "")).is_empty() or not str(reservation.get("error", "")).is_empty():
+		_label(d, body, "× 予約データを読み取れません", 17, RED, 600)
+		_button(d, body, "PC-AをEDRで確認", "HotelOpenEndpoint", func(): d._open_endpoint_device("pc_a"))
+		return
+	var split := BoxContainer.new()
+	split.name = "HotelReservationSplit"
+	split.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	split.add_theme_constant_override("separation", roundi(22 * _scale(d)))
+	body.add_child(split)
+	_calendar(d, split, snap, reservation)
+	var tray := _reservation_ticket(d, split, reservation)
+	root.resized.connect(func(): _reservation_layout(d, root, split, tray))
+	_reservation_layout.call_deferred(d, root, split, tray)
+
 static func render(d, page: Node) -> void:
 	var snap: Dictionary = d.game.hotel_snapshot()
 	var factor := _scale(d)
@@ -387,6 +595,9 @@ static func render(d, page: Node) -> void:
 	if not bool(snap.get("enabled", false)):
 		_label(d, body, "この案件にはフロント端末の接続先がありません。", 14, MUTED)
 		_button(d, body, "EDRへ戻る", "HotelOpenEndpoint", func(): d._open_endpoint_device("pc_b"))
+		return
+	if int(snap.get("workflow_version", 1)) == 2:
+		_recovery_view(d, body, root, snap)
 		return
 	var rooms: Array = snap.get("rooms", [])
 	var folios: Array = snap.get("folios", [])

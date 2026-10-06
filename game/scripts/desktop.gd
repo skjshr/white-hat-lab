@@ -1760,7 +1760,7 @@ func _edr_console_url(value: String) -> bool:
 	return _edr_v2() and value.get_slice("#",0).get_slice("?",0).trim_suffix("/") == EDR_URL.trim_suffix("/")
 
 func _hotel_enabled() -> bool:
-	return game != null and bool(game.state.get("accepted", false)) and game._current_chapter() == 4 and int(game._scenario().get("hotel_workflow_version", 0)) == 1
+	return game != null and bool(game.state.get("accepted", false)) and game._current_chapter() == 4 and int(game._scenario().get("hotel_workflow_version", 0)) in [1, 2]
 
 func _hotel_url(value: String) -> bool:
 	return _hotel_enabled() and value.get_slice("#", 0).get_slice("?", 0).trim_suffix("/") == HOTEL_URL.trim_suffix("/")
@@ -1774,6 +1774,8 @@ func _open_endpoint_device(device_id: String) -> void:
 	if device_id not in ["pc_a", "pc_b"]: return
 	edr_ui.view = "devices"
 	edr_ui.device = device_id
+	edr_ui.erase("file_id")
+	edr_ui["details_open"] = true
 	show_guide_service(EDR_URL)
 	_render_endpoint()
 	_browser_scroll_top()

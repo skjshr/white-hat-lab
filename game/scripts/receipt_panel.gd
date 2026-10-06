@@ -57,7 +57,11 @@ static func render(d, body: VBoxContainer, receipt: Dictionary, first_view: bool
 		_invoice(d, evaluation, receipt, sales, "ReceiptOutcome")
 		for site in receipt.get("hotel_workflow", {}).get("sites", []):
 			if str(site.get("status", "")) != "received": continue
-			var accepted := _text(d, "✓ %s号室 · 精算受付 %s · 残高 %s" % [str(site.get("room", "")), str(site.get("receipt", {}).get("number", "")), _yen(int(site.get("balance", 0)))], 14, UI.INK)
+			var caption := "✓ %s号室 · 精算受付 %s · 残高 %s" % [str(site.get("room", "")), str(site.get("receipt", {}).get("number", "")), _yen(int(site.get("balance", 0)))]
+			if int(site.get("workflow_version", 1)) == 2:
+				var reservation: Dictionary = site.get("reservation", {})
+				caption = "✓ %s号室 · DAY %02d到着 · 予約 %s\n精算控え %s · 引継ぎ済" % [str(reservation.get("room", "")), int(reservation.get("arrival_day", 0)), str(reservation.get("bookingno", "")), str(site.get("receipt", {}).get("number", ""))]
+			var accepted := _text(d, caption, 14, UI.INK)
 			accepted.name = "ReceiptHotelAccepted"
 			evaluation.add_child(accepted)
 		_outcomes(d, evaluation, receipt)

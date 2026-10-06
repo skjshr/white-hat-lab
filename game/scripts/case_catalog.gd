@@ -2,6 +2,7 @@ class_name CaseCatalog
 extends RefCounted
 const DISPLAY_COPY = preload("res://scripts/ui_theme.gd")
 const PROFESSIONAL_CONTRACTS = preload("res://scripts/professional_contracts.gd")
+const HOTEL_HANDOFF = preload("res://scripts/hotel_handoff.gd")
 ## Definitions remain addressable for old saves and linked composite targets, but
 ## these simple/repetitive cases are no longer generated as fresh market leads.
 const RETIRED_NEW_OFFER_IDS := {
@@ -33,6 +34,7 @@ const RETIRED_NEW_OFFER_IDS := {
 	"service-4-case-5": true,
 	"service-5-case-4": true,
 	"service-5-case-5": true,
+	"hotel-reservation-recovery": true,
 }
 ## Authored operational contracts. Each profile has a distinct initial state / requirement pair.
 static var _catalog: Array = []
@@ -107,6 +109,7 @@ static func all() -> Array:
 	_add_composite("composite-former-access","退職者IDによる不正アクセス","退職処理後も以前のセッションと公開共有が残り、取引先資料への不要な経路が疑われています。利用者の業務を止めずにアクセス経路を調査し、終了後の利用を再確認してください。",3,5,10000,[{"chapter":3,"case_id":"service-3-case-1","name":"ID管理"},{"chapter":5,"case_id":"service-5-case-2","name":"公開共有"}])
 	_add_composite("composite-corruption-response","不審通信とデータ破損","不審端末の通信と会計台帳の破損が報告されました。端末の隔離、証拠保全、データ復元、管理経路の確認を順に行ってください。",4,7,16000,[{"chapter":4,"case_id":"service-4-case-1","name":"調査対象PC"},{"chapter":1,"case_id":"service-1-case-3","name":"会計台帳"},{"chapter":2,"case_id":"service-2-case-2","name":"管理ゲートウェイ"}])
 	_add_endpoint_recovery()
+	_catalog.append(HOTEL_HANDOFF.catalog_definition(_catalog.back()))
 	_add_advanced_cases()
 	PROFESSIONAL_CONTRACTS.append_to(_catalog)
 	_ensure_metadata()
@@ -116,7 +119,7 @@ static func _ensure_metadata() -> void:
 	for item in _catalog:
 		if not item is Dictionary: continue
 		var id := str(item.get("id", "")); var category := str(item.get("category", "operations")); var tier := int(item.get("tier", 1)); var chapter := int(item.get("chapter", 0))
-		item.retired_from_new_offers = RETIRED_NEW_OFFER_IDS.has(id)
+		item.retired_from_new_offers = RETIRED_NEW_OFFER_IDS.has(id) or bool(item.get("hotel_recovery_only", false))
 		var family := str(item.get("work_family", ""))
 		if family.is_empty():
 			if id == "endpoint-recovery": family = "endpoint_recovery"

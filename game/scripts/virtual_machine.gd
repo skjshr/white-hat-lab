@@ -7,6 +7,7 @@ const PortalStorage = preload("res://scripts/portal_storage.gd")
 const FirewallPolicy = preload("res://scripts/firewall_policy.gd")
 const BusinessWorkspace = preload("res://scripts/business_workspace.gd")
 const HotelFrontdesk = preload("res://scripts/hotel_frontdesk_model.gd")
+const HotelRecovery = preload("res://scripts/hotel_recovery.gd")
 const BackupAuthorization = preload("res://scripts/backup_authorization.gd")
 ## Deterministic guest operating system. Files and service state are local game data.
 const PATHS := ["/etc/samba/smb.conf","/etc/restic/backup.conf","/etc/firewall/rules.conf","/etc/identity/users.conf","/etc/edr/policy.conf","/etc/share/portal.conf"]
@@ -2040,7 +2041,11 @@ func _evaluate_scenario() -> Array[bool]:
 			var status: Dictionary = EndpointRemediation.status(state,device)
 			business_ok = business_ok and str(state.applied.get(device,"")) == "connected" and bool(status.get("business_available",false))
 			clean = clean and int(status.get("threat_count",-1)) == 0 and bool(status.get("scan_current",false)) and bool(status.get("scan_clean",false))
-		return [business_ok,clean,bool(_edr_evidence_status().get("valid",false)) and state.applied.get("logs","") == "keep" and state.applied.get("reset","") == "wait"]
+		var recovery_result: Array[bool] = [business_ok,clean,bool(_edr_evidence_status().get("valid",false)) and state.applied.get("logs","") == "keep" and state.applied.get("reset","") == "wait"]
+		if HotelRecovery.enabled(state):
+			recovery_result.append(HotelRecovery.accepted(state))
+			recovery_result.append(HotelFrontdesk.accepted(state) and HotelRecovery.preserved(state))
+		return recovery_result
 	var desired: Dictionary = scenario.get("desired", {})
 	var result: Array[bool] = []
 	var desired_keys: Array = desired.keys()

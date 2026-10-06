@@ -29,6 +29,11 @@ static func project(state: Dictionary, record: Dictionary) -> Dictionary:
 		if str(reply.case_id) == "service-0-case-0" and bool(reply.report_write_confirmed): reply.body = "日報の保存を確認しました。締めの作業を再開します。"
 		for site in own.get("hotel_workflow", {}).get("sites", []):
 			if str(site.get("status", "")) != "received": continue
+			if int(site.get("workflow_version", 1)) == 2:
+				var reservation: Dictionary = site.get("reservation", {})
+				if str(reservation.get("status", "")) == "imported":
+					reply.body = "予約端末が復旧し、DAY %02d到着の%s様の予約が台帳に入りました。予約番号 %s。\n前回の精算控え %s と証拠原本も引き継げています。" % [int(reservation.get("arrival_day", 0)), str(reservation.get("guest", "")), str(reservation.get("bookingno", "")), str(site.get("receipt", {}).get("number", ""))]
+				continue
 			reply.body = "%s号室の精算票を受け取りました。受付番号 %s、残高は0円です。" % [str(site.get("room", "")), str(site.get("receipt", {}).get("number", ""))]
 			if bool(site.get("reservation_isolated", false)): reply.body += "\n予約端末PC-Aは隔離したまま、後続の調査担当へ引き継ぎます。"
 		if str(reply.rating) == "late": reply.body += "\nただ、予定していた時刻を超えてしまいました。"

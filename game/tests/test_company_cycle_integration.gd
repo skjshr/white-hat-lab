@@ -173,10 +173,16 @@ func low_trust_observation() -> void:
 	var next := find_offer("service-4-case-2")
 	print("RECOVERY_REMAINING next_case=", next.get("case_id", ""), " required_level=", next.get("required_level", 0), " required_skills=", next.get("required_skills", {}), " company_level=", game.company_level().level, " skills=", game.state.skills)
 	var feedback: Array = game.company_cycle_view().get("relationship_recovery", [])
-	check(not feedback.is_empty() and str(feedback[0].get("status", "")) == "locked", "recovery accurately reports the next same-customer work is not yet eligible")
-	if not feedback.is_empty():
-		check(str(feedback[0].get("goal", "")).contains(str(next.get("title", ""))) and str(feedback[0].get("goal", "")).contains("会社Lv.5") and str(feedback[0].get("goal", "")).contains("事故対応スキル2"), "recovery names the authored next job and its real level and skill requirements")
-		check(str(feedback[0].get("goal", "")).contains("ほかの依頼"), "recovery points honestly to preparation through other actual jobs")
+	if int(game.state.customer_relations["つばさ文具"].satisfaction) >= 40:
+		# Successful paid jobs can restore trust within this window. The next
+		# specialty must still require training after that real recovery.
+		var opportunities: Array = game.company_cycle_view().get("opportunities", []).filter(func(item): return str(item.get("client", "")) == "つばさ文具")
+		check(not opportunities.is_empty() and str(opportunities[0].get("status", "")) == "locked" and str(opportunities[0].get("locked_reason", "")).contains("事故対応スキル2"), "restored trust does not bypass the next consultation's required specialty")
+	else:
+		check(not feedback.is_empty() and str(feedback[0].get("status", "")) == "locked", "recovery accurately reports the next same-customer work is not yet eligible")
+		if not feedback.is_empty():
+			check(str(feedback[0].get("goal", "")).contains(str(next.get("title", ""))) and str(feedback[0].get("goal", "")).contains("事故対応スキル2"), "recovery names the authored next job and its real skill requirement")
+			check(str(feedback[0].get("goal", "")).contains("ほかの依頼"), "recovery points honestly to preparation through other actual jobs")
 	check(game.state.offers.any(func(offer): return str(offer.get("id", "")) not in game.state.completed_ids and bool(offer.get("market_available", false)) and bool(offer.get("unlocked", false))), "other real eligible work remains for company growth while relationship recovery waits")
 
 func malformed_save_boundaries() -> void:

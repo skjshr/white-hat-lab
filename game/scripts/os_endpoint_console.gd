@@ -184,14 +184,41 @@ static func _business_probe(d, selected: String) -> void:
 	if d.widgets.has("verify"): d._refresh_checks()
 	d._render_endpoint()
 
+static func _hotel_recovery(d) -> bool:
+	return d._hotel_enabled() and int(d.game._scenario().get("hotel_workflow_version", 0)) == 2
+
+static func _hotel_business(d, device_id: String) -> Dictionary:
+	if not d._hotel_enabled(): return {}
+	var recovery := _hotel_recovery(d)
+	if device_id != ("pc_a" if recovery else "pc_b"): return {}
+	var hotel: Dictionary = d.game.hotel_snapshot()
+	if recovery:
+		var reservation: Dictionary = hotel.get("reservation", {})
+		var caption := "! 予約票を確認"
+		if bool(reservation.get("enabled", false)) and str(reservation.get("error", "")).is_empty():
+			if str(reservation.get("status", "")) == "imported":
+				caption = "✓ 同期済み\n" + str(reservation.get("bookingno", ""))
+			elif str(reservation.get("status", "")) == "pending": caption = "未同期 1件"
+		return {"label":caption,"opens_app":true,"tooltip":"白波フロントで予約台帳を開く","button":"予約台帳を開く","glyph":"ledger"}
+	var folios: Array = hotel.get("folios", [])
+	var pending := folios.filter(func(item): return str(item.get("status", "")) != "received").size()
+	return {"label":"✓ 受付済み" if pending == 0 and not folios.is_empty() else "未送信 %d件" % pending if not folios.is_empty() else "! 伝票を確認", "opens_app":true, "tooltip":"白波フロントで精算票を開く","button":"白波フロントを開く","glyph":"receipt"}
+
+static func _open_hotel(d) -> void:
+	if _hotel_recovery(d): d.business_ui["hotel_tab"] = "reservations"
+	d._open_hotel_frontdesk()
+
 static func _normal_use(d, body: VBoxContainer, state: Dictionary, snap: Dictionary, selected: String) -> void:
 	var panel := frame(body, Color("f5f8fa"))
 	panel.name = "EdrBusinessVerification"
 	var controls := HFlowContainer.new(); controls.add_theme_constant_override("h_separation", 8); panel.add_child(controls)
-	if selected == "pc_b" and d._hotel_enabled():
-		button(d, controls, "白波フロントを開く", "EdrOpenHotel", func(): d._open_hotel_frontdesk())
+	var hotel: Dictionary = _hotel_business(d, selected)
+	if not hotel.is_empty():
+		button(d, controls, str(hotel.button), "EdrOpenHotel", func(): _open_hotel(d))
 	button(d, controls, "端末から業務接続を確認", "EdrBusinessProbe_" + selected, func(): _business_probe(d, selected))
 	button(d, controls, "端末状態を再読込", "EdrRefresh_" + selected, func(): d._render_endpoint())
+	if not hotel.is_empty() and _hotel_recovery(d):
+		label(d, panel, str(hotel.label).replace("\n", " · "), 13, MUTED).name = "EdrReservationState"
 	var observation: Dictionary = state.get("business_observations", {}).get(selected, {})
 	if observation.is_empty():
 		label(d, panel, "接続結果 · 未測定", 12, MUTED)
@@ -250,7 +277,7 @@ static func inventory(d, parent: VBoxContainer, snap: Dictionary, state: Diction
 		_scroll_selected_event_details(d,d.widgets.browser.page,true)
 	var business: Dictionary={}
 	var scenario: Dictionary=d.game._scenario()
-	if int(scenario.get("endpoint_engagement",0))==2:
+	if int(scenario.get("endpoint_engagement",0))==2 or _hotel_recovery(d):
 		var observations:Dictionary={}
 		for id in scenario.get("endpoint_business",{}):
 			var observed:Dictionary=state.get("business_observations",{}).get(id,{})
@@ -262,14 +289,12 @@ static func inventory(d, parent: VBoxContainer, snap: Dictionary, state: Diction
 			observations[id]={"label":caption,"response":response.get_slice("\n",0)}
 		business={"names":scenario.get("endpoint_business",{}),"observations":observations,"on_probe":func(id:String):_business_probe(d,id)}
 		if d._hotel_enabled():
-			var hotel:Dictionary=d.game.hotel_snapshot()
-			var folios:Array=hotel.get("folios",[])
-			var pending:=folios.filter(func(item):return str(item.get("status",""))!="received").size()
-			business.observations["pc_b"]={"label":"✓ 受付済み" if pending==0 and not folios.is_empty() else "未送信 %d件" % pending if not folios.is_empty() else "! 伝票を確認", "opens_app":true, "tooltip":"白波フロントで精算票を開く"}
+			var hotel_device := "pc_a" if _hotel_recovery(d) else "pc_b"
+			business.observations[hotel_device] = _hotel_business(d, hotel_device)
 			business.on_probe=func(id:String):
-				if id=="pc_b":d._open_hotel_frontdesk()
+				if id==hotel_device:_open_hotel(d)
 				else:_business_probe(d,id)
-			business.legend="点線: 過去の記録   実線 / ×: 接続設定   精算票から白波フロントへ"
+			business.legend="点線: 過去の記録   実線 / ×: 接続設定   予約台帳から白波フロントへ" if _hotel_recovery(d) else "点線: 過去の記録   実線 / ×: 接続設定   精算票から白波フロントへ"
 	InvestigationMap.render(d,parent,snap,open_device,open_record,query,business)
 
 static func recovery_device_record(snap: Dictionary, device_id: String) -> Dictionary:
@@ -307,10 +332,11 @@ static func recovery_inventory(d, body: VBoxContainer, rows: Array, state: Dicti
 			var pick := button(d,sites,("●  " if current else "○  ")+str(d.game.state.targets[index].name),"EdrSite_"+str(index),func():
 				if d._select_target(index): d._show_app("terminal"))
 			pick.disabled=current
-		var impact: Dictionary=d.game.state.work.get("endpoint_impact",{})
-		label(d,body,Impact.summary(impact),12,MUTED).name="EdrImpactSummary"
+		if not _hotel_recovery(d):
+			var impact: Dictionary=d.game.state.work.get("endpoint_impact",{})
+			label(d,body,Impact.summary(impact),12,MUTED).name="EdrImpactSummary"
 	var headings := HBoxContainer.new();headings.add_theme_constant_override("separation",28);body.add_child(headings)
-	for title in ["業務接続を確認", "端末を調査", "通信記録を開く"]:
+	for title in ["業務を開く / 接続確認" if _hotel_recovery(d) else "業務接続を確認", "端末を調査", "通信記録を開く"]:
 		var heading := label(d,headings,title,12,MUTED);heading.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
 	var map := VBoxContainer.new(); map.name="EdrRecoveryDeviceRows";map.add_theme_constant_override("separation",8);body.add_child(map)
 	for raw in rows:
@@ -320,14 +346,19 @@ static func recovery_inventory(d, body: VBoxContainer, rows: Array, state: Dicti
 		var row:=Control.new();row.name="EdrWorkflow_"+id;row.custom_minimum_size.y=148*scale(d);map.add_child(row)
 		var links:=WorkflowLinks.new();row.add_child(links);links.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		var layout:=HBoxContainer.new();layout.add_theme_constant_override("separation",28);row.add_child(layout);layout.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		var job:=_object_button(d,layout,"EdrBusinessProbe_"+id,func():_business_probe(d,id))
+		var hotel: Dictionary = _hotel_business(d, id)
+		var job:=_object_button(d,layout,("EdrBusinessOpen_" if not hotel.is_empty() else "EdrBusinessProbe_")+id,func():
+			if not hotel.is_empty(): _open_hotel(d)
+			else: _business_probe(d,id))
+		if not hotel.is_empty(): job.tooltip_text = str(hotel.tooltip)
 		var job_box:=_object_content(job)
-		Glyph.add_to(job_box,"file",30,BLUE)
+		Glyph.add_to(job_box,str(hotel.get("glyph", "file")),30,BLUE)
 		var job_title:=label(d,job_box,str(scenario.get("endpoint_business",{}).get(id,"業務サイト")),14)
 		job_title.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
 		var observation: Dictionary=state.get("business_observations",{}).get(id,{})
 		var result:="未測定"
-		if not observation.is_empty():
+		if not hotel.is_empty(): result = str(hotel.label)
+		elif not observation.is_empty():
 			result=str(observation.get("response","")).get_slice("\n",0)
 			if str(observation.get("state",""))!=_business_state(snap,id): result="変更前 · "+result
 		label(d,job_box,result,12,MUTED).horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
@@ -514,7 +545,7 @@ static func recovery_file_profile(d, body: VBoxContainer, state: Dictionary, sna
 	label(d,observed,rcopy("edr_device","Observed device"),12,MUTED)
 	var device:=recovery_device_record(snap,device_id)
 	var observed_row:=table_row(observed,Color("fafafa"))
-	label(d,observed_row,device_name(device_id),13,BLUE)
+	button(d,observed_row,device_name(device_id),"RecoveryObservedDevice_"+device_id,func():d._open_endpoint_device(device_id))
 	label(d,observed_row,recovery_scan_text(d,device,snap) if not device.is_empty() else rcopy("rmd_no_scan","No scan"),12,INK)
 	label(d,observed_row,recovery_file_status(d,file),12,UI.RED if bool(file.get("quarantined",false)) else INK)
 	var scan_data: Dictionary=recovery_scan_data(snap,device_id)
@@ -588,12 +619,12 @@ static func devices(d, body: VBoxContainer, state: Dictionary, snap: Dictionary)
 	var selected := str(state.get("device", ""))
 	var rows: Array = snap.get("devices", [])
 	var scenario:Dictionary=d.game._scenario()
-	if int(scenario.get("endpoint_engagement",0))==2:
+	if int(scenario.get("endpoint_engagement",0))==2 or _hotel_recovery(d):
 		var impact:Dictionary=d.game.state.work.get("endpoint_impact",{})
 		var work_summary:Dictionary=d.game.work_status()
 		var compensation:=Impact.total_cost(impact)
 		BusinessStrip.add_to(body,scale(d),int(work_summary.estimated_fee),maxi(0,int(work_summary.costs)-compensation),compensation)
-		label(d,body,Impact.summary(impact,2),12,MUTED).name="EdrImpactSummary"
+		label(d,body,Impact.summary(impact,int(scenario.get("endpoint_engagement",0))),12,MUTED).name="EdrImpactSummary"
 	if selected.is_empty():
 		if bool(snap.get("recovery_enabled",false)) and str(state.get("inventory_view","business"))!="records":
 			recovery_inventory(d,body,rows,state,snap)

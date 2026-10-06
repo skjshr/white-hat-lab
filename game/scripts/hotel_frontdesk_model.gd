@@ -4,13 +4,28 @@ extends RefCounted
 const PATH := "/srv/hotel/folios.json"
 const DEVICE := "pc_b"
 const FOLIO := "F-204"
+const RECOVERY = preload("res://scripts/hotel_recovery.gd")
 
 static func enabled(saved: Dictionary) -> bool:
-	return int(saved.get("scenario", {}).get("hotel_workflow_version", 0)) == 1
+	return int(saved.get("scenario", {}).get("hotel_workflow_version", 0)) == 1 or RECOVERY.enabled(saved)
 
 static func initialize(saved: Dictionary) -> void:
 	if not enabled(saved): return
 	if "/srv/hotel" not in saved.dirs: saved.dirs.append("/srv/hotel")
+	if RECOVERY.enabled(saved):
+		# Freeze the actual settled front desk received with this new contract.
+		# Never reset F-204 or rewrite the previous evidence as newly collected.
+		var handoff: Variant = saved.get("scenario", {}).get("hotel_handoff", {})
+		if not handoff is Dictionary or not handoff.get("hotel_journal") is Array: return
+		var folio_content := str(handoff.get("folio_content", ""))
+		var evidence := str(handoff.get("evidence_content", ""))
+		if folio_content.is_empty() or evidence.is_empty() or evidence.sha256_text() != str(handoff.get("evidence_sha256", "")): return
+		saved.fs[PATH] = folio_content
+		saved.hotel_journal = handoff.hotel_journal.duplicate(true)
+		if "/handoff" not in saved.dirs: saved.dirs.append("/handoff")
+		saved.fs[RECOVERY.EVIDENCE_PATH] = evidence
+		RECOVERY.initialize(saved)
+		return
 	var document := {"version":1,"rooms":[
 		{"room":"201","guest":"佐伯 航","status":"occupied","folio_id":""},
 		{"room":"202","guest":"宮原 奏","status":"occupied","folio_id":""},
@@ -71,6 +86,8 @@ static func snapshot(saved: Dictionary) -> Dictionary:
 	if not enabled(saved): return {"enabled":false}
 	var document := _document(saved)
 	var result := {"enabled":true,"connected":bool(saved.get("connected", false)) and bool(saved.get("active", false)),"client":str(saved.get("scenario", {}).get("client", "白波ホテル")),"device":DEVICE,"isolated":str(saved.get("applied", {}).get(DEVICE, "")) == "isolated","rooms":document.get("rooms", []).duplicate(true),"folios":document.get("folios", []).duplicate(true),"last_attempt":document.get("last_attempt", {}).duplicate(true),"source":PATH,"error":"data_unavailable" if document.is_empty() else ""}
+	result.workflow_version = int(saved.get("scenario", {}).get("hotel_workflow_version", 0))
+	if RECOVERY.enabled(saved): result.reservation = RECOVERY.snapshot(saved)
 	return result
 
 static func accepted(saved: Dictionary) -> bool:
@@ -80,7 +97,11 @@ static func outcome(saved: Dictionary) -> Dictionary:
 	if not enabled(saved): return {}
 	var folio := _folio(_document(saved), FOLIO)
 	if folio.is_empty(): return {"folio_id":FOLIO,"status":"unavailable"}
-	return {"folio_id":FOLIO,"room":str(folio.room),"guest":str(folio.guest),"total":int(folio.total),"balance":int(folio.balance),"status":"received" if _received(saved, folio) else "pending","receipt":folio.receipt.duplicate(true),"reservation_device":"pc_a","reservation_isolated":str(saved.get("applied", {}).get("pc_a", "")) == "isolated"}
+	var result := {"folio_id":FOLIO,"room":str(folio.room),"guest":str(folio.guest),"total":int(folio.total),"balance":int(folio.balance),"status":"received" if _received(saved, folio) else "pending","receipt":folio.receipt.duplicate(true),"reservation_device":"pc_a","reservation_isolated":str(saved.get("applied", {}).get("pc_a", "")) == "isolated"}
+	if RECOVERY.enabled(saved):
+		result.workflow_version = 2
+		result.reservation = RECOVERY.outcome(saved)
+	return result
 
 static func rejected(code: int, error: String) -> Dictionary:
 	return {"ok":false,"code":code,"error":error,"response":"HTTP %d · %s" % [code, error],"changed":false}
@@ -92,6 +113,9 @@ static func plan(saved: Dictionary, id: String, day: int, clock: String) -> Dict
 	if document.is_empty(): return rejected(422, "data_unavailable")
 	var folio := _folio(document, id)
 	if id != FOLIO or folio.is_empty(): return rejected(404, "folio_missing")
+	if RECOVERY.enabled(saved):
+		if not RECOVERY.preserved(saved) or not _received(saved, folio): return rejected(409, "handoff_folio_mismatch")
+		return {"ok":true,"code":200,"error":"","response":"HTTP 200 · 前回の精算控え " + str(folio.receipt.number),"receipt":folio.receipt.duplicate(true),"changed":false,"duplicate":true}
 	var code := 200
 	var error := ""
 	if not bool(saved.get("connected", false)): code = 503; error = "not_connected"
