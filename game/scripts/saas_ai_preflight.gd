@@ -14,6 +14,7 @@ const ROW_COST := 1500
 const LATE_COST := 900
 const ASSISTANT_COST := 300
 const COMPARISON_VERSION := 1
+const INCIDENT_FLOW := preload("res://scripts/ai_incident_projection.gd")
 const POLICY_KEYS := ["faq", "dispatch", "customers", "desk", "external"]
 const REQUIRED_SUMMARY_KEYS := ["faq", "dispatch", "desk"]
 const REQUESTS := [
@@ -674,5 +675,5 @@ static func view(state: Dictionary, selected: String = "") -> Dictionary:
 	var invoice: Dictionary = state.invoice.duplicate(true)
 	var attempt_rows: Array = invoice.get("attempts", [])
 	invoice["last_attempt"] = attempt_rows.back().duplicate(true) if not attempt_rows.is_empty() else {}
-	var data := {"kind":"saas_ai_preflight_v1","case_id":CASE_ID,"model_version":MODEL_VERSION,"source":state.get("source", {}).duplicate(true),"policy":policy,"policy_revision":int(preflight.get("policy_revision", 0)),"business":business_view,"schedule":preflight.get("schedule", []).duplicate(true),"impact_cost":int(preflight.get("impact_cost", 0)),"leaked_rows":state.egress.get("exported_rows", []).size(),"records":state.get("records", []).duplicate(true),"organization":org,"report":report,"report_fresh":report_fresh,"report_state":"unknown" if not bool(report.get("submitted", false)) else ("current" if report_fresh else "stale"),"elapsed_minutes":int(state.elapsed_minutes),"world_revision":int(state.world_revision),"next_event_minute":_next_event_minute(state),"egress":state.egress.duplicate(true),"invoice":invoice,"selected":selected}
+	var data := {"kind":"saas_ai_preflight_v1","case_id":CASE_ID,"model_version":MODEL_VERSION,"source":state.get("source", {}).duplicate(true),"policy":policy,"policy_revision":int(preflight.get("policy_revision", 0)),"business":business_view,"schedule":preflight.get("schedule", []).duplicate(true),"impact_cost":int(preflight.get("impact_cost", 0)),"leaked_rows":state.egress.get("exported_rows", []).size(),"records":state.get("records", []).duplicate(true),"flow":INCIDENT_FLOW.build(state),"organization":org,"report":report,"report_fresh":report_fresh,"report_state":"unknown" if not bool(report.get("submitted", false)) else ("current" if report_fresh else "stale"),"elapsed_minutes":int(state.elapsed_minutes),"world_revision":int(state.world_revision),"next_event_minute":_next_event_minute(state),"egress":state.egress.duplicate(true),"invoice":invoice,"selected":selected}
 	return {"kind":KIND,"case_id":CASE_ID,"checks":checks(state),"last_result":state.get("last_result", {}).duplicate(true),"ai_preflight":data}
