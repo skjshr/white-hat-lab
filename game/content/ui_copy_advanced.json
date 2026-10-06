@@ -3,6 +3,7 @@
   "model_selector": "Flash",
   "extraction": "Visible response code text, UTF-8 LF, values verbatim",
   "portal_copy_source": "Codex: pentest portal engagement and progression copy, 2026-10-01",
+  "relay_copy_source": "Codex: fictional relay engagement and shipment acceptance copy, 2026-10-06",
   "sources": [
     {
       "raw_file": "artifacts/simulator/advanced/gemini-advanced-01-raw.json",
@@ -357,6 +358,15 @@
     "adv_detection_replay_complete": "再生完了: 誤検知 %d、検知漏れ %d",
     "adv_detection_verified": "検知測定が完了しました",
     "adv_action_rejected": "操作を完了できませんでした",
-    "adv_difficulty": "上級"
+    "adv_difficulty": "上級",
+    "adv_relay_title": "出荷中継サーバーの侵入経路診断",
+    "adv_relay_environment": "出荷ネットワーク",
+    "adv_relay_brief": "出荷中継サーバーから社内の顧客データへ到達できる可能性が報告されました。relay01・queue01・archive01を対象に、接続元による到達範囲と取得できるデータを調べ、原記録を添えて変更を依頼してください。payroll01は診断の対象外です。出荷待ちSHP-041の受付を確認するまでが今回の契約です。中継を停止すると出荷も止まるため、再開後に同じ注文を再試行してください。",
+    "adv_relay_debrief": "取得した原記録と接続元を照合し、変更後のアクセス拒否と出荷受付を確認しました。",
+    "adv_relay_check_scope": "許可範囲と接続元の到達を実測する",
+    "adv_relay_check_report": "漏えいから内部データ取得までの原記録を提出する",
+    "adv_relay_check_config": "変更後の配置設定が公開されていない",
+    "adv_relay_check_credential": "漏えいした資格情報で接続できない",
+    "adv_relay_check_shipping": "変更後に出荷待ちSHP-041の受付を確認する"
   }
 }

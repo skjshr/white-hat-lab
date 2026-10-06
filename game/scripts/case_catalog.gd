@@ -152,6 +152,7 @@ static func _add_advanced_cases() -> void:
 	_add_portal_pentest()
 	_add_advanced_case("advanced-hunt", "response", 4, 7, {"response":5,"advisory":2}, 26000, 260)
 	_add_advanced_case("advanced-pentest", "advisory", 2, 7, {"advisory":5,"operations":2}, 28000, 300)
+	_add_relay_pentest()
 	_add_advanced_case("advanced-recovery", "operations", 1, 8, {"operations":5,"response":3}, 32000, 320)
 	_add_advanced_case("advanced-ddos", "response", 2, 7, {"operations":5,"response":2}, 30000, 240)
 	_add_advanced_case("advanced-api", "advisory", 5, 7, {"advisory":5}, 34000, 260)
@@ -162,6 +163,10 @@ static func _add_advanced_cases() -> void:
 
 static func _add_portal_pentest() -> void:
 	_catalog.append({"id":"advanced-portal","title":DISPLAY_COPY.copy("adv_portal_title"),"client":DISPLAY_COPY.copy("adv_portal_client"),"chapter":5,"category":"advisory","tier":1,"required_level":1,"required_skills":{"advisory":0},"brief":DISPLAY_COPY.copy("adv_portal_brief"),"service":DISPLAY_COPY.copy("adv_portal_service"),"evidence":[],"hints":[],"debrief":DISPLAY_COPY.copy("adv_portal_debrief"),"checks":[DISPLAY_COPY.copy("portal_check_report"),DISPLAY_COPY.copy("portal_check_security_retest"),DISPLAY_COPY.copy("portal_check_business_retest")],"probes":[],"desired":{},"initial":{},"targets":[{"chapter":5,"case_id":"advanced-portal","name":"portal.mihama.test"}],"reward":6500,"advanced_work_minutes":90,"work_family":"web-pentest"})
+
+static func _add_relay_pentest() -> void:
+	# Several connected hosts belong to one engagement, not separate site VMs.
+	_catalog.append({"id":"advanced-pentest-relay","title":DISPLAY_COPY.copy("adv_relay_title"),"client":"北斗物流","chapter":2,"category":"advisory","tier":3,"required_level":7,"required_skills":{"advisory":5,"operations":2},"brief":DISPLAY_COPY.copy("adv_relay_brief"),"service":DISPLAY_COPY.copy("adv_service"),"evidence":[],"hints":[],"debrief":DISPLAY_COPY.copy("adv_relay_debrief"),"checks":[DISPLAY_COPY.copy("adv_check_summary")],"probes":[],"desired":{},"initial":{},"targets":[{"chapter":2,"case_id":"advanced-pentest-relay","name":DISPLAY_COPY.copy("adv_relay_environment")}],"reward":32000,"advanced_work_minutes":340})
 
 static func _add_advanced_case(id: String, category: String, chapter: int, required_level: int, required_skills: Dictionary, reward: int, work_minutes: int) -> void:
 	var slug := id.trim_prefix("advanced-")

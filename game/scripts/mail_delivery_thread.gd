@@ -32,6 +32,20 @@ static func project(state: Dictionary, record: Dictionary) -> Dictionary:
 			reply.body = "%sまでの変更依頼%d件を確認しました。公開設定の閲覧制限と旧資格情報の失効、日報を利用できることを再診断いただきました。\n変更作業費は合計¥%sです。" % [str(requests.back().get("id", "")), requests.size(), str(int(pentest_changes.get("cost_total", 0)))]
 			if requests.any(func(change): return str(change.get("change", "")) == "isolate_share"):
 				reply.body += "\n途中で共有全体を停止したため、日報も利用できない時間がありました。"
+		if str(reply.case_id) == "advanced-pentest-relay" and str(pentest_changes.get("engagement", "")) == "relay-v1":
+			var requests: Array = pentest_changes.get("requests", [])
+			var shipping: Dictionary = pentest_changes.get("shipping", {})
+			var accepted: Array[String] = []
+			var delayed: Array[String] = []
+			for order in shipping.get("orders", []):
+				if bool(order.get("delivered", false)):
+					var receipt_id := str(order.get("receipt", {}).get("id", ""))
+					accepted.append(str(order.get("id", "")) + ("（" + receipt_id + "）" if not receipt_id.is_empty() else ""))
+				if order.get("attempts", []).any(func(attempt): return int(attempt.get("status", 0)) == 503): delayed.append(str(order.get("id", "")))
+			reply.body = "中継サーバーから内部へ届く経路の報告と、修正後の再診断を受領しました。"
+			if not accepted.is_empty(): reply.body += "\n出荷受付の控え: " + "・".join(accepted) + "。"
+			if not requests.is_empty(): reply.body += "\n変更依頼は%sまでの%d件、作業費は合計¥%sです。" % [str(requests.back().get("id", "")), requests.size(), str(int(pentest_changes.get("cost_total", 0)))]
+			if not delayed.is_empty(): reply.body += "\n" + "・".join(delayed) + "が中継停止で受付できなかった記録も残っています。"
 		if str(reply.case_id) == "service-0-case-0" and bool(reply.report_write_confirmed): reply.body = "日報の保存を確認しました。締めの作業を再開します。"
 		for site in own.get("hotel_workflow", {}).get("sites", []):
 			if str(site.get("status", "")) != "received": continue

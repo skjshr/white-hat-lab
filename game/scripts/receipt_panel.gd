@@ -43,7 +43,7 @@ static func render(d, body: VBoxContainer, receipt: Dictionary, first_view: bool
 	if not receipt.get("pentest_changes", {}).get("requests", []).is_empty():
 		var changes: VBoxContainer = d._disclosure(finance, "変更依頼の控え")
 		changes.name = "ReceiptPentestChanges"
-		var labels := {"restrict_config":"配置設定の公開範囲を制限", "rotate_credential":"サービス資格情報を更新", "isolate_share":"共有サービスを隔離", "restore_share":"共有サービスを再開"}
+		var labels := {"restrict_config":"配置設定の公開範囲を制限", "rotate_credential":"サービス資格情報を更新", "isolate_share":"共有サービスを隔離", "restore_share":"共有サービスを再開", "isolate_relay":"出荷中継を隔離", "restore_relay":"出荷中継を再開"}
 		for request in receipt.pentest_changes.requests:
 			changes.add_child(_text(d, "%s  ·  %s  ·  %d分  ·  %s" % [str(request.get("id", "")), str(labels.get(str(request.get("change", "")), "顧客の変更作業")), int(request.get("minutes", 0)), _yen(int(request.get("cost", 0)))], 13, UI.INK))
 	if receipt.get("endpoint_impact",{}) is Dictionary and not receipt.get("endpoint_impact",{}).is_empty():

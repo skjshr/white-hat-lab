@@ -4,6 +4,7 @@ const CATALOG = preload("res://scripts/case_catalog.gd")
 const GUIDE = preload("res://scripts/next_task_guide.gd")
 const INITIAL_TARGETS := {
 	"advanced-hunt":["HuntTab_timeline","HuntEvents"],"advanced-pentest":["NetworkTab_explore","NetworkResources"],"advanced-recovery":["RecoveryTab_copies","RecoverySnapshots"],
+	"advanced-pentest-relay":["NetworkTab_explore","RelayHostCanvas"],
 	"advanced-cloud":["SpecialistStage_0","CloudRead_app-19"],"advanced-malware":["SpecialistStage_0","MalwareStatic"],"advanced-detection":["SpecialistStage_0","Spec_rule_process"],
 	"advanced-ddos":["SpecialistStage_1","DdosInspectSession"],"advanced-api":["SpecialistStage_0","ApiSend"],"advanced-supplychain":["SpecialistStage_2","SpecEvidence"]
 }
@@ -84,8 +85,9 @@ func run() -> void:
 		check(desk.current_app=="advanced",case_id+" brings actual app forward")
 		check(target!=null and target.is_visible_in_tree(),case_id+" actual destination control is rendered")
 		check(ui.next_task_guide.target_rect.has_area(),case_id+" destination is highlighted")
-		if case_id in ["advanced-hunt","advanced-pentest","advanced-recovery"]:
-			check(str(desk.advanced_ui[case_id].get("tab",""))==expected.get_slice("_",1),case_id+" work view selected")
+		var workspace_kind := str(game.state.advanced.get("kind", case_id))
+		if workspace_kind in ["advanced-hunt","advanced-pentest","advanced-recovery"]:
+			check(str(desk.advanced_ui[workspace_kind].get("tab",""))==expected.get_slice("_",1),case_id+" work view selected")
 		else:
 			var page: Control=desk.find_child("SpecialistPage_"+expected.trim_prefix("SpecialistStage_"),true,false)
 			check(page!=null and page.is_visible_in_tree(),case_id+" actual work page is visible")
@@ -94,6 +96,9 @@ func run() -> void:
 		if case_id == "advanced-pentest" and work_control != null:
 			var resources: Array = work_control.find_children("*", "Button", true, false).filter(func(button): return str(button.get_meta("path", "")) in ["share01", "evidence"])
 			check(not work_control is Tree and resources.size() == 2, "guide reaches selectable scope objects on the diagram")
+		if case_id == "advanced-pentest-relay" and work_control != null:
+			var relay: Button = work_control.find_child("NetworkHost_relay01", true, false)
+			check(not work_control is Tree and relay != null and relay.is_visible_in_tree() and str(relay.get_meta("host", "")) == "relay01", "guide reaches the real selectable relay host in the new engagement")
 		check(model_mark(game)==before,case_id+" locate leaves observations, validation, billing and work unchanged")
 		if case_id in ["advanced-hunt","advanced-cloud"]:await save_capture(case_id+"-guide")
 		await locate_by_mouse(ui.next_task_guide)

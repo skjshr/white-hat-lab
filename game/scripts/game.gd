@@ -1520,7 +1520,7 @@ func incident_active() -> bool:
 	return advanced_active() and str(state.advanced.get("kind", "")) == "advanced-portal" and bool(state.advanced.get("exercise", {}).get("active", false))
 
 func _advanced_case_id(case_id: String) -> bool:
-	return case_id in ["advanced-hunt","advanced-pentest","advanced-recovery","advanced-ddos","advanced-api","advanced-supplychain","advanced-cloud","advanced-malware","advanced-detection","advanced-portal"]
+	return case_id in ["advanced-hunt","advanced-pentest","advanced-pentest-relay","advanced-recovery","advanced-ddos","advanced-api","advanced-supplychain","advanced-cloud","advanced-malware","advanced-detection","advanced-portal"]
 
 func _advanced_engine(case_id: String = ""):
 	var id := case_id if not case_id.is_empty() else str(state.get("contract", {}).get("case_id", ""))
@@ -2923,6 +2923,9 @@ func deliver() -> bool:
 	state.last_receipt.case_id = str(state.contract.get("case_id", ""))
 	if str(state.get("advanced", {}).get("kind", "")) == "advanced-pentest" and not state.advanced.get("world", {}).get("remediation", {}).get("requests", []).is_empty():
 		state.last_receipt.pentest_changes = {"cost_total":int(state.work.get("pentest_change_cost", 0)),"requests":state.advanced.world.remediation.requests.duplicate(true),"revision":int(state.advanced.world.get("change_revision", 0)),"retests":state.advanced.world.get("retests", {}).duplicate(true)}
+		if str(state.advanced.get("engagement", "")) == "relay-v1":
+			state.last_receipt.pentest_changes["engagement"] = "relay-v1"
+			state.last_receipt.pentest_changes["shipping"] = state.advanced.world.get("shipping", {}).duplicate(true)
 	if state.work.has("endpoint_impact"): state.last_receipt.endpoint_impact = state.work.endpoint_impact.duplicate(true)
 	if endpoint_containment: state.last_receipt.endpoint_satisfaction_delta = endpoint_satisfaction_delta
 	var hotel_outcome := _hotel_workflow_outcome()

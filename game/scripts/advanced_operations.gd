@@ -1,8 +1,10 @@
 extends RefCounted
 
 const INVESTIGATION = preload("res://scripts/advanced_investigation.gd")
+const ENGAGEMENT = preload("res://scripts/pentest_engagement.gd")
 
 static func create(case_id: String) -> Dictionary:
+	if case_id == "advanced-pentest-relay": return ENGAGEMENT.create(case_id)
 	var s: Dictionary = {"kind":case_id,"revision":0,"flags":{},"nodes":[],"edges":[],"events":[],"records":[],"actions":[],"checks":[],"last_result":{}}
 	if case_id not in ["advanced-hunt","advanced-pentest","advanced-recovery"]: return {}
 	if case_id == "advanced-hunt":
@@ -72,6 +74,7 @@ static func _seed_recovery(s: Dictionary) -> void:
 	s.world = {"snapshots":{"snap-0730":{"ledger":"id,amount\n001,100\n","startup":"none","revision":7},"snap-1405":{"ledger":"id,amount\n001,100\n","startup":"sync-persistence","revision":14},"snap-1410":{"ledger":"id,amount\n001,999999\n","startup":"sync-persistence","revision":14}},"expected_ledger_sha":"id,amount\n001,100\n".sha256_text(),"production":{"ledger":"id,amount\n001,999999\n","startup":"sync-persistence"},"staged":{},"identity":{"compromised":true},"network_isolated":false,"services":{"identity":false,"database":false,"app":false},"observations":[]}
 
 static func view(s: Dictionary, selected: String = "") -> Dictionary:
+	if str(s.get("engagement", "")) == "relay-v1": return ENGAGEMENT.view(s, selected)
 	return INVESTIGATION.view(s, selected)
 
 static func _legacy_view(s: Dictionary, selected: String = "") -> Dictionary:
@@ -102,6 +105,7 @@ static func _legacy_view(s: Dictionary, selected: String = "") -> Dictionary:
 	return out
 
 static func act(s: Dictionary, action: String, args: Dictionary = {}) -> Dictionary:
+	if str(s.get("engagement", "")) == "relay-v1": return ENGAGEMENT.act(s, action, args)
 	return INVESTIGATION.act(s, action, args)
 
 static func _legacy_act(s: Dictionary, action: String, args: Dictionary = {}) -> Dictionary:
@@ -119,6 +123,7 @@ static func _legacy_act(s: Dictionary, action: String, args: Dictionary = {}) ->
 	s.last_result = r.duplicate(true); return r
 
 static func checks(s: Dictionary) -> Array:
+	if str(s.get("engagement", "")) == "relay-v1": return ENGAGEMENT.checks(s)
 	return INVESTIGATION.checks(s)
 
 static func _legacy_checks(s: Dictionary) -> Array:

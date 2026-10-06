@@ -4,7 +4,7 @@ extends RefCounted
 ## navigation metadata; it never accepts, edits, verifies, saves, or delivers.
 const UI_COPY = preload("res://scripts/ui_theme.gd")
 const ADVANCED_REVIEW_TARGETS := {
-	"advanced-hunt":"HuntTab_results", "advanced-pentest":"NetworkTab_results", "advanced-recovery":"RecoveryTab_results",
+	"advanced-hunt":"HuntTab_results", "advanced-pentest":"NetworkTab_results", "advanced-pentest-relay":"NetworkTab_results", "advanced-recovery":"RecoveryTab_results",
 	"advanced-cloud":"SpecialistStage_2", "advanced-malware":"SpecialistStage_2", "advanced-detection":"SpecialistStage_2", "advanced-ddos":"SpecialistStage_2",
 	"advanced-api":"SpecialistStage_3", "advanced-supplychain":"SpecialistStage_3"
 }
@@ -201,7 +201,8 @@ static func navigation_target(game, task: Dictionary) -> String:
 	return expected if str(task.get("target",""))==expected else ""
 
 static func advanced_work_target(game, objective_id: String) -> String:
-	var kind := str(game.state.get("contract",{}).get("case_id",""))
+	var kind := str(game.state.get("advanced", {}).get("kind", game.state.get("contract",{}).get("case_id","")))
+	if str(game.state.get("advanced", {}).get("engagement", "")) == "relay-v1" and objective_id == "shipping": return "NetworkTab_shipping"
 	var targets: Dictionary=ADVANCED_WORK_TARGETS.get(kind,{})
 	var target := str(targets.get(objective_id,targets.get("default","")))
 	# These are public work-state transitions, not inspection of desired values.
