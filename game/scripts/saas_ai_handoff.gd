@@ -1,6 +1,7 @@
 extends RefCounted
 ## Independent offline partner handoff. Views only project saved originals.
 const FLOW = preload("res://scripts/ai_incident_projection.gd")
+const EVIDENCE = preload("res://scripts/ai_handoff_evidence.gd")
 const CASE_ID := "advanced-saas-ai-handoff"
 const MODEL_VERSION := "saas-ai-handoff-v1"
 const KIND := "advanced-saas-response"
@@ -214,7 +215,7 @@ static func _comparison(s: Dictionary, ids: Array) -> Dictionary:
 		var row := _find(s,str(id)); var lane := str({"boundary_read":"read","boundary_write":"write","run_business":"business"}.get(str(row.get("action", "")), ""))
 		if lane.is_empty() or int(row.get("seq", -1)) <= int(lanes[lane].get("seq", -1)): continue
 		lanes[lane] = {"state":"observed","status":int(row.status),"record_ids":[id],"seq":int(row.seq),"world_revision":int(row.world_revision),"policy_revision":int(row.data.get("policy_revision", -1)),"data":row.data.duplicate(true)}
-	return {"lanes":lanes,"record_ids":ids.duplicate(),"world_revision":int(s.world_revision),"created_minute":int(s.elapsed_minutes),"creates_evidence":false}
+	return {"lanes":lanes,"approvals":EVIDENCE.build(s.records,ids),"record_ids":ids.duplicate(),"world_revision":int(s.world_revision),"created_minute":int(s.elapsed_minutes),"creates_evidence":false}
 
 static func act(state: Dictionary, action: String, args: Dictionary = {}) -> Dictionary:
 	if not _valid(state): return _error("配送連携の案件データを確認できません。")
@@ -318,6 +319,7 @@ static func view(s: Dictionary, selected: String = "") -> Dictionary:
 	h.records = s.records.duplicate(true); h.report = s.report.duplicate(true); h.report.required_record_ids = _required(s); h.report_fresh = _report_fresh(s)
 	h.organization = s.organization.duplicate(true)
 	if not h.organization.is_empty():
+		if not h.organization.comparison.has("approvals"): h.organization.comparison.approvals = EVIDENCE.build(s.records,h.organization.get("record_ids", []))
 		h.organization.comparison.fresh = int(h.organization.world_revision) == int(s.world_revision); h.organization.comparison.state = "observed" if bool(h.organization.comparison.fresh) else "stale"
 		for lane in h.organization.comparison.lanes.values(): lane.fresh = int(lane.get("world_revision", -1)) == int(s.world_revision)
 	h.elapsed_minutes = int(s.elapsed_minutes); h.world_revision = int(s.world_revision); h.egress = s.egress.duplicate(true); h.invoice = s.invoice.duplicate(true); h.schedule = s.egress.schedule.duplicate(true); h.leaked_rows = s.egress.exported_rows.size(); h.impact_cost = int(s.egress.impact_cost); h.selected = selected
