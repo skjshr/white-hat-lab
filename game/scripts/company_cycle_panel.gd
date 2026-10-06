@@ -83,6 +83,8 @@ static func _opportunity(ui, g, body: VBoxContainer, item: Dictionary) -> void:
 			_:
 				action_title = "日締め・次の営業を確認"
 				route_item.route_title = "今日の同顧客依頼なし"; route_item.route_family = "calendar"; route_item.route_detail = "次の営業で確認"; route_item.route_state = "locked"
+	elif status == "working":
+		next = ui.open_panel.bind("board"); action_name = "CycleWorking_" + id.validate_node_name(); action_title = "受注した案件を進める"
 	elif status == "locked":
 		if bool(item.get("handoff_unavailable", false)):
 			next = inspect; action_name = "CycleHandoffMissing"; action_title = "引継ぎ元の記録を確認"

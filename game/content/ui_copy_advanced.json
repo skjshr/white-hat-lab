@@ -379,6 +379,13 @@
     "saas_sessions_check_denial": "失効した接続の取得拒否を実測する",
     "saas_sessions_check_billing": "請求BILL-003の受付を確認する",
     "saas_sessions_check_aggregation": "社内集計の接続を実測する",
-    "saas_sessions_check_business": "請求予約と配車集計の実処理を確認する"
+    "saas_sessions_check_business": "請求予約と配車集計の実処理を確認する",
+    "saas_partner_check_report": "前回原本・本日の承認・接続調査を報告する",
+    "saas_partner_check_consent": "承認済みの業務連携を維持する",
+    "saas_partner_check_revocation": "承認範囲を外れた要求の接続を失効させる",
+    "saas_partner_check_denial": "失効した接続の取得拒否を実測する",
+    "saas_partner_check_billing": "請求BILL-004の受付を確認する",
+    "saas_partner_check_dispatch": "委託先の送付接続を実測する",
+    "saas_partner_check_business": "請求予約と委託先受渡の実処理を確認する"
   }
 }

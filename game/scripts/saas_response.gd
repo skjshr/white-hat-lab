@@ -7,6 +7,7 @@ const SESSIONS_CASE_ID := "advanced-saas-sessions"
 const MODEL_VERSION := "saas-response-v1"
 const LEGACY_SESSIONS_MODEL_VERSION := "saas-sessions-v1"
 const SESSIONS_MODEL_VERSION := "saas-sessions-v2"
+const PARTNER_SESSIONS_MODEL_VERSION := "saas-partner-v1"
 const SESSIONS := preload("res://scripts/saas_session_model.gd")
 const ASSISTANT_COST := 300
 const ROW_IMPACT_COST := 500
@@ -21,6 +22,9 @@ const WATCH_EXPORT_ROWS := [
 	{"id":"ARCHIVE-002","department":"warehouse","amount":27,"type":"route-summary"},
 	{"id":"ARCHIVE-003","department":"support","amount":12,"type":"service-summary"}
 ]
+
+static func _canonical_json(value: Variant) -> String:
+	return JSON.stringify(JSON.parse_string(JSON.stringify(value)), "", true)
 
 static func create(case_id: String = CASE_ID) -> Dictionary:
 	if case_id not in [CASE_ID, SESSIONS_CASE_ID]: return {}
@@ -71,6 +75,98 @@ static func create(case_id: String = CASE_ID) -> Dictionary:
 		SESSIONS.mark_issued_record(created.session_case, "SES-203", "audit-4")
 		for index in created["egress"]["schedule"].size(): created["egress"]["schedule"][index]["session_id"] = "SES-203"
 	return created
+
+static func _valid_partner_payload(payload: Variant) -> bool:
+	if not payload is Dictionary: return false
+	if str(payload.get("source_contract_id", "")).is_empty() or not SESSIONS._whole(payload.get("source_day", null), 1, 2147483647): return false
+	if str(payload.get("client", "")) != "北斗物流": return false
+	var originals: Variant = payload.get("approved_originals", null)
+	if not originals is Array or originals.size() != 4: return false
+	var expected := {"audit-1":"consent_review","audit-2":"session_issued","audit-3":"session_issued","audit-4":"session_issued"}
+	var seen: Dictionary = {}
+	for row in originals:
+		if not row is Dictionary: return false
+		var id := str(row.get("id", ""))
+		if not expected.has(id) or seen.has(id) or str(row.get("action", "")) != str(expected[id]) or int(row.get("status", 0)) != 200: return false
+		if not row.get("data", null) is Dictionary: return false
+		if id == "audit-1" and str(row.data.get("approved_change", "")) != "FIN-114": return false
+		if id != "audit-1" and str(row.data.get("session_id", "")) != ("SES-%03d" % (199 + int(id.trim_prefix("audit-")))): return false
+		seen[id] = true
+	return seen.size() == expected.size()
+
+static func _valid_partner_source_state(s: Dictionary) -> bool:
+	var source: Variant = s.get("partner_source", null)
+	if not _valid_partner_payload(source): return false
+	if str(source.get("approved_change", "")) != "OPS-208" or str(source.get("partner_name", "")) != "ミナト配送": return false
+	var destinations: Variant = source.get("approved_destinations", null)
+	if not destinations is Array or destinations.size() != 2: return false
+	var expected_destinations := [
+		{"destination":"invoice/BILL-004","device":"BILLING-02","rows":3},
+		{"destination":"partner-vault/dispatch","device":"SYNC-NODE","rows":120,"partner_name":"ミナト配送"}
+	]
+	for index in expected_destinations.size():
+		if _canonical_json(destinations[index]) != _canonical_json(expected_destinations[index]): return false
+	var world: Dictionary = s.get("session_case", {})
+	var world_destinations: Variant = world.get("consent", {}).get("approved_destinations", null)
+	if not world_destinations is Array or world_destinations.size() != expected_destinations.size(): return false
+	for index in expected_destinations.size():
+		if _canonical_json(world_destinations[index]) != _canonical_json(expected_destinations[index]): return false
+	var baseline: Variant = source.get("baseline_reference", null)
+	if not baseline is Array or baseline.size() != 4: return false
+	for prior in source.get("approved_originals", []):
+		var found := false
+		var expected_record_id := "partner-baseline-%s" % str(prior.get("id", ""))
+		for reference in baseline:
+			if not reference is Dictionary: return false
+			if str(reference.get("record_id", "")) == expected_record_id and str(reference.get("source_record_id", "")) == str(prior.get("id", "")) and _canonical_json(reference.get("original", {})) == _canonical_json(prior):
+				found = true
+				break
+		if not found: return false
+		var persisted := _record_by_id(s, expected_record_id)
+		if str(persisted.get("action", "")) != "baseline_reference" or _canonical_json(persisted.get("data", {}).get("original", {})) != _canonical_json(prior): return false
+	return true
+
+static func create_partner_followup(payload: Dictionary) -> Dictionary:
+	if not _valid_partner_payload(payload): return {}
+	var s: Dictionary = create(SESSIONS_CASE_ID)
+	if s.is_empty(): return {}
+	s["model_version"] = PARTNER_SESSIONS_MODEL_VERSION
+	s["partner_source"] = {"source_contract_id":str(payload.source_contract_id),"source_day":int(payload.source_day),"client":"北斗物流","partner_name":"ミナト配送","approved_change":"OPS-208","approved_originals":payload.approved_originals.duplicate(true),"approved_destinations":[{"destination":"invoice/BILL-004","device":"BILLING-02","rows":3},{"destination":"partner-vault/dispatch","device":"SYNC-NODE","rows":120,"partner_name":"ミナト配送"}]}
+	var approval: Dictionary = {"id":"audit-1","seq":1,"minute":0,"actor":"operations-owner","app":"app-19","destination":"approved-connections","action":"consent_review","status":200,"revision":0,"world_revision":0,"detail":"OPS-208 approves BILL-004 billing and Minato delivery dispatch data.","data":{"publisher":"ledger-sync","permission":"billing-and-partner-dispatch","resource":"invoice-and-partner-vault","approved_change":"OPS-208","approved_by":"operations-owner","actualdataread":true,"approved_destinations":s.partner_source.approved_destinations.duplicate(true)}}
+	var issue_rows: Array[Dictionary] = [
+		{"id":"audit-2","seq":2,"minute":0,"actor":"ledger-sync","app":"app-19","destination":"unknown","action":"session_issued","status":200,"revision":0,"world_revision":0,"detail":"A connection was issued. Its requested destination is not recorded here.","data":{"session_id":"SES-201","device":"BATCH-01","issued_at":"08:50","request_id":"REQ-208-01","destination":"unknown"}},
+		{"id":"audit-3","seq":3,"minute":0,"actor":"ledger-sync","app":"app-19","destination":"unknown","action":"session_issued","status":200,"revision":0,"world_revision":0,"detail":"A connection was issued. Its requested destination is not recorded here.","data":{"session_id":"SES-202","device":"BILLING-02","issued_at":"08:55","request_id":"REQ-208-02","destination":"unknown"}},
+		{"id":"audit-4","seq":4,"minute":0,"actor":"ledger-sync","app":"app-19","destination":"unknown","action":"session_issued","status":200,"revision":0,"world_revision":0,"detail":"A connection was issued. Its requested destination is not recorded here.","data":{"session_id":"SES-203","device":"SYNC-NODE","issued_at":"09:00","request_id":"REQ-208-03","destination":"unknown"}}
+	]
+	var audit_rows: Array[Dictionary] = [approval]
+	audit_rows.append_array(issue_rows)
+	s["audit"] = audit_rows.duplicate(true)
+	var records: Array = s.get("records", []).duplicate(true)
+	if records.size() != 4: return {}
+	for index in 4: records[index] = audit_rows[index].duplicate(true)
+	var baseline_records: Array[Dictionary] = []
+	var baseline_references: Array[Dictionary] = []
+	for prior in payload.approved_originals:
+		var prior_id := str(prior.get("id", ""))
+		var ref_id := "partner-baseline-" + prior_id
+		var reference := {"id":ref_id,"seq":5 + baseline_records.size(),"minute":0,"actor":"prior-case","app":"","destination":"prior-case/%s" % str(payload.source_contract_id),"action":"baseline_reference","status":200,"revision":0,"world_revision":0,"detail":"前回受理済み原本の参照です。今回の再測定ではありません。","data":{"source_contract_id":str(payload.source_contract_id),"source_day":int(payload.source_day),"source_record_id":prior_id,"original":prior.duplicate(true)}}
+		baseline_records.append(reference)
+		baseline_references.append({"record_id":ref_id,"source_record_id":prior_id,"original":prior.duplicate(true)})
+		records.append(reference.duplicate(true))
+	s["records"] = records
+	s["sequence"] = 8
+	s["partner_source"]["baseline_reference"] = baseline_references.duplicate(true)
+	s["session_case"] = SESSIONS.create_partner()
+	s.session_case["partner_source"] = s.partner_source.duplicate(true)
+	s["egress"] = s.session_case.get("egress", {}).duplicate(true)
+	s.session_case.erase("egress")
+	SESSIONS.mark_issued_record(s.session_case,"SES-201","audit-2")
+	SESSIONS.mark_issued_record(s.session_case,"SES-202","audit-3")
+	SESSIONS.mark_issued_record(s.session_case,"SES-203","audit-4")
+	s["invoice"]["id"] = "BILL-004"
+	s["invoice"]["customer"] = "北斗物流"
+	s["invoice"]["amount"] = 57500
+	return s
 
 static func _valid_watch_source(payload: Variant) -> bool:
 	if not payload is Dictionary: return false
@@ -139,6 +235,8 @@ static func _valid_state(s: Dictionary) -> bool:
 			return SESSIONS.validate(session_world, int(s.get("elapsed_minutes", -1))) and int(session_world.get("version", 0)) == SESSIONS.LEGACY_VERSION
 		if model_version == SESSIONS_MODEL_VERSION:
 			return SESSIONS.validate(session_world, int(s.get("elapsed_minutes", -1))) and int(session_world.get("version", 0)) == SESSIONS.VERSION and _valid_business_event_records(s, session_world)
+		if model_version == PARTNER_SESSIONS_MODEL_VERSION:
+			return _valid_partner_source_state(s) and SESSIONS.validate(session_world, int(s.get("elapsed_minutes", -1))) and int(session_world.get("version", 0)) == SESSIONS.PARTNER_VERSION and _valid_business_event_records(s, session_world)
 		return false
 	if str(s.get("model_version", "")) != MODEL_VERSION: return false
 	if case_id == CASE_ID: return true
@@ -174,7 +272,7 @@ static func _export_rows(s: Dictionary) -> Array:
 	return WATCH_EXPORT_ROWS if str(s.get("case_id", "")) == WATCH_CASE_ID else LEDGER_ROWS
 
 static func _invoice_id(s: Dictionary) -> String:
-	if str(s.get("case_id", "")) == SESSIONS_CASE_ID: return "BILL-003"
+	if str(s.get("case_id", "")) == SESSIONS_CASE_ID: return "BILL-004" if str(s.get("model_version", "")) == PARTNER_SESSIONS_MODEL_VERSION else "BILL-003"
 	return "BILL-002" if str(s.get("case_id", "")) == WATCH_CASE_ID else "BILL-001"
 
 static func _receipt_id(s: Dictionary) -> String:
@@ -242,7 +340,11 @@ static func _advance(s: Dictionary, minutes: int) -> int:
 				continue
 			var status := int(event.get("status", 403))
 			var event_data: Dictionary = event.get("data", {}).duplicate(true)
-			var event_record := _append_record(s, "app-19", "external-storage", "scheduled_export", status, "外部保存への同期が3件の写しを送信しました。" if status == 200 else "外部保存への同期は現在の接続では拒否されました。", event_data, "SYNC-NODE")
+			var destination := str(event_data.get("destination", "external-storage"))
+			var sync_actor := "SYNC-NODE"
+			if str(s.get("model_version", "")) == PARTNER_SESSIONS_MODEL_VERSION:
+				sync_actor = str(SESSIONS.get_session(s.session_case, str(event_data.get("session_id", ""))).get("device", "BATCH-01"))
+			var event_record := _append_record(s, "app-19", destination, "scheduled_export", status, "連携先への同期が記録行の写しを送信しました。" if status == 200 else "連携先への同期は現在の接続で拒否されました。", event_data, sync_actor)
 			SESSIONS.bind_sync_record(s, str(event.get("sync_id", "")), str(event_record.get("id", "")))
 		s["elapsed_minutes"] = previous_elapsed + minutes
 		return int(advancement.get("impact_cost", 0))
@@ -320,6 +422,16 @@ static func _record_by_id(s: Dictionary, id: String) -> Dictionary:
 		if str(row.get("id", "")) == id: return row
 	return {}
 
+static func _partner_reissue_is_evidenced(s: Dictionary, purpose: String) -> bool:
+	var required_session_id := "SES-202" if purpose == "billing" else "SES-203"
+	var expected_destination := "invoice/BILL-004" if purpose == "billing" else "partner-vault/dispatch"
+	var records: Array = s.get("records", [])
+	for index in range(records.size() - 1, -1, -1):
+		var row: Dictionary = records[index]
+		if str(row.get("action", "")) != "inspect_connection" or str(row.get("data", {}).get("session_id", "")) != required_session_id: continue
+		return str(row.get("data", {}).get("destination", "")) == expected_destination and int(row.get("data", {}).get("read_rows", -1)) == (3 if purpose == "billing" else 120)
+	return false
+
 static func _latest_egress_record_id(s: Dictionary) -> String:
 	var records: Array = s.get("records", [])
 	for index in range(records.size() - 1, -1, -1):
@@ -346,14 +458,14 @@ static func _report_covers_latest_egress(report_record: Dictionary, s: Dictionar
 	return false
 
 static func _audit_covers_business_events(audit_record: Dictionary, s: Dictionary) -> bool:
-	if str(s.get("model_version", "")) != SESSIONS_MODEL_VERSION: return true
+	if str(s.get("model_version", "")) not in [SESSIONS_MODEL_VERSION, PARTNER_SESSIONS_MODEL_VERSION]: return true
 	var required_ids: Array[String] = SESSIONS.business_event_record_ids(s.get("session_case", {}))
 	for record_id in required_ids:
 		if not _audit_snapshot_covers_egress(audit_record, record_id): return false
 	return true
 
 static func _report_covers_latest_business(report_record: Dictionary, s: Dictionary) -> bool:
-	if str(s.get("model_version", "")) != SESSIONS_MODEL_VERSION: return true
+	if str(s.get("model_version", "")) not in [SESSIONS_MODEL_VERSION, PARTNER_SESSIONS_MODEL_VERSION]: return true
 	if not SESSIONS.business_snapshot_matches(report_record.get("business_snapshot", null), s.get("session_case", {})): return false
 	var required_ids: Array[String] = SESSIONS.business_event_record_ids(s.get("session_case", {}))
 	for source in report_record.get("records", []):
@@ -370,6 +482,7 @@ static func _act(s: Dictionary, action: String, args: Dictionary) -> Dictionary:
 	var app_id := str(args.get("app", ""))
 	var threat_id := _threat_app_id(s)
 	var sessions_case := str(s.get("case_id", "")) == SESSIONS_CASE_ID
+	var partner_case := sessions_case and str(s.get("model_version", "")) == PARTNER_SESSIONS_MODEL_VERSION
 	var session_id := str(args.get("session_id", ""))
 	var app: Dictionary
 	var usage_cost := 0
@@ -389,8 +502,10 @@ static func _act(s: Dictionary, action: String, args: Dictionary) -> Dictionary:
 			if not s.session_case.get("sessions", []).any(func(item): return bool(item.get("active", false))): return _result(true,false,false,0,0,0,"発行済みの接続はすべて失効しています。")
 			minutes = 2
 		"reissue_connection":
-			if not sessions_case or str(args.get("purpose", "")) not in ["billing", "aggregation"]: return _error("再発行する通常業務の接続を選んでください。")
-			if not SESSIONS.active_for(s.session_case, str(args.purpose)).is_empty(): return _result(true,false,false,0,0,0,"この用途には有効な接続が既にあります。",{"purpose":str(args.purpose)})
+			var reissue_purpose := str(args.get("purpose", ""))
+			if not sessions_case or reissue_purpose not in (["billing", "partner-dispatch"] if partner_case else ["billing", "aggregation"]): return _error("再発行する通常業務の接続を選んでください。")
+			if partner_case and not _partner_reissue_is_evidenced(s, reissue_purpose): return _error("OPS-208の承認範囲と調査済み要求先を確認してから再発行してください。")
+			if not SESSIONS.active_for(s.session_case, reissue_purpose).is_empty(): return _result(true,false,false,0,0,0,"この用途には有効な接続が既にあります。",{"purpose":reissue_purpose})
 			if s.session_case.get("sessions", []).size() >= 64 or int(s.session_case.get("next_session_number", 1000)) > 999: return _error("再発行できる接続履歴の上限に達しました。既存記録は保持しています。")
 			minutes = 2
 		"inspect_app":
@@ -447,6 +562,9 @@ static func _act(s: Dictionary, action: String, args: Dictionary) -> Dictionary:
 			if str(s.get("case_id", "")) == SESSIONS_CASE_ID:
 				required_audit_ids.append_array(["audit-3", "audit-4"])
 			var selected_baseline := true
+			if partner_case:
+				for prior in s.get("partner_source", {}).get("approved_originals", []):
+					if ("partner-baseline-%s" % str(prior.get("id", ""))) not in report_source_ids_list: selected_baseline = false
 			if str(s.get("case_id", "")) == WATCH_CASE_ID:
 				for prior_original in s.get("watch_source", {}).get("approved_originals", []):
 					var expected_reference := "watch-baseline-%s" % str(prior_original.get("id", ""))
@@ -462,11 +580,11 @@ static func _act(s: Dictionary, action: String, args: Dictionary) -> Dictionary:
 						collected_audit = true
 			var selected_required_audit := required_audit_ids.all(func(id): return id in report_source_ids_list)
 			var inspected_all_connections := true
-			if str(s.get("case_id", "")) == SESSIONS_CASE_ID:
+			if sessions_case:
 				for required_session_id in ["SES-201", "SES-202", "SES-203"]:
 					if not inspected_sessions.has(required_session_id): inspected_all_connections = false
 			if not selected_audit1 or not selected_audit2 or not selected_required_audit or not selected_baseline or not collected_audit or not inspected_all_connections:
-				return _error("発行原本、3接続の調査、取得済み監査記録が必要です。") if str(s.get("case_id", "")) == SESSIONS_CASE_ID else _error("両アプリと前回の承認原本、取得した監査記録が必要です。")
+				return _error("今回の承認原本、前回の承認原本、3接続の調査、取得済み監査記録が必要です。") if partner_case else (_error("発行原本、3接続の調査、取得済み監査記録が必要です。") if sessions_case else _error("両アプリと前回の承認原本、取得した監査記録が必要です。"))
 			var prior_report: Dictionary = s.get("report", {})
 			var prior_latest_report: Dictionary = prior_report.get("latest", prior_report.get("original", {}))
 			if bool(prior_report.get("submitted", false)) and _report_covers_latest_egress(prior_latest_report, s) and _report_covers_latest_business(prior_latest_report, s):
@@ -491,7 +609,13 @@ static func _act(s: Dictionary, action: String, args: Dictionary) -> Dictionary:
 			var destination := str(target.get("expected_destination", ""))
 			var approved := bool(target.get("approved", false))
 			var approval_change := "FIN-114" if approved else "none"
-			record = _append_record(s, "app-19", "session:" + session_id, "inspect_connection", 200, "発行原本と、この接続が要求する取得先・対象行数を照合しました。送信済み件数は同期原記録に残ります。", {"session_id":session_id,"device":str(target.get("device", "")),"issued_at":str(target.get("issued_at", "")),"destination":destination,"read_rows":int(target.get("expected_read_rows", 0)),"approved":approved,"approved_change":approval_change,"permission":"ledger.read","source_record_id":str(source_record.get("id", target.get("issued_record_id", "")))})
+			var inspection_data := {"session_id":session_id,"device":str(target.get("device", "")),"issued_at":str(target.get("issued_at", "")),"destination":destination,"read_rows":int(target.get("expected_read_rows", 0)),"approved":approved,"approved_change":approval_change,"permission":"ledger.read","source_record_id":str(source_record.get("id", target.get("issued_record_id", "")))}
+			if partner_case:
+				approval_change = "OPS-208" if approved else "none"
+				inspection_data["approved_change"] = approval_change
+				inspection_data["request_id"] = str(source_record.get("data", {}).get("request_id", ""))
+				inspection_data["authorized_destinations"] = s.get("partner_source", {}).get("approved_destinations", []).duplicate(true)
+			record = _append_record(s, "app-19", "session:" + session_id, "inspect_connection", 200, "発行原本と、この接続が要求する取得先・対象行数を照合しました。送信済み件数は同期原記録に残ります。", inspection_data)
 			result.data.session_id = session_id
 			result.message = "接続IDと要求先・対象行数を照合しました。"
 		"revoke_connection":
@@ -515,7 +639,7 @@ static func _act(s: Dictionary, action: String, args: Dictionary) -> Dictionary:
 			var issued: Dictionary = SESSIONS.reissue(s.session_case, purpose, int(s.get("elapsed_minutes", 0)))
 			if issued.is_empty(): return _error("この用途の接続は再発行できません。")
 			s.world_revision = world_revision + 1
-			record = _append_record(s, "app-19", "session:" + str(issued.get("id", "")), "reissue_connection", 200, "FIN-114の範囲内で通常業務用の接続を再発行しました。", {"session_id":str(issued.get("id", "")),"purpose":purpose,"device":str(issued.get("device", "")),"issued_at":str(issued.get("issued_at", "")),"generation":int(issued.get("generation", 1)),"world_revision":int(s.world_revision)})
+			record = _append_record(s, "app-19", "session:" + str(issued.get("id", "")), "reissue_connection", 200, "承認範囲内で業務用の接続を再発行しました。", {"session_id":str(issued.get("id", "")),"purpose":purpose,"device":str(issued.get("device", "")),"issued_at":str(issued.get("issued_at", "")),"generation":int(issued.get("generation", 1)),"world_revision":int(s.world_revision)})
 			SESSIONS.mark_issued_record(s.session_case, str(issued.get("id", "")), str(record.get("id", "")))
 			result.data.session_id = str(issued.get("id", ""))
 			result.message = "通常業務用の新しい接続IDを発行しました。旧接続IDの履歴は維持されています。"
@@ -708,7 +832,10 @@ static func _report_requirements(s: Dictionary) -> bool:
 			if str(raw.get("action", "")) == "inspect_connection": inspected[str(raw.get("data", {}).get("session_id", ""))] = true
 		for session_id in ["SES-201", "SES-202", "SES-203"]:
 			if not inspected.has(session_id): return false
-		if str(s.get("model_version", "")) == SESSIONS_MODEL_VERSION and not _report_covers_latest_business(latest, s): return false
+		if str(s.get("model_version", "")) == PARTNER_SESSIONS_MODEL_VERSION:
+			for prior in s.get("partner_source", {}).get("approved_originals", []):
+				if ("partner-baseline-%s" % str(prior.get("id", ""))) not in ids: return false
+		if str(s.get("model_version", "")) in [SESSIONS_MODEL_VERSION, PARTNER_SESSIONS_MODEL_VERSION] and not _report_covers_latest_business(latest, s): return false
 	if str(s.get("case_id", "")) == WATCH_CASE_ID:
 		var ids: Variant = latest.get("record_ids", [])
 		if not ids is Array: return false
@@ -749,6 +876,8 @@ static func checks(s: Dictionary) -> Array:
 	]
 
 static func _session_checks(s: Dictionary) -> Array:
+	if str(s.get("model_version", "")) == PARTNER_SESSIONS_MODEL_VERSION:
+		return _partner_session_checks(s)
 	var world: Dictionary = s.get("session_case", {})
 	var consent: Dictionary = world.get("consent", {})
 	var threat: Dictionary = SESSIONS.get_session(world, SESSIONS.THREAT_SESSION_ID)
@@ -778,6 +907,35 @@ static func _session_checks(s: Dictionary) -> Array:
 		var jobs: Array = world.get("business", {}).get("jobs", [])
 		checks.append({"id":"business_jobs","label_key":"saas_sessions_check_business","passed":jobs.size() == 2 and jobs.all(func(job): return str(job.get("status", "")) == "completed")})
 	return checks
+
+static func _partner_session_checks(s: Dictionary) -> Array:
+	var world: Dictionary = s.get("session_case", {})
+	var consent: Dictionary = world.get("consent", {})
+	var target := SESSIONS.get_session(world, "SES-201")
+	var denied_target := false
+	var dispatched_current := false
+	var active_dispatch := SESSIONS.active_for(world, "partner-dispatch")
+	for raw in s.get("records", []):
+		if str(raw.get("action", "")) != "probe_session" or int(raw.get("world_revision", -1)) != int(s.get("world_revision", 0)): continue
+		var id := str(raw.get("data", {}).get("session_id", ""))
+		if id == "SES-201" and int(raw.get("status", 0)) == 403 and not bool(target.get("active", true)): denied_target = true
+		if not active_dispatch.is_empty() and id == str(active_dispatch.get("id", "")) and int(raw.get("status", 0)) == 200: dispatched_current = true
+	var invoice: Dictionary = s.get("invoice", {})
+	var active_billing := SESSIONS.active_for(world, "billing")
+	var invoice_current := not active_billing.is_empty() and bool(consent.get("enabled", false)) and str(invoice.get("receipt_id", "")) == _receipt_id(s) and int(invoice.get("verified_revision", -1)) == int(s.get("world_revision", 0))
+	if invoice_current:
+		var attempts: Array = invoice.get("attempts", [])
+		invoice_current = not attempts.is_empty() and int(attempts.back().get("status", 0)) == 200 and int(attempts.back().get("world_revision", -1)) == int(s.get("world_revision", 0)) and str(attempts.back().get("data", {}).get("used_session_id", "")) == str(active_billing.get("id", ""))
+	var jobs: Array = world.get("business", {}).get("jobs", [])
+	return [
+		{"id":"report","label_key":"saas_partner_check_report","passed":_report_requirements(s)},
+		{"id":"consent","label_key":"saas_partner_check_consent","passed":bool(consent.get("enabled", false)) and str(consent.get("approved_change", "")) == "OPS-208"},
+		{"id":"revocation","label_key":"saas_partner_check_revocation","passed":not target.is_empty() and not bool(target.get("active", true)) and str(target.get("status", "")) == "revoked"},
+		{"id":"denial","label_key":"saas_partner_check_denial","passed":denied_target},
+		{"id":"billing","label_key":"saas_partner_check_billing","passed":invoice_current},
+		{"id":"dispatch","label_key":"saas_partner_check_dispatch","passed":dispatched_current},
+		{"id":"business_jobs","label_key":"saas_partner_check_business","passed":jobs.size() == 2 and jobs.all(func(job): return str(job.get("status", "")) == "completed")}
+	]
 
 static func view(state: Dictionary, selected: String = "") -> Dictionary:
 	if not _valid_state(state): return {}
@@ -836,6 +994,13 @@ static func view(state: Dictionary, selected: String = "") -> Dictionary:
 		session_view["schedule"] = schedule.duplicate(true)
 		session_view["billing"] = {"invoice_id":str(invoice.get("id", "BILL-003")),"amount":int(invoice.get("amount", 0)),"receipt_id":str(invoice.get("receipt_id", "")),"verified_revision":int(invoice.get("verified_revision", -1)),"used_session_id":str(invoice_attempt.get("data", {}).get("used_session_id", invoice_attempt.get("used_session_id", ""))),"last_attempt":invoice_attempt}
 		session_view["observations"] = state.get("records", []).duplicate(true)
+		if str(state.get("model_version", "")) == PARTNER_SESSIONS_MODEL_VERSION:
+			session_view["partner_source"] = state.get("partner_source", {}).duplicate(true)
+			session_view["is_partner_case"] = true
+			session_view["required_session_ids"] = ["SES-201","SES-202","SES-203"]
+			var required_record_ids: Array[String] = ["audit-1","audit-2","audit-3","audit-4"]
+			for prior in state.get("partner_source", {}).get("approved_originals", []): required_record_ids.append("partner-baseline-%s" % str(prior.get("id", "")))
+			session_view["required_record_ids"] = required_record_ids
 		data["session_case"] = session_view
 		data["sessions"] = session_view.get("sessions", []).duplicate(true)
 	return {"kind":"saas_response_v1","revision":int(state.get("revision", 0)),"selected":selected,"checks":checks(state),"last_result":state.get("last_result", {}).duplicate(true),"saas":data}

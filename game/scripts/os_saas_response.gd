@@ -54,7 +54,7 @@ static func refresh(d) -> void:
 	var tabs:Array=[["identity","Identity"],["billing","請求デスク"],["records","原記録・整理"],["results","受入確認"]]
 	if Business.enabled(n):
 		tabs[1][1]=Business.tab_label(n,"billing")
-		tabs.insert(2,["batch",Business.tab_label(n,"aggregation")])
+		tabs.insert(2,["batch",Business.tab_label(n,Business.secondary_purpose(n))])
 	U.navigation(d,KIND,tabs,"identity","SaasTab_")
 	for tab in d.widgets.advanced.nav.get_children():
 		if tab is Button:_light(tab)
@@ -62,9 +62,9 @@ static func refresh(d) -> void:
 		"billing":_billing(d,body,n)
 		"batch":
 			if Business.enabled(n):
-				var batch:=_surface(body,"Batch Desk / 配車集計",Color("326e66"))
+				var batch:=_surface(body,Business.desk_title(n),Color("326e66"))
 				_raw(d,batch,n)
-				Business.render(d,batch,n,"aggregation")
+				Business.render(d,batch,n,Business.secondary_purpose(n))
 			else:_identity(d,body,n)
 		"records":_records(d,body,n,data.get("checks",[]))
 		"results":U.checks(body,data)
@@ -259,15 +259,17 @@ static func _records(d,parent:Node,n:Dictionary,checks:Array) -> void:
 		if str(check.get("id",""))=="report":current_report=bool(check.get("passed",false))
 	if submitted:_label(status,("✓ 最新の報告" if current_report else "△ 追補が必要")+" · 第%d版" % int(report.get("version",1)),13,UI.GREEN if current_report else UI.WARNING)
 	var actions:=U.row(body)
-	var required_sessions:Array=[]
-	for session in n.get("session_case",{}).get("sessions",[]).slice(0,3):required_sessions.append(str(session.get("id","")))
+	var required_sessions:Array=n.get("session_case",{}).get("required_session_ids",[]).duplicate()
+	if required_sessions.is_empty():
+		for session in n.get("session_case",{}).get("sessions",[]).slice(0,3):required_sessions.append(str(session.get("id","")))
+	var required_records:Array=n.get("session_case",{}).get("required_record_ids",["audit-1","audit-2","audit-3","audit-4"])
 	if not required_sessions.is_empty():
 		var missing:Array=required_sessions.duplicate();var audit_acquired:=false
 		for record in sources:
 			if str(record.get("action",""))=="inspect_connection":missing.erase(_record_session(record))
 			if str(record.get("action",""))=="collect_audit":audit_acquired=true
 		if not missing.is_empty() or not audit_acquired:_label(status,("未調査 " + " / ".join(missing) if not missing.is_empty() else "")+(" · 監査未取得" if not audit_acquired else ""),13,MUTED)
-	_button(actions,"原本と最新記録を選択","SaasSelectRecords",_select_records.bind(d,sources,required_sessions))
+	_button(actions,"原本と最新記録を選択","SaasSelectRecords",_select_records.bind(d,sources,required_sessions,required_records))
 	var same:=ids.size()==organized.size() and not ids.is_empty()
 	for id in ids:
 		if not id in organized:same=false
@@ -358,11 +360,11 @@ static func _timeline_row(d,parent:Node,record:Dictionary,selectable:bool,ids:Ar
 	if by_session and not session_id.is_empty():_label(row,session_id,12,MUTED)
 	if str(record.get("action",""))=="scheduled_export":_label(row,"%d行" % record.get("data",{}).get("row_ids",[]).size(),12,UI.RED if code==200 else MUTED)
 
-static func _select_records(d,records:Array,required_sessions:Array=[]) -> void:
+static func _select_records(d,records:Array,required_sessions:Array=[],required_records:Array=["audit-1","audit-2","audit-3","audit-4"]) -> void:
 	var chosen:Array=[];var audit:="";var inspections:Dictionary={}
 	for record in records:
 		var id:=str(record.get("id",""))
-		if id in ["audit-1","audit-2","audit-3","audit-4"] or str(record.get("action", "")) == "baseline_reference":chosen.append(id)
+		if id in required_records or str(record.get("action", "")) == "baseline_reference":chosen.append(id)
 		if str(record.get("action",""))=="collect_audit":audit=id
 		var session_id:=str(record.get("data",{}).get("session_id",record.get("session_id","")))
 		if str(record.get("action",""))=="inspect_connection" and session_id in required_sessions and int(record.get("status",0))==200:inspections[session_id]=id

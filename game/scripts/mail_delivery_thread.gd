@@ -33,6 +33,7 @@ static func project(state: Dictionary, record: Dictionary) -> Dictionary:
 			reply.body = "連携の同意と発行済み接続の取消、既存接続からの取得拒否を確認しました。"
 			if str(reply.case_id) == "advanced-saas-sessions":
 				reply.body = "承認済みの連携を維持したまま、対象接続の失効と取得拒否を確認しました。請求と社内集計を続けられます。"
+				if str(saas.get("model_version", "")) == "saas-partner-v1": reply.body = "本日のOPS-208で承認した配車表の送付と、承認範囲外の資料要求の拒否を確認しました。ミナト配送への受渡と請求を続けられます。"
 			reply.body += "\n予定同期による持出しはありませんでした。" if lost == 0 else "\n外部へ持ち出された延べ%d行の記録は消せません。補償費用¥%dと影響報告を受領しました。" % [lost, int(saas.get("costs", {}).get("impact_cost", 0))]
 			reply.body += "\n請求 %s / 受付 %s を確認しました。" % [str(invoice.get("id", "")), str(invoice.get("receipt_id", ""))]
 			if invoice.get("attempts", []).any(func(attempt): return int(attempt.get("status", 0)) >= 400): reply.body += "\n途中で未受付になった請求も、同じ原票から復旧できています。"

@@ -12,6 +12,7 @@ var factor := 1.0
 var callback: Callable
 var wide := true
 var billing := false
+var handoff := false
 var nodes: Dictionary = {}
 var input_rect := Rect2()
 var gate_rect := Rect2()
@@ -19,10 +20,11 @@ var result_rect := Rect2()
 
 func configure(value: Dictionary, scale: float, action: Callable) -> void:
 	model = value.duplicate(true); factor = scale; callback = action; billing = str(model.get("purpose", "")) == "billing"
-	name = "SaasBillingQueueCanvas" if billing else "SaasBatchCanvas"
+	handoff = str(model.get("purpose", "")) == "partner-dispatch"
+	name = "SaasBillingQueueCanvas" if billing else "SaasPartnerHandoffCanvas" if handoff else "SaasBatchCanvas"
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL; mouse_filter = Control.MOUSE_FILTER_IGNORE
 	for part in ["session", "record"]:
-		var button := Button.new(); button.name = ("SaasBillingQueue" if billing else "SaasBatch") + part.capitalize()
+		var button := Button.new(); button.name = ("SaasBillingQueue" if billing else "SaasPartnerHandoff" if handoff else "SaasBatch") + part.capitalize()
 		button.tooltip_text = "接続券を選択" if part == "session" else "保存された処理原本を開く"
 		button.disabled = part == "record" and str(model.get("evidence_record_id", "")).is_empty()
 		for state in ["normal", "hover", "pressed", "disabled"]: button.add_theme_stylebox_override(state, UI.style(Color.TRANSPARENT, Color.TRANSPARENT, 0, 0, 0))
@@ -116,12 +118,17 @@ func _gate(accent: Color, completed: bool, available: bool) -> void:
 	if billing:
 		for x in [ticket.position.x, ticket.end.x]: draw_circle(Vector2(x, ticket.position.y + 27 * factor), 5 * factor, Color("fbf7fb"))
 		draw_dashed_line(ticket.position + Vector2(20, 4) * factor, ticket.position + Vector2(20, 50) * factor, LINE, factor, 3 * factor)
+	elif handoff:
+		var folder := Rect2(ticket.position + Vector2(8, 10) * factor, Vector2(104, 34) * factor)
+		draw_rect(folder, Color("e3eae2")); draw_rect(folder, accent, false, factor)
+		draw_rect(Rect2(folder.position - Vector2(0, 6) * factor, Vector2(35, 6) * factor), Color("e3eae2"))
+		draw_line(folder.position - Vector2(0, 6) * factor, folder.position + Vector2(35, -6) * factor, accent, factor)
 	else:
 		draw_rect(Rect2(ticket.position + Vector2(8, 8) * factor, Vector2(104, 27) * factor), Color("dbeae4"))
 		for x in [28, 55, 82]: draw_rect(Rect2(ticket.position + Vector2(x, 40) * factor, Vector2(10, 5) * factor), accent)
 	_text(session_id if not session_id.is_empty() else "接続券なし", ticket.position + Vector2(28 if billing else 12, 29) * factor, 13, INK, ticket.size.x - (35 if billing else 20) * factor)
 	_text("使用した券" if completed else "○ 有効券あり" if available else "× 券を再発行", Vector2(gate_rect.position.x, gate_rect.end.y - 24 * factor), 13, accent if completed or available else RED, gate_rect.size.x)
-	_text("請求連携" if billing else "配車集計機", Vector2(gate_rect.position.x, gate_rect.end.y - 3 * factor), 14, INK, gate_rect.size.x)
+	_text("請求連携" if billing else "受渡の接続券" if handoff else "配車集計機", Vector2(gate_rect.position.x, gate_rect.end.y - 3 * factor), 14, INK, gate_rect.size.x)
 
 func _output(accent: Color, completed: bool) -> void:
 	var rect := result_rect.grow(-5 * factor)
@@ -130,6 +137,18 @@ func _output(accent: Color, completed: bool) -> void:
 		_text("✓ 予約処理済み" if completed else "受付控え / 未処理", rect.position + Vector2(8, 24) * factor, 14, accent if completed else MUTED, rect.size.x - 16 * factor)
 		_text("%d分 · %d%s" % [int(model.get("completed_minute", 0)), int(model.get("units", 0)), str(model.get("unit", ""))] if completed else "―", rect.position + Vector2(8, 49) * factor, 15, INK, rect.size.x - 16 * factor)
 		_text(str(model.get("record_id", "")) if completed else "処理の記録なし", rect.position + Vector2(8, 74) * factor, 12, MUTED, rect.size.x - 16 * factor)
+	elif handoff:
+		draw_rect(rect, Color("fffef8")); draw_rect(rect, accent if completed else LINE, false, factor)
+		var folded := PackedVector2Array([rect.position + Vector2(rect.size.x - 15 * factor, 0), rect.position + Vector2(rect.size.x - 15 * factor, 12 * factor), rect.position + Vector2(rect.size.x, 12 * factor)])
+		draw_polyline(folded, LINE, factor)
+		_text(str(model.get("partner_name", "委託先")), rect.position + Vector2(8, 22) * factor, 15, INK, rect.size.x - 26 * factor)
+		_text(str(model.get("destination", "")), rect.position + Vector2(8, 43) * factor, 12, MUTED, rect.size.x - 16 * factor)
+		draw_line(rect.position + Vector2(8, 51) * factor, rect.position + Vector2(rect.size.x - 8 * factor, 51 * factor), LINE, factor)
+		var stamp := Rect2(rect.position + Vector2(8, 60) * factor, Vector2(rect.size.x - 16 * factor, 27 * factor))
+		draw_rect(stamp, accent if completed else LINE, false, (2 if completed else 1) * factor)
+		_text("✓ 委託先受付" if completed else "― 未受付", stamp.position + Vector2(7, 20) * factor, 15, accent if completed else MUTED, stamp.size.x - 14 * factor)
+		_text("%d%s · %d分" % [int(model.get("units", 0)), str(model.get("unit", "")), int(model.get("completed_minute", 0))] if completed else "受付の記録なし", rect.position + Vector2(8, 106) * factor, 13, INK, rect.size.x - 16 * factor)
+		_text(str(model.get("record_id", "")) if completed else "", rect.position + Vector2(8, 126) * factor, 12, MUTED, rect.size.x - 16 * factor)
 	else:
 		draw_rect(rect, Color.WHITE); draw_rect(rect, accent if completed else LINE, false, factor)
 		var header := Rect2(rect.position, Vector2(rect.size.x, 29 * factor)); draw_rect(header, Color("dbeae4"))

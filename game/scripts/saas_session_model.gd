@@ -3,11 +3,16 @@ extends RefCounted
 
 const VERSION := 2
 const LEGACY_VERSION := 1
+const PARTNER_VERSION := 3
 const BUSINESS_VERSION := 1
 const THREAT_SESSION_ID := "SES-203"
 const BUSINESS_JOB_DEFS := [
 	{"id":"BILL-RUN-01","purpose":"billing","label":"請求予約","units":6,"unit":"件","release_minute":8,"deadline_minute":12,"penalty":900},
 	{"id":"DISPATCH-01","purpose":"aggregation","label":"配車集計","units":120,"unit":"行","release_minute":8,"deadline_minute":10,"penalty":1600}
+]
+const PARTNER_JOB_DEFS := [
+	{"id":"BILL-RUN-01","purpose":"billing","label":"請求予約","units":6,"unit":"件","release_minute":8,"deadline_minute":12,"penalty":900},
+	{"id":"PARTNER-HANDOFF-01","purpose":"partner-dispatch","label":"委託先受渡","units":120,"unit":"行","release_minute":8,"deadline_minute":10,"penalty":1600}
 ]
 const EXPORT_ROWS := [
 	{"id":"EXPORT-001","type":"shipment-summary","department":"dispatch"},
@@ -17,6 +22,9 @@ const EXPORT_ROWS := [
 
 static func _whole(value: Variant, minimum: int, maximum: int) -> bool:
 	return typeof(value) in [TYPE_INT, TYPE_FLOAT] and is_finite(float(value)) and float(value) == floorf(float(value)) and float(value) >= minimum and float(value) <= maximum
+
+static func _canonical_json(value: Variant) -> String:
+	return JSON.stringify(JSON.parse_string(JSON.stringify(value)), "", true)
 
 static func create() -> Dictionary:
 	return {
@@ -31,17 +39,39 @@ static func create() -> Dictionary:
 		]
 	}
 
+static func create_partner() -> Dictionary:
+	var world := create()
+	world["version"] = PARTNER_VERSION
+	world["consent"] = {"app_id":"app-19","enabled":true,"approved_change":"OPS-208","approved_by":"operations-owner","approved_destinations":[{"destination":"invoice/BILL-004","device":"BILLING-02","rows":3},{"destination":"partner-vault/dispatch","device":"SYNC-NODE","rows":120,"partner_name":"ミナト配送"}],"revision":0}
+	world["next_session_number"] = 204
+	world["sessions"] = [
+		{"id":"SES-201","app_id":"app-19","purpose":"archive","device":"BATCH-01","issued_at":"08:50","issued_minute":0,"generation":1,"active":true,"status":"active","expected_destination":"partner-vault/archive","expected_read_rows":3,"approved":false,"issued_record_id":""},
+		{"id":"SES-202","app_id":"app-19","purpose":"billing","device":"BILLING-02","issued_at":"08:55","issued_minute":0,"generation":1,"active":true,"status":"active","expected_destination":"invoice/BILL-004","expected_read_rows":3,"approved":true,"issued_record_id":""},
+		{"id":"SES-203","app_id":"app-19","purpose":"partner-dispatch","device":"SYNC-NODE","issued_at":"09:00","issued_minute":0,"generation":1,"active":true,"status":"active","expected_destination":"partner-vault/dispatch","expected_read_rows":120,"approved":true,"issued_record_id":""}
+	]
+	world["business"] = {"version":BUSINESS_VERSION,"jobs":_new_jobs(PARTNER_JOB_DEFS),"loss_cost":0}
+	world["egress"] = {"schedule":[
+		{"id":"PARTNER-SYNC-001","due_minute":12,"status":"scheduled","row_count":0,"record_id":"","session_id":"SES-201","destination":"partner-vault/archive"},
+		{"id":"PARTNER-SYNC-002","due_minute":18,"status":"scheduled","row_count":0,"record_id":"","session_id":"SES-201","destination":"partner-vault/archive"},
+		{"id":"PARTNER-SYNC-003","due_minute":24,"status":"scheduled","row_count":0,"record_id":"","session_id":"SES-201","destination":"partner-vault/archive"}
+	],"exported_rows":[],"impact_cost":0}
+	return world
+
 static func _new_business_jobs() -> Array[Dictionary]:
+	return _new_jobs(BUSINESS_JOB_DEFS)
+
+static func _new_jobs(definitions: Array) -> Array[Dictionary]:
 	var jobs: Array[Dictionary] = []
-	for definition in BUSINESS_JOB_DEFS:
+	for definition in definitions:
 		var row: Dictionary = definition.duplicate(true)
 		row.merge({"status":"scheduled","queued_minute":-1,"completed_minute":-1,"used_session_id":"","loss_charged":false,"loss_amount":0,"record_id":"","queued_record_id":"","loss_record_id":""}, true)
 		jobs.append(row)
 	return jobs
 
 static func validate(world: Variant, elapsed_minutes: int = -1) -> bool:
-	if not world is Dictionary or not _whole(world.get("version", null), LEGACY_VERSION, VERSION): return false
+	if not world is Dictionary or not _whole(world.get("version", null), LEGACY_VERSION, PARTNER_VERSION): return false
 	var world_version := int(world.version)
+	if world_version == PARTNER_VERSION: return _validate_partner(world, elapsed_minutes)
 	var consent: Variant = world.get("consent", null)
 	if not consent is Dictionary or str(consent.get("app_id", "")) != "app-19" or typeof(consent.get("enabled", null)) != TYPE_BOOL: return false
 	if str(consent.get("approved_change", "")) != "FIN-114" or not _whole(consent.get("revision", null), 0, 2147483647): return false
@@ -79,18 +109,61 @@ static func validate(world: Variant, elapsed_minutes: int = -1) -> bool:
 		return not world.has("business")
 	return _validate_business(world.get("business", null), sessions_array, elapsed_minutes)
 
+static func _validate_partner(world: Dictionary, elapsed_minutes: int) -> bool:
+	var consent: Variant = world.get("consent", null)
+	if not consent is Dictionary or str(consent.get("app_id", "")) != "app-19" or typeof(consent.get("enabled", null)) != TYPE_BOOL: return false
+	if str(consent.get("approved_change", "")) != "OPS-208" or not _whole(consent.get("revision", null), 0, 2147483647): return false
+	if not consent.get("approved_destinations", null) is Array or consent.approved_destinations.size() != 2: return false
+	if _canonical_json(consent.approved_destinations[0]) != _canonical_json({"destination":"invoice/BILL-004","device":"BILLING-02","rows":3}): return false
+	if _canonical_json(consent.approved_destinations[1]) != _canonical_json({"destination":"partner-vault/dispatch","device":"SYNC-NODE","rows":120,"partner_name":"ミナト配送"}): return false
+	var sessions: Variant = world.get("sessions", null)
+	if not sessions is Array or sessions.size() < 3 or sessions.size() > 64: return false
+	var ids: Dictionary = {}
+	var active_purposes: Dictionary = {}
+	for raw in sessions:
+		if not raw is Dictionary: return false
+		var id := str(raw.get("id", ""))
+		var purpose := str(raw.get("purpose", ""))
+		if id.is_empty() or ids.has(id) or not id.begins_with("SES-"): return false
+		if purpose not in ["billing", "archive", "partner-dispatch"]: return false
+		if str(raw.get("app_id", "")) != "app-19" or typeof(raw.get("active", null)) != TYPE_BOOL: return false
+		if str(raw.get("status", "")) != ("active" if bool(raw.active) else "revoked"): return false
+		if not raw.get("device", null) is String or not raw.get("issued_at", null) is String: return false
+		if not _whole(raw.get("issued_minute", null), 0, 2147483647) or not _whole(raw.get("generation", null), 1, 2147483647): return false
+		if not raw.get("expected_destination", null) is String or not _whole(raw.get("expected_read_rows", null), 0, 1000000): return false
+		if typeof(raw.get("approved", null)) != TYPE_BOOL or not raw.get("issued_record_id", null) is String: return false
+		ids[id] = true
+		if bool(raw.active):
+			if active_purposes.has(purpose): return false
+			active_purposes[purpose] = id
+	if not ids.has("SES-201") or not ids.has("SES-202") or not ids.has("SES-203"): return false
+	var expected_sessions := {
+		"SES-201":{"purpose":"archive","device":"BATCH-01","expected_destination":"partner-vault/archive","expected_read_rows":3,"approved":false},
+		"SES-202":{"purpose":"billing","device":"BILLING-02","expected_destination":"invoice/BILL-004","expected_read_rows":3,"approved":true},
+		"SES-203":{"purpose":"partner-dispatch","device":"SYNC-NODE","expected_destination":"partner-vault/dispatch","expected_read_rows":120,"approved":true}
+	}
+	for session_id in expected_sessions:
+		var actual: Dictionary = get_session(world, str(session_id))
+		for key in expected_sessions[session_id]:
+			if _canonical_json(actual.get(key, null)) != _canonical_json(expected_sessions[session_id][key]): return false
+	if not _whole(world.get("next_session_number", null), 204, 1000): return false
+	return _validate_business_defs(world.get("business", null), sessions, elapsed_minutes, PARTNER_JOB_DEFS)
+
 static func _validate_business(value: Variant, sessions: Array, elapsed_minutes: int) -> bool:
+	return _validate_business_defs(value, sessions, elapsed_minutes, BUSINESS_JOB_DEFS)
+
+static func _validate_business_defs(value: Variant, sessions: Array, elapsed_minutes: int, definitions: Array) -> bool:
 	if not value is Dictionary or not _whole(value.get("version", null), BUSINESS_VERSION, BUSINESS_VERSION): return false
 	var jobs: Variant = value.get("jobs", null)
-	if not jobs is Array or jobs.size() != BUSINESS_JOB_DEFS.size(): return false
+	if not jobs is Array or jobs.size() != definitions.size(): return false
 	if not _whole(value.get("loss_cost", null), 0, 2147483647): return false
 	var expected_loss := 0
-	for index in BUSINESS_JOB_DEFS.size():
-		var definition: Dictionary = BUSINESS_JOB_DEFS[index]
+	for index in definitions.size():
+		var definition: Dictionary = definitions[index]
 		var job: Variant = jobs[index]
 		if not job is Dictionary: return false
 		for key in ["id", "purpose", "label", "units", "unit", "release_minute", "deadline_minute", "penalty"]:
-			if job.get(key, null) != definition[key]: return false
+			if _canonical_json(job.get(key, null)) != _canonical_json(definition[key]): return false
 		if str(job.get("status", "")) not in ["scheduled", "queued", "completed"]: return false
 		if not _whole(job.get("queued_minute", null), -1, 2147483647) or not _whole(job.get("completed_minute", null), -1, 2147483647): return false
 		if not job.get("used_session_id", null) is String or not job.get("record_id", null) is String or not job.get("queued_record_id", null) is String or not job.get("loss_record_id", null) is String: return false
@@ -166,12 +239,13 @@ static func revoke_all(world: Dictionary) -> Array[Dictionary]:
 	return revoked
 
 static func reissue(world: Dictionary, purpose: String, elapsed_minutes: int) -> Dictionary:
-	if purpose not in ["billing", "aggregation"]: return {}
+	var partner := int(world.get("version", 0)) == PARTNER_VERSION
+	if purpose not in (["billing", "partner-dispatch"] if partner else ["billing", "aggregation"]): return {}
 	var prior := active_for(world, purpose)
 	if not prior.is_empty(): return {}
 	var generation := 1
-	var device := "BILLING-01" if purpose == "billing" else "BATCH-01"
-	var destination := "invoice/BILL-003" if purpose == "billing" else "internal-aggregate"
+	var device := ("BILLING-02" if partner else "BILLING-01") if purpose == "billing" else ("SYNC-NODE" if partner else "BATCH-01")
+	var destination := ("invoice/BILL-004" if partner else "invoice/BILL-003") if purpose == "billing" else ("partner-vault/dispatch" if partner else "internal-aggregate")
 	for raw in world.get("sessions", []):
 		if str(raw.get("purpose", "")) == purpose:
 			generation = maxi(generation, int(raw.get("generation", 0)) + 1)
@@ -206,10 +280,13 @@ static func view(world: Dictionary, records: Array, elapsed_minutes: int = 0) ->
 		row.erase("expected_destination")
 		row.erase("expected_read_rows")
 		row.erase("approved")
+		if int(world.get("version", LEGACY_VERSION)) == PARTNER_VERSION: row.erase("purpose")
 		sessions.append(row)
 	var projection := {"version":int(world.get("version", LEGACY_VERSION)),"consent":world.get("consent", {}).duplicate(true),"sessions":sessions,"next_session_number":int(world.get("next_session_number", 204))}
 	if int(world.get("version", LEGACY_VERSION)) >= VERSION:
 		projection["business"] = business_view(world, elapsed_minutes)
+	if int(world.get("version", LEGACY_VERSION)) == PARTNER_VERSION:
+		projection["partner_source"] = world.get("partner_source", {}).duplicate(true) if world.get("partner_source", {}) is Dictionary else {}
 	return projection
 
 static func advance(state: Dictionary, minutes: int) -> Dictionary:
@@ -236,7 +313,8 @@ static func advance(state: Dictionary, minutes: int) -> Dictionary:
 				rows.append(copy)
 				exported.append({"sync_id":str(item.get("id", "")),"minute":int(item.get("due_minute", finish)),"record_id":"","row":copy.duplicate(true)})
 			impact_cost += rows.size() * 500
-		var event_data := {"sync_id":str(item.get("id", "")),"destination":"external-storage","session_id":str(item.get("session_id", THREAT_SESSION_ID)),"rows":rows.duplicate(true),"row_ids":rows.map(func(row): return str(row.get("id", ""))),"world_revision":int(state.get("world_revision", 0))}
+		var destination := str(item.get("destination", "external-storage"))
+		var event_data := {"sync_id":str(item.get("id", "")),"destination":destination,"session_id":str(item.get("session_id", THREAT_SESSION_ID)),"rows":rows.duplicate(true),"row_ids":rows.map(func(row): return str(row.get("id", ""))),"world_revision":int(state.get("world_revision", 0))}
 		item["status"] = "sent" if allowed else "blocked"
 		item["row_count"] = rows.size()
 		item["session_id"] = str(item.get("session_id", THREAT_SESSION_ID))
@@ -348,6 +426,9 @@ static func business_view(world: Dictionary, elapsed_minutes: int) -> Dictionary
 	for raw in business.get("jobs", []):
 		if not raw is Dictionary: continue
 		var row: Dictionary = raw.duplicate(true)
+		var active_session := active_for(world, str(row.get("purpose", "")))
+		row["configured_available"] = bool(world.get("consent", {}).get("enabled", false)) and not active_session.is_empty()
+		row["current_session_id"] = str(active_session.get("id", ""))
 		if str(row.get("status", "")) == "completed": completed += 1
 		elif str(row.get("status", "")) == "queued": queued += 1
 		jobs.append(row)
@@ -376,7 +457,7 @@ static func business_snapshot_matches(snapshot: Variant, world: Dictionary) -> b
 		var saved_job: Variant = snapshot_jobs[index]
 		if not saved_job is Dictionary: return false
 		for key in fields:
-			if saved_job.get(key, null) != expected_job.get(key, null): return false
+			if _canonical_json(saved_job.get(key, null)) != _canonical_json(expected_job.get(key, null)): return false
 	return true
 
 static func bind_sync_record(state: Dictionary, sync_id: String, record_id: String) -> void:

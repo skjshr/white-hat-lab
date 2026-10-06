@@ -38,7 +38,7 @@ func setup(saved: Dictionary, scale: float, inspect: Callable, next: Callable) -
 	resized.connect(_layout); _layout()
 
 func status_label() -> String:
-	return {"ready":"▶ 相談受付", "locked":"⌛ 準備待ち", "paused":"Ⅱ 相談保留", "fulfilled":"✓ 対応済み"}.get(str(item.get("status", "")), "— 未確認")
+	return {"ready":"▶ 相談受付", "working":"▶ 対応中", "locked":"⌛ 準備待ち", "paused":"Ⅱ 相談保留", "fulfilled":"✓ 対応済み"}.get(str(item.get("status", "")), "— 未確認")
 
 func _field(id: String, value: String, points: int, x: float, y: float, width: float) -> void:
 	var label := Label.new(); label.name = id; label.text = value
@@ -81,7 +81,7 @@ func _title_lines(label: Label, value: String, width: float) -> String:
 func _draw() -> void:
 	draw_style_box(UI.style(Color("f5faf6"), LINE, 6, 0, 1), Rect2(Vector2.ZERO, size))
 	var y := 84 * factor
-	var active: bool = str(item.get("status", "")) in ["ready", "fulfilled"]
+	var active: bool = str(item.get("status", "")) in ["ready", "working", "fulfilled"]
 	for pair in [[.20,.37],[.63,.80]]:
 		var start := Vector2(size.x * float(pair[0]), y); var end := Vector2(size.x * float(pair[1]), y)
 		if active or float(pair[0]) < .3: draw_line(start, end, TEAL, 3 * factor, true)

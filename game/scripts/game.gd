@@ -24,6 +24,7 @@ const HOTEL_FRONTDESK = preload("res://scripts/hotel_frontdesk_model.gd")
 const HOTEL_RECOVERY = preload("res://scripts/hotel_recovery.gd")
 const HOTEL_HANDOFF = preload("res://scripts/hotel_handoff.gd")
 const SAAS_WATCH = preload("res://scripts/company_saas_watch.gd")
+const SAAS_PARTNER = preload("res://scripts/saas_partner_followup.gd")
 const BUSINESS_START_MINUTE := 9 * 60
 const BUSINESS_END_MINUTE := 18 * 60
 const DELIVERY_WAIT_SECONDS := 30.0
@@ -2479,7 +2480,10 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 	# Refreshing the same day's board must not replace previously offered terms.
 	# Only a new offer ID receives a newly authored containment scenario.
 	var previous_endpoint_offers: Dictionary = {}
+	var previous_saas_offers: Dictionary = {}
 	for previous_offer in state.get("offers", []):
+		if previous_offer is Dictionary and str(previous_offer.get("case_id", "")) == SAAS_PARTNER.CASE_ID:
+			previous_saas_offers[str(previous_offer.get("id", ""))] = previous_offer.duplicate(true)
 		if previous_offer is Dictionary and ENDPOINT_ENGAGEMENT.containment_case(str(previous_offer.get("case_id", ""))):
 			previous_endpoint_offers[str(previous_offer.get("id", ""))] = previous_offer.duplicate(true)
 	state.offers = []
@@ -2508,6 +2512,14 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 		var supply_cost := int(CUSTOMER_STOCK.product(str(supply_requirement.get("sku",CUSTOMER_STOCK.SKU))).get("unit_cost",CUSTOMER_STOCK.UNIT_COST)) if not supply_requirement.is_empty() else 0
 		state.offers.append({"id":"career-%d-%s" % [state.day,selected.id],"case_id":selected.id,"chapter":selected.chapter,"title":selected.title,"client":selected.client,"brief":selected.brief,"service":selected.service,"category":category,"grade":tier,"targets":sites,"target_specs":target_specs.duplicate(true),"reward":reward,"base_reward":reward,"required_credit":0,"required_level":needed_level,"required_rank":required_rank,"required_skills":required_skills,"work_family":str(selected.get("work_family","chapter-"+str(selected.chapter))),"supply_requirement":supply_requirement,"estimated_cost":700+supply_cost,"estimated_budget":estimated_budget,"deadline_text":_clock_text(BUSINESS_START_MINUTE+estimated_budget),"unlocked":_case_skills_met(selected,state.skills) and level>=needed_level,"market_available":false,"market_day":int(state.day),"retired_from_new_offers":bool(selected.get("retired_from_new_offers",false))})
 		state.offers[-1].advanced_work_minutes = int(selected.get("advanced_work_minutes", 0))
+		if str(selected.id) == SAAS_PARTNER.CASE_ID:
+			var previous: Dictionary = previous_saas_offers.get(str(state.offers[-1].id), {})
+			var partner_payload: Dictionary = previous.get("saas_partner_payload", {}) if not previous.is_empty() else SAAS_PARTNER.payload(state, int(state.day))
+			if not partner_payload.is_empty():
+				state.offers[-1].saas_partner_payload = partner_payload.duplicate(true)
+				state.offers[-1].title = SAAS_PARTNER.TITLE
+				state.offers[-1].brief = SAAS_PARTNER.BRIEF
+				state.offers[-1].target_specs = [{"chapter":3,"case_id":SAAS_PARTNER.CASE_ID,"name":"北斗物流・委託先送付の接続"}]
 		if str(selected.id) == "advanced-saas-watch":
 			var incident: Dictionary = saas_incidents[0]
 			state.offers[-1].saas_watch_source_contract_id = str(incident.source_contract_id)
@@ -2584,17 +2596,19 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 		if bool(state.get("care_agreements", {}).get(candidate_client, {}).get("active", false)) and not candidate_case_id.is_empty():
 			care_replacement_cases[candidate_case_id] = true
 	var existing_leads: Array = state.get("market_leads", []) if int(state.get("market_day", -1)) == int(state.day) else []
+	var partner_pending := candidate_payload_available(state.offers)
 	if not existing_leads.is_empty(): existing_leads = existing_leads.filter(func(raw_id): return not canceled_today_cases.has(str(raw_id)))
 	if not existing_leads.is_empty():
 		existing_leads = existing_leads.filter(func(raw_id):
 			var lead_id := str(raw_id)
 			var lead_category := str(offer_category_by_case.get(lead_id, ""))
-			return not completed_cases.has(lead_id) or care_replacement_cases.has(lead_id) or quoted_case_ids.has(lead_id) or int(fresh_category_counts.get(lead_category, 0)) == 0)
+			return (lead_id == SAAS_PARTNER.CASE_ID and partner_pending) or not completed_cases.has(lead_id) or care_replacement_cases.has(lead_id) or quoted_case_ids.has(lead_id) or int(fresh_category_counts.get(lead_category, 0)) == 0)
 	for candidate in state.offers:
 		var case_id := str(candidate.get("case_id", ""))
 		var retired := bool(candidate.get("retired_from_new_offers", false))
 		var care_replacement := care_replacement_cases.has(case_id)
-		var completed_allowed := not completed_cases.has(case_id) or care_replacement or quoted_case_ids.has(case_id) or case_id in recovery_cases or int(fresh_category_counts.get(str(candidate.get("category", "")), 0)) == 0
+		var completed_allowed := (case_id == SAAS_PARTNER.CASE_ID and partner_pending) or not completed_cases.has(case_id) or care_replacement or quoted_case_ids.has(case_id) or case_id in recovery_cases or int(fresh_category_counts.get(str(candidate.get("category", "")), 0)) == 0
+		if candidate.has("saas_partner_payload") and not SAAS_PARTNER.matches_available(state, candidate.saas_partner_payload, int(state.day)): completed_allowed = false
 		# Preserve a lead already shown this day, including a quoted/awaiting
 		# retired case. Retirement only affects fresh market generation.
 		if bool(candidate.get("unlocked", false)) and not canceled_today.has(str(candidate.get("id", ""))) and case_id not in carried_cases and completed_allowed and (not retired or case_id in existing_leads): candidate_offers.append(candidate)
@@ -2675,6 +2689,7 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 				break
 	if not hotel_recoveries.is_empty(): relationship_priorities.push_front(HOTEL_HANDOFF.CASE_ID)
 	if not saas_incidents.is_empty(): relationship_priorities.push_front("advanced-saas-watch")
+	if partner_pending: relationship_priorities.push_front(SAAS_PARTNER.CASE_ID)
 	state.market_leads = MARKET_DEMAND.prioritize_relationships(candidate_offers, state.market_leads, relationship_priorities, protected_leads, int(state.day))
 	state.market_day=int(state.day)
 	var lead_set: Dictionary = {}
@@ -2692,6 +2707,11 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 	for quote_id in state.offer_quotes.keys():
 		if quote_id not in current_ids: state.offer_quotes.erase(quote_id)
 
+func candidate_payload_available(offers: Array) -> bool:
+	for offer in offers:
+		if offer is Dictionary and str(offer.get("case_id", "")) == SAAS_PARTNER.CASE_ID and SAAS_PARTNER.matches_available(state, offer.get("saas_partner_payload", {}), int(state.day)): return true
+	return false
+
 func market_summary() -> Dictionary:
 	var result: Dictionary = {}
 	for offer in state.get("offers", []):
@@ -2704,6 +2724,10 @@ func market_summary() -> Dictionary:
 func company_cycle_view() -> Dictionary:
 	var cycle: Dictionary = COMPANY_CYCLE.view(self)
 	var opportunities: Array = cycle.get("leads", []).duplicate(true)
+	var partner_lead: Dictionary = SAAS_PARTNER.lead(self)
+	if not partner_lead.is_empty():
+		opportunities = opportunities.filter(func(item): return str(item.get("client", "")) != SAAS_PARTNER.CLIENT)
+		opportunities.append(partner_lead)
 	for lead in opportunities:
 		if str(lead.get("case_id", "")) == BRANCH_HANDOFF.CASE_ID and str(lead.get("status", "")) not in ["paused", "fulfilled"] and not BRANCH_HANDOFF.available(state):
 			lead.status = "locked"; lead.handoff_unavailable = true
@@ -2827,6 +2851,8 @@ func choose_contract(id: String) -> bool:
 	_sync_contract_context()
 	for offer in state.offers:
 		if offer.id == id and offer.unlocked and _case_skills_met(offer,state.skills) and bool(offer.get("market_available", true)) and int(state.credit) >= int(offer.required_credit) and int(company_level().level) >= int(offer.get("required_level",1)):
+			if offer.has("saas_partner_payload") and not SAAS_PARTNER.matches_available(state, offer.saas_partner_payload, int(state.day)):
+				state = previous_state; _assignments = previous_assignments; _machine = previous_machine; _machine_key = previous_machine_key; return false
 			var handoff_scenario: Dictionary = {}
 			if HOTEL_HANDOFF.is_case(str(offer.get("case_id", ""))):
 				var recovery_source := str(offer.get("hotel_recovery_source_contract_id", ""))
@@ -2880,6 +2906,10 @@ func choose_contract(id: String) -> bool:
 				state.targets[0].scenario = handoff_scenario
 				if handoff_scenario.has("handoff"): state.contract.handoff = handoff_scenario.handoff.duplicate(true)
 			state.advanced = _advanced_engine(selected_case_id).create(selected_case_id) if _advanced_case_id(selected_case_id) else {}
+			if offer.has("saas_partner_payload"):
+				state.advanced = _advanced_engine(selected_case_id).create_partner_followup(offer.saas_partner_payload)
+				if state.advanced.is_empty():
+					state = previous_state; _assignments = previous_assignments; _machine = previous_machine; _machine_key = previous_machine_key; return false
 			if selected_case_id == "advanced-saas-watch":
 				state.advanced = _advanced_engine(selected_case_id).create_followup(offer.get("saas_watch_payload", {}))
 				if state.advanced.is_empty():

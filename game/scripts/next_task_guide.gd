@@ -10,7 +10,7 @@ const ADVANCED_REVIEW_TARGETS := {
 	"advanced-api":"SpecialistStage_3", "advanced-supplychain":"SpecialistStage_3"
 }
 const ADVANCED_WORK_TARGETS := {
-	"advanced-saas-response":{"default":"SaasTab_identity","report":"SaasTab_records","audit":"SaasTab_records","invoice":"SaasTab_billing","billing":"SaasTab_billing","business_jobs":"SaasTab_batch"},
+	"advanced-saas-response":{"default":"SaasTab_identity","report":"SaasTab_records","audit":"SaasTab_records","invoice":"SaasTab_billing","billing":"SaasTab_billing","dispatch":"SaasTab_identity","business_jobs":"SaasTab_batch"},
 	"advanced-hunt":{"default":"HuntTab_timeline","containment":"HuntTab_response","business":"HuntTab_response","false_attribution":"HuntTab_timeline"},
 	"advanced-pentest":{"default":"NetworkTab_explore","path":"NetworkTab_report"},
 	"advanced-recovery":{"default":"RecoveryTab_copies","staging":"RecoveryTab_stage","persistence":"RecoveryTab_stage","identity":"RecoveryTab_release","network":"RecoveryTab_release","business":"RecoveryTab_release","reinfection":"RecoveryTab_release"},
@@ -183,7 +183,7 @@ static func _advanced(game) -> Dictionary:
 	var checks: Array = _array_call(game, "diagnostic_probes")
 	if str(game.state.get("advanced", {}).get("kind", "")) == "advanced-saas-response":
 		# Urgent containment and live business checks precede final paperwork.
-		var priority := ["controls", "revocation", "denial", "invoice", "billing", "aggregation", "business_jobs", "audit", "report", "consent"]
+		var priority := ["controls", "revocation", "denial", "invoice", "billing", "aggregation", "dispatch", "business_jobs", "audit", "report", "consent"]
 		checks.sort_custom(func(a, b): return priority.find(str(a.get("id", ""))) < priority.find(str(b.get("id", ""))))
 	var failed: Dictionary = {}
 	for check in checks:

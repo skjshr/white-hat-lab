@@ -257,7 +257,7 @@ static func _finance(d, host: VBoxContainer, receipt: Dictionary) -> void:
 	_row(d, costs, "ReceiptOperatingCost", UI.copy("receipt_operating_cost"), operating-compensation-change_cost-assistant_cost-leak_cost-business_cost)
 	if assistant_cost > 0: _row(d, costs, "ReceiptAssistantCost", "記録整理助手（%d回）" % int(saas_costs.get("assistant_runs", 0)), assistant_cost)
 	if leak_cost > 0: _row(d, costs, "ReceiptLeakCost", "流出記録の補償（延べ%d行）" % receipt.get("saas_outcome", {}).get("egress", {}).get("exported_rows", []).size(), leak_cost)
-	if business_cost > 0: _row(d, costs, "ReceiptBusinessCost", "請求予約・配車集計の遅延補償", business_cost)
+	if business_cost > 0: _row(d, costs, "ReceiptBusinessCost", "請求予約・委託先受渡の遅延補償" if str(receipt.get("saas_outcome", {}).get("model_version", "")) == "saas-partner-v1" else "請求予約・配車集計の遅延補償", business_cost)
 	if change_cost > 0: _row(d, costs, "ReceiptPentestChangeCost", "顧客変更作業費（%d件）" % receipt.pentest_changes.get("requests", []).size(), change_cost)
 	if compensation > 0: _row(d, costs, "ReceiptCompensationCost", "未封じ込め・業務誤停止の補償" if receipt.get("endpoint_impact",{}).values().any(func(item):return item.has("uncontained_minutes")) else "業務停止・不審送信の補償", compensation)
 	if material > 0: _row(d, costs, "ReceiptMaterialCost", UI.copy("stock_material_cost"), material)
