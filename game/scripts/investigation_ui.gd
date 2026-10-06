@@ -110,14 +110,17 @@ static func begin(d, kind: String, data: Dictionary) -> VBoxContainer:
 static func _restore(d, body: Control, mark: Dictionary) -> void:
 	if not is_instance_valid(body) or d.current_app != "advanced": return
 	var scroll: ScrollContainer = body.get_parent()
-	scroll.scroll_vertical = int(mark.scroll)
-	if str(mark.name).is_empty(): return
 	var existing: Control = body.get_viewport().gui_get_focus_owner()
-	if is_instance_valid(existing): return
-	var control: Control = body.find_child(str(mark.name), true, false)
-	if is_instance_valid(control) and control.is_visible_in_tree():
-		control.grab_focus()
-		if control is LineEdit: control.caret_column = int(mark.caret)
+	if not str(mark.name).is_empty() and not is_instance_valid(existing):
+		var control: Control = body.find_child(str(mark.name), true, false)
+		if is_instance_valid(control) and control.is_visible_in_tree():
+			# Rebuilt controls have not finished layout; retain position while restoring focus.
+			var follow_focus := scroll.follow_focus
+			scroll.follow_focus = false
+			control.grab_focus()
+			if control is LineEdit: control.caret_column = int(mark.caret)
+			scroll.follow_focus = follow_focus
+	scroll.set_deferred("scroll_vertical", int(mark.scroll))
 
 static func send(d, kind: String, action: String, args: Dictionary = {}) -> Dictionary:
 	d._save_session(false)
