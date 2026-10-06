@@ -58,8 +58,8 @@ static func _canonical_event(e: Dictionary) -> String:
 	copy.erase("pinned"); copy.erase("hash")
 	return JSON.stringify(copy)
 
-static func _result(ok: bool, message: String, changed: bool = false, data: Dictionary = {}, minutes: float = 0.0) -> Dictionary:
-	return {"ok":ok,"changed":changed,"minutes":minutes,"message":message,"data":data.duplicate(true)}
+static func _result(ok: bool, message: String, changed: bool = false, data: Dictionary = {}, minutes: float = 0.0, cost: int = 0) -> Dictionary:
+	return {"ok":ok,"changed":changed,"minutes":minutes,"cost":cost,"message":message,"data":data.duplicate(true)}
 
 static func _log(s: Dictionary, operation: String, target: String, status: int, data: Dictionary) -> Dictionary:
 	s.sequence = int(s.sequence) + 1
@@ -176,9 +176,137 @@ static func _resource_path(value: Variant) -> String:
 	return path
 
 static func _network_access(w: Dictionary, principal: String, path: String) -> bool:
-	if principal == "employee01": return path == "share01" or (path.begins_with("share01/") and (not bool(w.fixed) or path != "share01/deploy.env"))
+	if principal == "employee01":
+		var config_restricted: bool = bool(w.get("config_restricted", w.get("fixed", false)))
+		return path == "share01" or (path.begins_with("share01/") and (not config_restricted or path != "share01/deploy.env"))
 	if principal == "svc-report": return path == "evidence" or path.begins_with("evidence/")
 	return false
+
+static func _token_from_env(bytes: String) -> String:
+	for raw_line in bytes.split("\n", false):
+		var line := str(raw_line).strip_edges()
+		if line.begins_with("TOKEN="): return line.trim_prefix("TOKEN=")
+	return ""
+
+static func _repair_state(s: Dictionary, w: Dictionary) -> Dictionary:
+	var stored_value: Variant = w.get("remediation", {})
+	var repair: Dictionary = stored_value.duplicate(true) if stored_value is Dictionary else {}
+	var legacy_fixed := bool(w.get("fixed", w.get("grant_fixed", false)))
+	repair["mode"] = str(repair.get("mode", ""))
+	repair["config_restricted"] = bool(repair.get("config_restricted", legacy_fixed))
+	repair["credential_rotated"] = bool(repair.get("credential_rotated", legacy_fixed))
+	repair["share_isolated"] = bool(repair.get("share_isolated", false))
+	var requests_value: Variant = repair.get("requests", [])
+	repair["requests"] = requests_value.duplicate(true) if requests_value is Array else []
+	repair["change_seq"] = maxi(int(repair.get("change_seq", 0)), repair.requests.size())
+	repair["cost_total"] = maxi(0, int(repair.get("cost_total", 0)))
+	var hashes_value: Variant = repair.get("exposed_credential_hashes", {})
+	var exposed_hashes: Dictionary = hashes_value.duplicate(true) if hashes_value is Dictionary else {}
+	var exposed_epoch := int(repair.get("exposed_credential_epoch", 0))
+	var sources: Array = [s.get("observations", []), s.get("evidence", {}).values(), w.get("report", {}).get("evidence", {}).values()]
+	var seen: Dictionary = {}
+	for source in sources:
+		if not source is Array: continue
+		for row in source:
+			if not row is Dictionary: continue
+			var record_id := str(row.get("id", ""))
+			if record_id.is_empty() or seen.has(record_id): continue
+			seen[record_id] = true
+			var data_value: Variant = row.get("data", {})
+			if not data_value is Dictionary: continue
+			var data: Dictionary = data_value
+			if str(row.get("operation", "")) != "read" or str(row.get("target", "")) != "share01/deploy.env" or int(row.get("status", 0)) != 200 or str(data.get("principal", "")) != "employee01": continue
+			var token := _token_from_env(str(data.get("bytes", "")))
+			if token.is_empty(): continue
+			var epoch := int(data.get("credential_epoch", 1 if not legacy_fixed else maxi(1, int(w.get("credential_epoch", 1)) - 1)))
+			exposed_epoch = maxi(exposed_epoch, epoch)
+			exposed_hashes[str(epoch)] = token.sha256_text()
+	repair["exposed_credential_epoch"] = exposed_epoch
+	repair["exposed_credential_hashes"] = exposed_hashes
+	return repair
+
+static func _record_credential_exposure(s: Dictionary, w: Dictionary, result: Dictionary) -> void:
+	var row: Dictionary = result.get("data", {}).get("record", {})
+	var data: Dictionary = row.get("data", {})
+	var token := _token_from_env(str(data.get("bytes", "")))
+	if token.is_empty(): return
+	var repair := _repair_state(s, w)
+	var epoch := int(data.get("credential_epoch", w.get("credential_epoch", 1)))
+	var hashes: Dictionary = repair.get("exposed_credential_hashes", {})
+	hashes[str(epoch)] = token.sha256_text()
+	repair["exposed_credential_hashes"] = hashes
+	repair["exposed_credential_epoch"] = maxi(int(repair.get("exposed_credential_epoch", 0)), epoch)
+	repair["last_exposed_record_id"] = str(row.get("id", ""))
+	w["remediation"] = repair
+
+static func _is_exposed_old_credential(s: Dictionary, w: Dictionary, user: String, credential: String) -> bool:
+	if user != "svc-report" or credential.is_empty(): return false
+	var repair := _repair_state(s, w)
+	if not bool(repair.credential_rotated): return false
+	var supplied_hash := credential.sha256_text()
+	var exposed_hashes: Dictionary = repair.get("exposed_credential_hashes", {})
+	for epoch_key in exposed_hashes:
+		if int(epoch_key) < int(w.get("credential_epoch", 1)) and str(exposed_hashes[epoch_key]) == supplied_hash: return true
+	return false
+
+static func _request_change(s: Dictionary, change: String) -> Dictionary:
+	var w: Dictionary = s.world
+	if not bool(w.get("report", {}).get("accepted", false)): return _result(false, "先に観測した根拠を提出してください。")
+	var repair := _repair_state(s, w)
+	var cost := 0
+	var minutes := 0.0
+	var message := ""
+	match change:
+		"restrict_config":
+			if bool(repair.config_restricted): return _result(true, "設定は既に制限されています。")
+			repair.config_restricted = true; w.config_restricted = true; w.grant_fixed = true; cost = 300; minutes = 3.0; message = "顧客が配置設定の公開範囲を制限しました。資格情報の再利用と日報業務を実測してください。"
+		"rotate_credential":
+			w.credential_epoch = int(w.get("credential_epoch", 1)) + 1
+			w.credential = "rpt-" + Crypto.new().generate_random_bytes(16).hex_encode()
+			w.files["share01/deploy.env"] = "SERVICE_USER=svc-report\nTOKEN=" + str(w.credential) + "\n"
+			repair.credential_rotated = true; cost = 500; minutes = 4.0; message = "顧客がサービス資格情報を更新しました。設定公開と既存接続への影響を実測してください。"
+		"isolate_share":
+			if bool(repair.share_isolated): return _result(true, "共有サービスは既に隔離されています。")
+			repair.share_isolated = true; cost = 400; minutes = 2.0; message = "顧客が共有サービスを隔離しました。停止した日報業務も確認してください。"
+		"restore_share":
+			if not bool(repair.share_isolated): return _result(true, "共有サービスは稼働中です。")
+			repair.share_isolated = false; cost = 200; minutes = 2.0; message = "顧客が共有サービスを再開しました。現在の設定で再測定してください。"
+		_:
+			return _result(false, "変更依頼を選択してください。")
+	repair.mode = "selected"
+	w.change_revision = int(w.get("change_revision", 0)) + 1
+	w.fixed = bool(repair.config_restricted) and bool(repair.credential_rotated)
+	w.retests = {}
+	repair.change_seq = int(repair.change_seq) + 1
+	var change_record := {"id":"CHG-%03d" % int(repair.change_seq),"change":change,"revision":int(w.change_revision),"cost":cost,"minutes":minutes}
+	repair.requests.append(change_record)
+	repair.cost_total = int(repair.cost_total) + cost
+	w.remediation = repair
+	return _result(true, message, true, {"change":change_record.duplicate(true)}, minutes, cost)
+
+static func _change_control(s: Dictionary, w: Dictionary) -> Dictionary:
+	var repair: Dictionary = _repair_state(s, w)
+	var requests_value: Variant = repair.get("requests", [])
+	var requests: Array = requests_value.duplicate(true) if requests_value is Array else []
+	var available: bool = bool(w.get("report", {}).get("accepted", false))
+	var last_change: Dictionary = requests.back().duplicate(true) if not requests.is_empty() else {}
+	return {
+		"available": available,
+		"config_restricted": bool(repair.get("config_restricted", false)),
+		"credential_rotated": bool(repair.get("credential_rotated", false)),
+		"share_isolated": bool(repair.get("share_isolated", false)),
+		"credential_epoch": int(w.get("credential_epoch", 1)),
+		"change_revision": int(w.get("change_revision", 0)),
+		"last_change": last_change,
+		"requests": requests,
+		"cost_total": int(repair.get("cost_total", 0)),
+		"options": [
+			{"id":"restrict_config", "cost":300, "minutes":3, "label":"設定公開を制限", "enabled":available and not bool(repair.get("config_restricted", false))},
+			{"id":"rotate_credential", "cost":500, "minutes":4, "label":"資格情報を更新", "enabled":available},
+			{"id":"isolate_share", "cost":400, "minutes":2, "label":"共有を隔離", "enabled":available and not bool(repair.get("share_isolated", false))},
+			{"id":"restore_share", "cost":200, "minutes":2, "label":"共有を再開", "enabled":available and bool(repair.get("share_isolated", false))}
+		]
+	}
 
 static func _network_record(s: Dictionary, op: String, path: String, status: int, data: Dictionary, message: String) -> Dictionary:
 	data["principal"] = str(s.world.principal)
@@ -195,18 +323,25 @@ static func _pentest(s: Dictionary, action: String, args: Dictionary, target: St
 		if not user is String or not credential is String: return _result(false, "利用者と資格情報を文字列で入力してください。")
 		if user.length() > 80 or credential.length() > 256: return _result(false, "入力が長すぎます。")
 		var from_principal := str(w.principal)
-		if user != "svc-report" or credential != str(w.credential): return _network_record(s, "authenticate", str(user), 401, {"from_principal":from_principal}, "認証できませんでした。")
+		if user != "svc-report" or credential != str(w.credential):
+			if _is_exposed_old_credential(s, w, str(user), str(credential)): w.retests["credential"] = int(w.get("change_revision", 0))
+			return _network_record(s, "authenticate", str(user), 401, {"from_principal":from_principal}, "認証できませんでした。")
 		w.principal = user; w.authenticated_epoch = int(w.credential_epoch)
 		return _network_record(s, "authenticate", user, 200, {"from_principal":from_principal}, "接続を確立しました。")
 	if action in ["browse", "read"]:
 		var path := _resource_path(args.get("path", target))
 		if path == "!invalid": return _network_record(s, action, "", 400, {}, "パスの形式が不正です。")
-		if str(w.principal) == "svc-report" and int(w.authenticated_epoch) != int(w.credential_epoch): return _network_record(s, action, path, 401, {}, "接続が失効しています。")
+		var repair := _repair_state(s, w)
+		if str(w.principal) == "svc-report" and int(w.authenticated_epoch) != int(w.credential_epoch):
+			if path == "evidence/proof.csv" and bool(repair.credential_rotated) and int(w.authenticated_epoch) < int(w.credential_epoch): w.retests["credential"] = int(w.get("change_revision", 0))
+			return _network_record(s, action, path, 401, {}, "接続が失効しています。")
+		if bool(repair.share_isolated) and (path == "share01" or path.begins_with("share01/")):
+			return _network_record(s, action, path, 503, {"error":"share_isolated"}, "共有サービスは隔離中です。")
 		if path.is_empty() and action == "browse": return _network_record(s, action, path, 200, {"entries":[{"path":"share01","directory":true},{"path":"evidence","directory":true}]}, "許可された検証環境の共有一覧です。")
 		var known: bool = path in ["share01", "evidence"] or w.files.has(path)
 		if not known: return _network_record(s, action, path, 404, {}, "資源が見つかりません。")
 		if not _network_access(w, str(w.principal), path):
-			if bool(w.fixed) and path == "share01/deploy.env" and w.principal == "employee01": w.retests["denied"] = int(w.change_revision)
+			if (bool(w.fixed) or str(repair.get("mode", "")) == "selected" and bool(repair.config_restricted)) and path == "share01/deploy.env" and w.principal == "employee01": w.retests["denied"] = int(w.change_revision)
 			return _network_record(s, action, path, 403, {}, "この利用者にはアクセスが許可されていません。")
 		if action == "browse":
 			if w.files.has(path): return _network_record(s, action, path, 400, {}, "フォルダーを指定してください。")
@@ -216,8 +351,12 @@ static func _pentest(s: Dictionary, action: String, args: Dictionary, target: St
 			return _network_record(s, action, path, 200, {"entries":entries}, "フォルダーを開きました。")
 		if not w.files.has(path): return _network_record(s, action, path, 400, {}, "ファイルを指定してください。")
 		var bytes: String = str(w.files[path])
-		if bool(w.fixed) and path == "share01/daily.csv" and w.principal == "employee01": w.retests["business"] = int(w.change_revision)
-		return _network_record(s, action, path, 200, {"bytes":bytes,"sha256":bytes.sha256_text()}, "ファイルの内容を取得しました。")
+		if (bool(w.fixed) or str(repair.get("mode", "")) == "selected") and path == "share01/daily.csv" and w.principal == "employee01": w.retests["business"] = int(w.change_revision)
+		var read_data := {"bytes":bytes,"sha256":bytes.sha256_text()}
+		if path == "share01/deploy.env" and w.principal == "employee01": read_data["credential_epoch"] = int(w.get("credential_epoch", 1))
+		var read_result := _network_record(s, action, path, 200, read_data, "ファイルの内容を取得しました。")
+		if path == "share01/deploy.env" and w.principal == "employee01": _record_credential_exposure(s, w, read_result)
+		return read_result
 	if action == "submit_finding":
 		var ids = args.get("evidence_ids", [])
 		if not ids is Array or ids.size() < 2 or ids.size() > 6: return _result(false, "観測した根拠を 2〜6 件選んでください。")
@@ -231,13 +370,17 @@ static func _pentest(s: Dictionary, action: String, args: Dictionary, target: St
 				proof = proof or (str(row.target) == "evidence/proof.csv" and row.data.get("principal", "") == "svc-report" and not str(row.data.get("bytes", "")).is_empty())
 		if not leak or not proof: return _result(false, "権限の変化と取得できたデータを再現できる原記録が必要です。")
 		w.report = {"evidence":saved,"accepted":true}
-		return _result(true, "顧客が再現を確認しました。修正版を受け取れます。", true)
+		return _result(true, "顧客が再現を確認しました。変更依頼を選択できます。", true)
+	if action == "request_change":
+		var change := str(args.get("change", ""))
+		return _request_change(s, change)
 	if action in ["customer_fix", "modify_grant"]:
 		if not bool(w.report.get("accepted", false)): return _result(false, "先に観測した根拠を提出してください。")
 		if bool(w.fixed): return _result(true, "修正版は受領済みです。")
-		w.fixed = true; w.grant_fixed = true; w.change_revision = int(w.change_revision) + 1
+		w.fixed = true; w.config_restricted = true; w.grant_fixed = true; w.change_revision = int(w.change_revision) + 1
 		w.credential_epoch = int(w.credential_epoch) + 1; w.credential = "rotated-" + str(w.credential_epoch)
 		w.files["share01/deploy.env"] = "SERVICE_USER=svc-report\nTOKEN=" + str(w.credential) + "\n"
+		w.retests = {}
 		return _result(true, "顧客が配置設定の公開範囲と資格情報を更新しました。元の操作と通常の日報を再確認してください。", true, {}, 3)
 	return _result(false, "資源の閲覧・読取・認証で観測してください。旧経路ショートカットは利用できません。")
 
@@ -353,6 +496,12 @@ static func checks(state: Dictionary) -> Array:
 		values = [linked.size() == 3 and normal, source_evidence.size() >= 2 and s.evidence.has("CHG-114"), contained and int(security.get("revision", -1)) == int(w.change_revision), running and int(business.get("revision", -1)) == int(w.change_revision), normal and bool(w.sessions["sid-b21"].active) and bool(w.tasks["task-backup"].enabled)]
 	elif s.kind == "advanced-pentest":
 		values = [not s.observations.is_empty(), bool(w.report.get("accepted", false)), bool(w.fixed) and int(w.retests.get("denied", -1)) == int(w.change_revision), bool(w.fixed) and int(w.retests.get("business", -1)) == int(w.change_revision)]
+		var repair: Dictionary = _repair_state(s, w)
+		if str(repair.get("mode", "")) == "selected":
+			var epoch: int = int(w.get("credential_epoch", 1))
+			var exposed_epoch: int = int(repair.get("exposed_credential_epoch", 0))
+			var credential_retest: bool = int(w.retests.get("credential", -1)) == int(w.get("change_revision", 0))
+			values.append(bool(w.fixed) and credential_retest and exposed_epoch > 0 and epoch > exposed_epoch)
 	else:
 		var current: bool = int(w.get("scan", {}).get("revision", -1)) == int(w.stage_revision)
 		var ledger := _ledger(w, str(w.get("staged", {}).get("ledger", "")))
@@ -360,9 +509,15 @@ static func checks(state: Dictionary) -> Array:
 		var tested: bool = int(w.business_test.get("revision", -1)) == int(w.stage_revision) and bool(w.business_test.get("running", false))
 		var startup:=_startup(str(w.get("staged",{}).get("startup","")))
 		values = [ledger.matches, current and ledger.errors.is_empty(), identity, not startup.writes_ledger and startup.errors.is_empty() and current, bool(w.get("reconnected", false)) and not bool(w.network_isolated), tested and _ledger(w, str(w.production.get("ledger", ""))).matches, bool(w.get("reconnected", false)) and not bool(w.get("reinfection_observed", true)) and int(w.published_revision) == int(w.stage_revision)]
+	var check_defs: Array = s.checks.duplicate(true)
+	if s.kind == "advanced-pentest" and str(_repair_state(s, w).get("mode", "")) == "selected":
+		var has_credential_check := false
+		for definition in check_defs:
+			if str(definition.get("id", "")) == "credential": has_credential_check = true
+		if not has_credential_check: check_defs.append({"id":"credential", "label_key":"adv_check_credential_revoked"})
 	var rows: Array = []
-	for i in s.checks.size():
-		var row: Dictionary = s.checks[i].duplicate(true); row["passed"] = bool(values[i]) if i < values.size() else false; rows.append(row)
+	for i in check_defs.size():
+		var row: Dictionary = check_defs[i].duplicate(true); row["passed"] = bool(values[i]) if i < values.size() else false; rows.append(row)
 	return rows
 
 static func view(state: Dictionary, selected: String = "") -> Dictionary:
@@ -377,7 +532,7 @@ static func view(state: Dictionary, selected: String = "") -> Dictionary:
 		out.records = [{"id":"work-orders","label":"顧客の作業予定","detail":JSON.stringify(w.work_orders)}]
 	elif s.kind == "advanced-pentest":
 		var topology: Dictionary = PENTEST_TOPOLOGY.project(["share01", "evidence"],str(w.principal),int(w.get("change_revision", 0)),s.observations,s.evidence,w.report.get("evidence", {}))
-		out["network"] = {"principal":w.principal,"scope":["share01", "evidence"],"brief":"社員アカウントから到達できる範囲を、架空の検証環境だけで確認してください。日報共有は継続利用します。設定変更は顧客が行います。","fixed":w.fixed,"report":w.report,"retests":w.retests,"change_revision":int(w.get("change_revision", 0)),"topology":topology}
+		out["network"] = {"principal":w.principal,"scope":["share01", "evidence"],"brief":"社員アカウントから到達できる範囲を、架空の検証環境だけで確認してください。日報共有は継続利用します。設定変更は顧客が行います。","fixed":w.fixed,"report":w.report,"retests":w.retests,"change_revision":int(w.get("change_revision", 0)),"topology":topology,"change_control":_change_control(s, w)}
 		out.records = [{"id":"scope","label":"許可範囲","detail":"share01 / evidence — 閲覧・読取・取得した資格情報による認証。削除・範囲外接続は禁止。"}]
 	else:
 		var snapshots: Array = []

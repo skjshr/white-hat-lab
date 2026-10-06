@@ -1578,7 +1578,10 @@ func advanced_action(action: String, args: Dictionary = {}) -> Dictionary:
 	if action in ["verify", "measure", "retest"] and state.advanced.has("measurement_revision"):
 		state.advanced.measurement_revision = int(state.advanced.revision)
 	state.validated_revision = -1
-	_work_add(float(result.get("minutes", 0)), 0, true)
+	var change_cost := maxi(0, int(result.get("cost", 0))) if action == "request_change" and str(state.advanced.get("kind", "")) == "advanced-pentest" else 0
+	if change_cost > 0:
+		state.work["pentest_change_cost"] = int(state.work.get("pentest_change_cost", 0)) + change_cost
+	_work_add(float(result.get("minutes", 0)), change_cost, true)
 	_sync_target()
 	if not save_game():
 		state = before; _assignments = before_assignments; _machine = before_machine; _machine_key = before_machine_key
@@ -2918,6 +2921,8 @@ func deliver() -> bool:
 	if state.care_agreements.has(client): renewal_outcome = "active" if bool(state.care_agreements[client].get("active",false)) else "suspended"
 	state.last_receipt = {"day":int(state.day),"client":mission().client,"title":mission().title,"fee":fee,"bonus":bonus,"baseline_bonus":baseline_bonus,"quality_score":int(review.get("score",0)),"grade":str(review.get("grade","C")),"baseline_sites":int(review.get("recorded_sites",0)),"baseline_total_sites":int(review.get("total_sites",1)),"cost":int(status.costs),"material_cost":material_cost,"material_billable":invoiced and material_cost > 0,"hardware_serial":str(_customer_hardware().get("serial","")),"net":net,"minutes":status.minutes,"elapsed_minutes":status.get("elapsed_minutes",status.minutes),"budget":status.budget,"rating":status.quality,"credit_gain":int(state.credit)-credit_before,"credit_before":credit_before,"credit_after":state.credit,"checks":state.checks.duplicate(true),"plan":state.contract_plan,"level_before":level_before,"level_after":int(company_level().level),"xp_gain":maxi(net,0),"satisfaction_before":satisfaction_before,"satisfaction_after":int(relation.satisfaction),"renewal_outcome":renewal_outcome,"price_satisfaction_delta":price_satisfaction_delta,"quality_satisfaction_delta":quality_satisfaction_delta,"agreed_fee":agreed_fee,"reference_fee":reference_fee}
 	state.last_receipt.case_id = str(state.contract.get("case_id", ""))
+	if str(state.get("advanced", {}).get("kind", "")) == "advanced-pentest" and not state.advanced.get("world", {}).get("remediation", {}).get("requests", []).is_empty():
+		state.last_receipt.pentest_changes = {"cost_total":int(state.work.get("pentest_change_cost", 0)),"requests":state.advanced.world.remediation.requests.duplicate(true),"revision":int(state.advanced.world.get("change_revision", 0)),"retests":state.advanced.world.get("retests", {}).duplicate(true)}
 	if state.work.has("endpoint_impact"): state.last_receipt.endpoint_impact = state.work.endpoint_impact.duplicate(true)
 	if endpoint_containment: state.last_receipt.endpoint_satisfaction_delta = endpoint_satisfaction_delta
 	var hotel_outcome := _hotel_workflow_outcome()
@@ -2939,6 +2944,7 @@ func deliver() -> bool:
 	state.history[-1].work_family = str(delivered_case.get("work_family", COMPANY_CYCLE.FAMILIES[_current_chapter()]))
 	# Keep this delivery's existing observations after dispatch contexts retire.
 	state.history[-1].delivery_results = state.last_receipt.delivery_results.duplicate(true)
+	if state.last_receipt.has("pentest_changes"): state.history[-1].pentest_changes = state.last_receipt.pentest_changes.duplicate(true)
 	if state.last_receipt.has("endpoint_impact"): state.history[-1].endpoint_impact = state.last_receipt.endpoint_impact.duplicate(true)
 	if endpoint_containment: state.history[-1].endpoint_satisfaction_delta = endpoint_satisfaction_delta
 	if state.last_receipt.has("hotel_workflow"): state.history[-1].hotel_workflow = state.last_receipt.hotel_workflow.duplicate(true)

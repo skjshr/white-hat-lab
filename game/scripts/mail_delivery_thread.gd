@@ -26,6 +26,12 @@ static func project(state: Dictionary, record: Dictionary) -> Dictionary:
 				if str(probe.get("id",""))=="staff-write" and bool(probe.get("recorded",false)) and bool(probe.get("passed",false)) and str(probe.get("command","" )).contains("/srv/data/report.txt") and str(probe.get("result",""))=="putting file report.txt: OK": reply.report_write_confirmed=true
 	if confirmed:
 		reply.body = "対応内容の受取を確認しました。"
+		var pentest_changes: Dictionary = own.get("pentest_changes", {})
+		if str(reply.case_id) == "advanced-pentest" and not pentest_changes.get("requests", []).is_empty():
+			var requests: Array = pentest_changes.requests
+			reply.body = "%sまでの変更依頼%d件を確認しました。公開設定の閲覧制限と旧資格情報の失効、日報を利用できることを再診断いただきました。\n変更作業費は合計¥%sです。" % [str(requests.back().get("id", "")), requests.size(), str(int(pentest_changes.get("cost_total", 0)))]
+			if requests.any(func(change): return str(change.get("change", "")) == "isolate_share"):
+				reply.body += "\n途中で共有全体を停止したため、日報も利用できない時間がありました。"
 		if str(reply.case_id) == "service-0-case-0" and bool(reply.report_write_confirmed): reply.body = "日報の保存を確認しました。締めの作業を再開します。"
 		for site in own.get("hotel_workflow", {}).get("sites", []):
 			if str(site.get("status", "")) != "received": continue

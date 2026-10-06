@@ -245,6 +245,7 @@
     "adv_check_reproducible_path": "記録済みアクセス経路",
     "adv_check_blocked_path": "是正済み経路の拒否",
     "adv_check_legitimate_business": "正規サービスのアクセス権",
+    "adv_check_credential_revoked": "漏えい済み資格情報の失効",
     "adv_check_clean_snapshot": "有効な復旧データ",
     "adv_check_staged_scan": "検証環境の新規スキャン",
     "adv_check_identity_repaired": "IDの修復完了",

@@ -112,6 +112,31 @@ func read_path(path: String) -> void:
 	if field == null or not field.is_visible_in_tree(): await click("NetworkShowPath")
 	await type_text("NetworkPath", path); await click("NetworkReadPath")
 
+func request_network_change(change: String) -> void:
+	await click("NetworkTab_changes")
+	var before := network_mark()
+	await click("NetworkChange_" + change)
+	check(network_mark() == before, "selecting a repair target does not apply or charge it: " + change)
+	await click("NetworkRequestChange")
+
+func pentest_acceptance_labels() -> void:
+	await click("NetworkTab_results")
+	var rows: Array = game.advanced_view().checks
+	var scroll: ScrollContainer = node("InvestigationScroll")
+	var japanese := RegEx.new(); japanese.compile("[ぁ-ゖァ-ヺ一-龯]")
+	var named := rows.size() == 5
+	var fifth: Label
+	for index in rows.size():
+		var caption := preload("res://scripts/ui_theme.gd").copy(str(rows[index].get("label_key", ""))).strip_edges()
+		var actual: Label
+		for candidate in scroll.find_children("*", "Label", true, false):
+			if str(candidate.text) in ["✓  " + caption, "○  " + caption]: actual = candidate; break
+		named = named and not caption.is_empty() and japanese.search(caption) != null and actual != null and actual.is_visible_in_tree()
+		if index == 4: fifth = actual
+	if fifth != null:
+		scroll.ensure_control_visible(fifth); await frames(4)
+	check(named and fifth != null and fifth.get_global_rect().intersection(scroll.get_global_rect()).size.y >= 14, "all five acceptance items have visible Japanese names, including the actual fifth label")
+
 func fixed_feedback() -> void:
 	var label: Control=node("InvestigationFeedback")
 	check(label!=null and label.is_visible_in_tree(),"actual action feedback visible")
@@ -149,12 +174,18 @@ func run_investigation_cases() -> void:
 		fixed_feedback();await click("NetworkTab_report")
 		await click("NetworkEvidence_"+str(leak.id)); await click("NetworkEvidence_"+str(proof.id)); await click("NetworkSubmit")
 		await capture("network-evidence-report")
-		await click("NetworkCustomerFix"); await click("NetworkRetest"); await open_resource("evidence/proof.csv"); check(int(latest().status)==401,"previous service session invalid after customer fix")
+		await request_network_change("restrict_config")
+		await click("NetworkRetest"); await open_resource("evidence/proof.csv")
+		check(int(latest().status)==200,"restricting the exposed file leaves the existing service session usable")
+		await request_network_change("rotate_credential")
+		await click("NetworkRetest"); await open_resource("evidence/proof.csv")
+		check(int(latest().status)==401,"credential rotation invalidates the previous service session")
 		await click("NetworkResetSession"); await read_path("share01/deploy.env")
 		check(int(latest().status)==403,"employee former request denied")
 		await read_path("share01/daily.csv")
 		check(int(latest().status)==200,"employee normal daily report works")
 		await verify_case("advanced-pentest")
+		await pentest_acceptance_labels()
 	if requested_case in ["", "advanced-recovery"] and await start_case("advanced-recovery"):
 		await select_record("RecoverySnapshots","snap-1410");detail_visible("RecoveryCandidateComparison");await capture("recovery-candidates")
 		await click("RecoveryShowOriginal")
