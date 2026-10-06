@@ -215,14 +215,28 @@ func run() -> void:
 	check(not paused.is_empty(), "validated late-delivery model fixture pauses consultation")
 	await assert_readonly_view()
 	if not paused.is_empty():
+		if str(paused.get("recovery_status", "")) == "available":
+			var work: Dictionary = paused.recovery_offer
+			var discounted := roundi(int(work.reward) * .85)
+			check(game.set_offer_quote(str(work.id), discounted), "save a real quote decision for the customer's ordinary work")
+			ui._select_company_view("overview"); await frames()
+			check(str(node("CycleNextService").text).contains("¥" + str(discounted)), "customer's graphical job shows the saved quoted amount")
 		check(text_under(node("CompanyCycle")).contains(str(paused.recovery_goal)), "paused card explains actual recovery condition")
 		var text_checks := assert_wrapping(node("CompanyCycle"))
 		if narrow: check(text_checks > 0, "long customer copy checked at 130 percent narrow layout")
 		var before := int(game.state.cash)
 		await click("CycleRecover_" + str(paused.id).validate_node_name())
-		check(ui.current_kind == "sales" and str(ui.board_selected_id).is_empty(), "paused recovery opens ordinary sales list")
-		check(str(ui.sales_search) == str(paused.client) and str(ui.sales_view) == "inquiries", "recovery route filters actual inquiries to the affected customer")
+		if str(paused.get("recovery_status", "")) == "available":
+			check(ui.current_kind == "sales" and str(ui.board_selected_id) == str(paused.recovery_offer_id), "held customer route opens the actual available job quote")
+			check(str(ui.sales_search) == str(paused.client) and str(ui.sales_view) == "inquiries", "available route keeps the affected customer's inquiries")
+		elif str(paused.get("recovery_status", "")) == "locked":
+			check(ui.current_kind == "company" and str(ui.get_meta("company_view")) == "growth", "unavailable work route opens required preparation")
+		else:
+			check(ui.current_kind == "door", "no ordinary work routes to next trading day instead of an empty search")
 		check(int(game.state.cash) == before and not game.state.accepted, "recovery route changes no cash or acceptance")
+		ui._select_company_view("overview"); await frames()
+		await click("CycleOtherWork")
+		check(ui.current_kind == "sales" and str(ui.sales_search).is_empty() and str(ui.board_selected_id).is_empty(), "player can compare other customers' real work")
 	ui._select_company_view("overview"); await frames()
 	await finance_presentation_fixtures()
 	print("COMPANY_CYCLE_UI_", "PASS" if failures.is_empty() else "FAIL", " assertions=", assertions, " narrow=", narrow, " failures=", failures)

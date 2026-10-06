@@ -2371,6 +2371,9 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 		var contract: Dictionary = context.get("contract", {})
 		if not bool(context.get("completed", false)) and str(context_id) != "career-%d-%s" % [state.day, str(contract.get("case_id", ""))]:
 			carried_cases.append(str(contract.get("case_id", "")))
+	var recovery_blocks: Array = canceled_today_cases.keys(); recovery_blocks.append_array(carried_cases)
+	var recovery_work: Dictionary = COMPANY_CYCLE.recovery_work(state, state.offers, recovery_blocks)
+	var recovery_cases: Array = recovery_work.values().map(func(offer): return str(offer.case_id))
 	var care_replacement_cases: Dictionary = {}
 	var offer_category_by_case: Dictionary = {}
 	var fresh_category_counts: Dictionary = {}
@@ -2398,7 +2401,7 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 		var case_id := str(candidate.get("case_id", ""))
 		var retired := bool(candidate.get("retired_from_new_offers", false))
 		var care_replacement := care_replacement_cases.has(case_id)
-		var completed_allowed := not completed_cases.has(case_id) or care_replacement or quoted_case_ids.has(case_id) or int(fresh_category_counts.get(str(candidate.get("category", "")), 0)) == 0
+		var completed_allowed := not completed_cases.has(case_id) or care_replacement or quoted_case_ids.has(case_id) or case_id in recovery_cases or int(fresh_category_counts.get(str(candidate.get("category", "")), 0)) == 0
 		# Preserve a lead already shown this day, including a quoted/awaiting
 		# retired case. Retirement only affects fresh market generation.
 		if bool(candidate.get("unlocked", false)) and not canceled_today.has(str(candidate.get("id", ""))) and case_id not in carried_cases and completed_allowed and (not retired or case_id in existing_leads): candidate_offers.append(candidate)
@@ -2465,7 +2468,8 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 				break
 	var protected_leads: Array = quoted_case_ids.keys()
 	protected_leads.append_array(carried_cases)
-	state.market_leads = MARKET_DEMAND.prioritize_relationships(candidate_offers, state.market_leads, COMPANY_CYCLE.priority_case_ids(self), protected_leads, int(state.day))
+	var relationship_priorities: Array = COMPANY_CYCLE.priority_case_ids(self); relationship_priorities.append_array(recovery_cases)
+	state.market_leads = MARKET_DEMAND.prioritize_relationships(candidate_offers, state.market_leads, relationship_priorities, protected_leads, int(state.day))
 	state.market_day=int(state.day)
 	var lead_set: Dictionary = {}
 	for lead in state.get("market_leads", []): lead_set[str(lead)] = true

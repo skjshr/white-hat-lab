@@ -33,8 +33,8 @@ func setup(saved: Dictionary, scale: float, inspect: Callable, next: Callable) -
 	_field("CycleRelationshipValue", str(satisfaction) + " / 100" if satisfaction >= 0 else "記録なし", 22, .355, 78, .29)
 	_field("CycleRelationshipDay", "顧客満足 · DAY %02d" % int(outcome.get("day", item.get("source_day", 0))), 12, .355, 120, .29)
 	_field("CycleRelationshipStatus", status_label(), 15, .355, 158, .29)
-	_field("CycleNextTitle", str(item.get("title", "次の仕事")), 15, .685, 135, .295)
-	_field("CycleNextService", {"backup":"退避・復元", "deployment_backup":"退避機器の導入", "deployment_gateway":"ゲートウェイの導入", "permissions":"共有資料", "network":"ネットワーク", "identity":"利用者ID", "external_sharing":"外部ファイル共有", "endpoint":"端末調査"}.get(str(item.get("work_family", "")), "次の業務"), 12, .685, 189, .295)
+	_field("CycleNextTitle", str(item.get("route_title", item.get("title", "次の仕事"))), 15, .685, 135, .295)
+	_field("CycleNextService", str(item.get("route_detail", {"backup":"退避・復元", "deployment_backup":"退避機器の導入", "deployment_gateway":"ゲートウェイの導入", "permissions":"共有資料", "network":"ネットワーク", "identity":"利用者ID", "external_sharing":"外部ファイル共有", "endpoint":"端末調査"}.get(str(item.get("work_family", "")), "次の業務"))), 12, .685, 189, .295)
 	resized.connect(_layout); _layout()
 
 func status_label() -> String:
@@ -106,9 +106,19 @@ func _object(index: int) -> void:
 		object.draw_arc(center + Vector2(12,24)*f, 13*f, 0,TAU,32, TEAL if str(item.get("source_rating", "")) == "on_time" else RED, 2*f,true)
 		_mark(object, center + Vector2(12,24)*f, "check" if str(item.get("source_rating", "")) == "on_time" else "late")
 	else:
-		var family := str(item.get("work_family", ""))
+		var family := str(item.get("route_family", item.get("work_family", "")))
 		if family in ["deployment_backup", "deployment_gateway"]:
 			object.draw_texture_rect(ART.icon("stock_backup" if family == "deployment_backup" else "stock_gateway"), Rect2(center - Vector2(72, 53) * f, Vector2(144, 106) * f), false)
+		elif family in ["preparation", "calendar"]:
+			object.draw_style_box(UI.style(Color("fffaf0"), TEAL, 3, 0, 2), box)
+			if family == "preparation":
+				object.draw_line(center + Vector2(0,-30)*f, center + Vector2(0,32)*f, TEAL, 2*f)
+				for y in [-20,-7,6,19]:
+					for x in [-23,6]: object.draw_line(center+Vector2(x,y)*f,center+Vector2(x+17,y)*f, LINE, 2*f)
+			else:
+				object.draw_line(center+Vector2(-26,-18)*f,center+Vector2(26,-18)*f,TEAL,3*f)
+				for y in [0,18]:
+					for x in [-16,0,16]: object.draw_rect(Rect2(center+Vector2(x-4,y-4)*f,Vector2(8,8)*f),LINE)
 		elif family == "backup":
 			for offset in [-26,0,26]:
 				object.draw_style_box(UI.style(Color("253c45"), TEAL, 5, 0, 2), Rect2(center + Vector2(-36,offset-10)*f,Vector2(72,21)*f))
@@ -118,7 +128,7 @@ func _object(index: int) -> void:
 			object.draw_circle(center + Vector2(0,-15)*f, 10*f, TEAL)
 			object.draw_line(center + Vector2(-18,12)*f, center + Vector2(18,12)*f, TEAL, 3*f)
 			object.draw_line(center + Vector2(-18,25)*f, center + Vector2(10,25)*f, TEAL, 3*f)
-		_mark(object, center + Vector2(31,37)*f, {"ready":"play","locked":"wait","paused":"pause","fulfilled":"check"}.get(str(item.get("status", "")), "wait"))
+		_mark(object, center + Vector2(31,37)*f, {"ready":"play","working":"play","locked":"wait","paused":"pause","fulfilled":"check"}.get(str(item.get("route_state", item.get("status", ""))), "wait"))
 
 func _mark(object: Button, center: Vector2, kind: String) -> void:
 	var f := factor; var color := RED if kind in ["late","pause"] else TEAL

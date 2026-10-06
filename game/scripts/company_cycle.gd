@@ -174,6 +174,38 @@ static func priority_case_ids(game) -> Array[String]:
 		if str(lead.status) == "ready" and str(lead.case_id) not in ids: ids.append(str(lead.case_id))
 	return ids
 
+static func recovery_work(state: Dictionary, offers: Array, blocked_cases: Array = []) -> Dictionary:
+	# A held consultation can earn an ordinary job in an existing demand slot.
+	# It still requires the real quote, work, deadline and customer outcome.
+	var cycle: Variant = state.get("company_cycle", {})
+	if not validate(cycle): return {}
+	var chosen: Dictionary = {}
+	var completed := _completed_cases(state)
+	var clients: Array = cycle.leads.keys(); clients.sort()
+	for client in clients:
+		var lead: Dictionary = cycle.leads[client]
+		if str(lead.status) != "paused": continue
+		var working := false
+		for context in state.get("contract_contexts", {}).values():
+			if context is Dictionary and not bool(context.get("completed", false)) and str(context.get("contract", {}).get("client", "")) == str(client): working = true; break
+		if working: continue
+		var eligible: Array = offers.filter(func(offer):
+			if not offer is Dictionary or str(offer.get("client", "")) != str(client) or not bool(offer.get("unlocked", false)) or bool(offer.get("retired_from_new_offers", false)): return false
+			var id := str(offer.get("id", "")); var case_id := str(offer.get("case_id", ""))
+			var supply: Variant = offer.get("supply_requirement", {})
+			return not id.is_empty() and not case_id.is_empty() and case_id != str(lead.case_id) and case_id not in blocked_cases and id not in state.get("completed_ids", []) and not state.get("contract_contexts", {}).has(id) and (not supply is Dictionary or supply.is_empty()) and case_id != "endpoint-recovery" and not case_id.begins_with("advanced-") and not case_id.begins_with("composite-"))
+		eligible.sort_custom(func(a,b):
+			var aq: bool = state.get("offer_quotes", {}).has(str(a.id)); var bq: bool = state.get("offer_quotes", {}).has(str(b.id))
+			if aq != bq: return aq
+			var ad: bool = completed.has(str(a.case_id)); var bd: bool = completed.has(str(b.case_id))
+			if ad != bd: return not ad
+			var same_a: bool = str(a.case_id) == str(lead.source_case_id); var same_b: bool = str(b.case_id) == str(lead.source_case_id)
+			if same_a != same_b: return not same_a
+			if int(a.get("required_level", 1)) != int(b.get("required_level", 1)): return int(a.get("required_level", 1)) < int(b.get("required_level", 1))
+			return str(a.case_id) < str(b.case_id))
+		if not eligible.is_empty(): chosen[str(client)] = eligible[0].duplicate(true)
+	return chosen
+
 static func view(game) -> Dictionary:
 	# Rendering never migrates or mutates the saved company.
 	var raw: Variant = game.state.get("company_cycle", null)
@@ -199,6 +231,11 @@ static func view(game) -> Dictionary:
 				lead.offer_id = str(offer.get("id", "")); lead.market_available = bool(offer.get("market_available", false)); break
 		if status == "paused":
 			var available := {}
+			lead.recovery_working_id = ""
+			for context_id in game.state.get("contract_contexts", {}):
+				var context: Dictionary = game.state.contract_contexts[context_id]
+				if not bool(context.get("completed", false)) and str(context.get("contract", {}).get("client", "")) == str(client):
+					lead.recovery_working_id = str(context_id); lead.recovery_working_title = str(context.get("contract", {}).get("title", "進行中の仕事")); break
 			for offer in game.state.get("offers", []):
 				if not offer is Dictionary or str(offer.get("client", "")) != str(client): continue
 				if bool(offer.get("retired_from_new_offers", false)) or not bool(offer.get("unlocked", false)) or not bool(offer.get("market_available", false)): continue
@@ -206,7 +243,11 @@ static func view(game) -> Dictionary:
 				available = offer; break
 			lead.recovery_case_id = str(lead.case_id); lead.recovery_offer_id = ""
 			var next_step := ""
-			if not available.is_empty():
+			lead.recovery_offer = available.duplicate(true)
+			if not str(lead.recovery_working_id).is_empty():
+				lead.recovery_status = "working"
+				next_step = "受注済みの「%s」を進め、期限内の納品で関係を確認します。" % str(lead.recovery_working_title)
+			elif not available.is_empty():
 				lead.recovery_case_id = str(available.get("case_id", "")); lead.recovery_offer_id = str(available.get("id", "")); lead.recovery_status = "available"
 				next_step = "今日の通常依頼「%s」で、見積と受注条件を確認できます。" % str(available.get("title", available.get("case_id", "")))
 			elif not reasons.is_empty():

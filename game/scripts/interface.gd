@@ -1330,8 +1330,25 @@ func _scroll_company_operations() -> void:
 	if is_instance_valid(operating): modal_scroll.ensure_control_visible(operating)
 
 func _open_cycle_recovery(client: String) -> void:
-	board_selected_id = ""; board_filter = "all"; sales_view = "inquiries"; sales_stage = "all"; sales_search = client
-	open_panel("sales")
+	var g := _game()
+	if g == null: return
+	for item in g.company_cycle_view().get("opportunities", []):
+		if str(item.get("client", "")) != client or str(item.get("status", "")) != "paused": continue
+		var working_id := str(item.get("recovery_working_id", ""))
+		if not working_id.is_empty():
+			if g.switch_contract(working_id): board_selected_id = working_id; open_panel("board")
+			else: _management_feedback("進行中の仕事を開けませんでした。")
+			return
+		var offer_id := str(item.get("recovery_offer_id", ""))
+		if not offer_id.is_empty():
+			board_selected_id = offer_id; board_filter = "all"; sales_view = "inquiries"; sales_stage = "all"; sales_search = client; open_panel("sales"); return
+		if str(item.get("recovery_status", "")) == "locked": _select_company_view("growth")
+		else: open_panel("door")
+		return
+	_open_cycle_other_work()
+
+func _open_cycle_other_work() -> void:
+	board_selected_id = ""; board_filter = "all"; sales_view = "inquiries"; sales_stage = "all"; sales_search = ""; open_panel("sales")
 
 func _open_cycle_offer(opportunity_id: String) -> void:
 	var g := _game()

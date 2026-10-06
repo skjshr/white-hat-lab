@@ -65,8 +65,24 @@ static func _opportunity(ui, g, body: VBoxContainer, item: Dictionary) -> void:
 	var inspect := _toggle_details.bind(ui, details)
 	var next: Callable = inspect
 	var action_name := ""; var action_title := ""
+	var route_item: Dictionary = item.duplicate(true)
 	if status == "paused":
-		next = ui._open_cycle_recovery.bind(str(item.get("client", ""))); action_name = "CycleRecover_" + id.validate_node_name(); action_title = "この顧客の通常依頼を探す"
+		next = ui._open_cycle_recovery.bind(str(item.get("client", ""))); action_name = "CycleRecover_" + id.validate_node_name()
+		var work: Dictionary = item.get("recovery_offer", {})
+		match str(item.get("recovery_status", "")):
+			"available":
+				action_title = "この仕事の期限・見積を見る"
+				var quote: Dictionary = g.contract_quote(work)
+				route_item.route_title = str(work.get("title", "通常依頼")); route_item.route_family = str(work.get("work_family", "")); route_item.route_detail = "通常業務 · %d分 / ¥%d" % [int(quote.get("budget", 0)), int(quote.get("quoted_fee", 0))]; route_item.route_state = "ready"
+			"working":
+				action_title = "受注した仕事を進める"
+				route_item.route_title = str(item.get("recovery_working_title", "進行中の仕事")); route_item.route_detail = "通常業務 · 対応中"; route_item.route_state = "working"
+			"locked":
+				action_title = "次の仕事への準備を見る"
+				route_item.route_title = "今日の同顧客依頼なし"; route_item.route_family = "preparation"; route_item.route_detail = "次の相談の技能・条件"; route_item.route_state = "locked"
+			_:
+				action_title = "日締め・次の営業を確認"
+				route_item.route_title = "今日の同顧客依頼なし"; route_item.route_family = "calendar"; route_item.route_detail = "次の営業で確認"; route_item.route_state = "locked"
 	elif status == "locked":
 		if bool(item.get("handoff_unavailable", false)):
 			next = inspect; action_name = "CycleHandoffMissing"; action_title = "引継ぎ元の記録を確認"
@@ -76,13 +92,14 @@ static func _opportunity(ui, g, body: VBoxContainer, item: Dictionary) -> void:
 			next = ui._open_cycle_route.bind("company_growth"); action_name = "CyclePrepare_" + id.validate_node_name(); action_title = "必要なスキル・成長を確認"
 	elif status == "ready":
 		next = ui._open_cycle_offer.bind(id); action_name = "CycleOpen_" + id.validate_node_name(); action_title = "この顧客の相談へ"
-	var board := ROUTE.new(); board.name = "CycleCustomerRoute"; board.setup(item, ui.text_scale, inspect, next); content.add_child(board)
+	var board := ROUTE.new(); board.name = "CycleCustomerRoute"; board.setup(route_item, ui.text_scale, inspect, next); content.add_child(board)
 	var busy: bool = not bool(g.state.get("career_mode", false)) and bool(g.state.get("accepted", false)) and not g.current_done()
 	board.objects[2].disabled = busy and status == "ready"
 	var actions := HFlowContainer.new(); content.add_child(actions)
 	if not action_name.is_empty():
 		var button := _action(ui, actions, action_title, next, action_name, "primary" if status == "ready" else "secondary")
 		button.disabled = busy and status == "ready"
+	if status == "paused": _action(ui, actions, "今日の別の仕事", ui._open_cycle_other_work, "CycleOtherWork", "quiet")
 	_action(ui, actions, "納品記録・相談の条件", inspect, "CycleDetailsToggle", "quiet")
 	content.add_child(details)
 	details.add_child(ui._label(str(item.get("reason", "")), 14, M.INK))

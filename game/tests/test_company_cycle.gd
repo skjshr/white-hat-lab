@@ -27,6 +27,7 @@ func _init() -> void:
 	_test_first_story_delivery()
 	_test_selection_and_eligibility()
 	_test_relationship_recovery()
+	_test_recovery_work_choices()
 	_test_completion_and_roundtrip()
 	_test_completed_history_retention()
 	_test_saved_schema_validation()
@@ -155,6 +156,32 @@ func _test_relationship_recovery() -> void:
 		_record(game,"later-bad-"+quality,_receipt(SOURCE,quality,60))
 		_expect(str(_lead(game).get("status","")) == "paused" and NEXT not in CYCLE.priority_case_ids(game), "later poor delivery pauses existing referral even above 40")
 	print("PASS company_cycle group: relationship recovery" if failures.is_empty() else "CHECK company_cycle group: relationship recovery")
+
+func _test_recovery_work_choices() -> void:
+	var game := _new_game()
+	_record(game, "held-source", _receipt(SOURCE, "late", 60))
+	var repeat := {"id":"today-repeat", "case_id":SOURCE, "client":CLIENT, "unlocked":true, "required_level":1}
+	var fresh := {"id":"today-fresh", "case_id":"service-4-case-2", "client":CLIENT, "unlocked":true, "required_level":3}
+	var consultation := {"id":"today-consultation", "case_id":NEXT, "client":CLIENT, "unlocked":true}
+	var others := {"id":"other-client", "case_id":"service-0-case-1", "client":"別の顧客", "unlocked":true}
+	var offers: Array = [repeat, fresh, consultation, others]
+	var before := JSON.stringify(game.state)
+	_expect(str(CYCLE.recovery_work(game.state, offers)[CLIENT].id) == "today-fresh", "held customer can choose a fresh ordinary job before repeating past work")
+	_expect(JSON.stringify(game.state) == before, "recovery selection grants no money, acceptance or relationship change")
+	_expect(str(CYCLE.recovery_work(game.state, offers, [str(fresh.case_id)])[CLIENT].id) == "today-repeat", "blocked or cancelled fresh work does not bypass its exclusion")
+	_expect(CYCLE.recovery_work(game.state, [consultation, others]).is_empty(), "held consultation and other customers do not count as recovery work")
+	game.state.offer_quotes = {"today-repeat":{"standard":5400}}
+	_expect(str(CYCLE.recovery_work(game.state, offers)[CLIENT].id) == "today-repeat", "player's existing quote takes precedence over a replacement job")
+	game.state.completed_ids.append("today-repeat")
+	_expect(str(CYCLE.recovery_work(game.state, offers)[CLIENT].id) == "today-fresh", "same exact completed contract cannot be sold twice")
+	for exclusion in [{"unlocked":false}, {"retired_from_new_offers":true}, {"supply_requirement":{"sku":"hardware"}}]:
+		var unavailable: Dictionary = fresh.duplicate(true); unavailable.merge(exclusion, true)
+		_expect(CYCLE.recovery_work(game.state, [unavailable]).is_empty(), "ordinary recovery respects work eligibility " + str(exclusion))
+	game.state.contract_contexts["accepted"] = {"completed":false,"contract":{"client":CLIENT,"title":"進行中の通常業務"}}
+	_expect(CYCLE.recovery_work(game.state, offers).is_empty(), "working for the held customer does not mint an additional recovery priority")
+	var projected := _public_lead(game)
+	_expect(str(projected.recovery_status) == "working" and str(projected.recovery_working_id) == "accepted", "held relationship points to the actual working contract")
+	_expect(str(_lead(game).status) == "paused", "acceptance alone never recovers a held consultation")
 
 func _test_completion_and_roundtrip() -> void:
 	var game := _new_game(); game.level = 20
