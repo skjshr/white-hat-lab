@@ -143,9 +143,14 @@ func run() -> void:
 	await capture("portal-sharing")
 	press("PortalPreview");select("PortalIdentity",2);press("PortalRead")
 	check(response().begins_with("HTTP/1.1 200") and str(pc.portal_ui.get("preview_content",""))==original,"recipient reads exact stored CSV")
+	check(control("PortalRecipientFlow")!=null and control("PortalWorkStage_0").text.contains("読込済み"),"recipient workspace shows its actual successful read")
+	for index in 3:
+		var stage: Label = control("PortalWorkStage_"+str(index))
+		check(stage.get_minimum_size().y<=stage.size.y+1,"recipient stage captions fit at current text scale")
 	var updated: String="order_id,customer,total\nPO-1001,Quoted 'single' and \"double\",12900\nPO-1002,Minato Foods,7600\n"
 	edit(updated);press("PortalWrite")
 	check(response().begins_with("HTTP/1.1 403") and game.vm_read(FILE)==original,"readonly request cannot change file")
+	check(control("PortalWorkStage_1").text.contains("未提出") and control("PortalWorkStage_2").text.contains("提出できません"),"denied submission remains a pending input and blocked storage operation")
 	select("PortalIdentity",1);check(control("PortalContent")==null and not pc.portal_ui.has("preview_content"),"different identity does not inherit draft")
 	select("PortalIdentity",2);check(str(pc.portal_ui.get("preview_content",""))==updated and bool(pc.portal_ui.get("draft_dirty",false)),"identity switch restores its own draft")
 	select("PortalAge",1);check(control("PortalContent")==null,"different link age starts without previous draft")
@@ -156,6 +161,7 @@ func run() -> void:
 	press("PortalCancel");check(str(pc.portal_ui.get("preview_content",""))==original and not bool(pc.portal_ui.get("draft_dirty",false)) and pc.portal_ui.get("recipient_drafts",{}).is_empty(),"explicit cancel discards only pending draft")
 	share("partner",2,1);press("PortalPreview");select("PortalIdentity",2);press("PortalRead");edit(updated);press("PortalWrite")
 	check(response().begins_with("HTTP/1.1 200") and game.vm_read(FILE)==updated,"actual PUT persists literal quotes and linebreaks")
+	check(control("PortalWorkStage_2").text.contains("保存済み"),"recipient saved state follows the actual successful PUT")
 	press("PortalRead");check(str(pc.portal_ui.preview_content)==updated,"fresh GET sees saved bytes")
 	await capture("portal-recipient")
 	# Recover the previous contents through actual Nextcloud-style controls,
@@ -179,6 +185,7 @@ func run() -> void:
 	check(str(pc.portal_ui.preview_content).ends_with("PENDING\n"),"failed write preserves user draft")
 	check(game.save_game() and game.load_game(),"real save reload");pc._load_session();pc._render_portal()
 	check(game.vm_read(FILE)==updated and str(pc.portal_ui.preview_content).ends_with("PENDING\n"),"file and unsaved draft remain distinct after reload")
+	check(control("PortalWorkStage_2").text.contains("提出できません"),"save failure remains visible after a real save reload")
 	press("PortalRead");edit("");press("PortalWrite");check(response().begins_with("HTTP/1.1 200") and game.vm_read(FILE).is_empty(),"empty content PUT is a real write")
 	edit(updated);press("PortalWrite")
 	select("PortalIdentity",1);press("PortalRead");check(response().contains("mfa_required"),"password-only session denied")
@@ -193,6 +200,9 @@ func run() -> void:
 	share("partner",1,1)
 	check(game.vm_read(str(game.vm_info().config_path)).contains("audit=off") and bool(game._vm().state.dirty),"share update preserves pending service edit")
 	game.vm_run("systemctl restart portal")
+	press("PortalPreview")
+	check(control("PortalWorkStage_0")!=null and control("PortalWorkStage_0").text.contains("変更前"),"changed policy marks the actual prior recipient read as outdated")
+	press("PortalRecipientBack");press("PortalAccessBack")
 	var public_share: Dictionary={}
 	for item in game._vm().portal_snapshot().shares:
 		if str(item.role)=="public":public_share=item

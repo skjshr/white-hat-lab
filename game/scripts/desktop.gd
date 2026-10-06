@@ -1845,6 +1845,9 @@ func _portal_discard_draft() -> void:
 
 func _set_portal_response(response: String) -> void:
 	portal_ui["response"]=response
+	var recipient_flow = preload("res://scripts/portal_recipient_flow.gd")
+	var stamp: String = recipient_flow.signature(game._vm().portal_snapshot(),browser_identities())
+	portal_ui["recipient_results"] = recipient_flow.record(portal_ui.get("recipient_results",{}),_portal_draft_key(),str(portal_ui.get("response_method","GET")),response,stamp)
 	var boundary:=response.find("\n\n")
 	if response.begins_with("HTTP/1.1 200") and boundary>=0:
 		portal_ui["loaded_content"]=response.substr(boundary+2)
