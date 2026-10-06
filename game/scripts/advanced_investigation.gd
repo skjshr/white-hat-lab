@@ -1,4 +1,5 @@
 extends RefCounted
+const PENTEST_TOPOLOGY = preload("res://scripts/pentest_topology.gd")
 
 # Offline, serializable investigations. Views contain observations, never the
 # private answer model. Legacy files are migrated on a copy for read-only views.
@@ -193,9 +194,10 @@ static func _pentest(s: Dictionary, action: String, args: Dictionary, target: St
 		var user = args.get("username", ""); var credential = args.get("credential", "")
 		if not user is String or not credential is String: return _result(false, "利用者と資格情報を文字列で入力してください。")
 		if user.length() > 80 or credential.length() > 256: return _result(false, "入力が長すぎます。")
-		if user != "svc-report" or credential != str(w.credential): return _network_record(s, "authenticate", str(user), 401, {}, "認証できませんでした。")
+		var from_principal := str(w.principal)
+		if user != "svc-report" or credential != str(w.credential): return _network_record(s, "authenticate", str(user), 401, {"from_principal":from_principal}, "認証できませんでした。")
 		w.principal = user; w.authenticated_epoch = int(w.credential_epoch)
-		return _network_record(s, "authenticate", user, 200, {}, "接続を確立しました。")
+		return _network_record(s, "authenticate", user, 200, {"from_principal":from_principal}, "接続を確立しました。")
 	if action in ["browse", "read"]:
 		var path := _resource_path(args.get("path", target))
 		if path == "!invalid": return _network_record(s, action, "", 400, {}, "パスの形式が不正です。")
@@ -374,7 +376,8 @@ static func view(state: Dictionary, selected: String = "") -> Dictionary:
 		out.events = out.hunt.events
 		out.records = [{"id":"work-orders","label":"顧客の作業予定","detail":JSON.stringify(w.work_orders)}]
 	elif s.kind == "advanced-pentest":
-		out["network"] = {"principal":w.principal,"scope":["share01", "evidence"],"brief":"社員アカウントから到達できる範囲を、架空の検証環境だけで確認してください。日報共有は継続利用します。設定変更は顧客が行います。","fixed":w.fixed,"report":w.report,"retests":w.retests}
+		var topology: Dictionary = PENTEST_TOPOLOGY.project(["share01", "evidence"],str(w.principal),int(w.get("change_revision", 0)),s.observations,s.evidence,w.report.get("evidence", {}))
+		out["network"] = {"principal":w.principal,"scope":["share01", "evidence"],"brief":"社員アカウントから到達できる範囲を、架空の検証環境だけで確認してください。日報共有は継続利用します。設定変更は顧客が行います。","fixed":w.fixed,"report":w.report,"retests":w.retests,"change_revision":int(w.get("change_revision", 0)),"topology":topology}
 		out.records = [{"id":"scope","label":"許可範囲","detail":"share01 / evidence — 閲覧・読取・取得した資格情報による認証。削除・範囲外接続は禁止。"}]
 	else:
 		var snapshots: Array = []

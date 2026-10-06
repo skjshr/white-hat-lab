@@ -9,6 +9,7 @@ const INITIAL_TARGETS := {
 }
 var native_clicks := 0
 var audit_folder := ""
+var requested_case := ""
 
 func accept_fixture(game, case_id: String) -> bool:
 	if not game.new_game() or not game.choose_strategy(str(CATALOG.by_id(case_id).category)) or not game.start_free_career(): return false
@@ -23,12 +24,24 @@ func accept_fixture(game, case_id: String) -> bool:
 func locate_by_mouse(panel) -> void:
 	panel.refresh(1.0);await frames(5)
 	check(panel.locate.is_visible_in_tree() and not panel.locate.disabled,"guide location button available")
-	var point: Vector2=panel.locate.get_global_rect().get_center()
-	check(root.get_visible_rect().has_point(point),"location button is within viewport")
-	var motion:=InputEventMouseMotion.new();motion.position=point;Input.parse_input_event(motion)
+	var button: Button = panel.locate
+	var logical: Vector2=button.get_global_rect().get_center()
+	check(root.get_visible_rect().has_point(logical),"location button is within viewport")
+	# GUI rectangles are logical; Input.parse_input_event consumes window pixels.
+	var point := logical * Vector2(root.size) / root.get_visible_rect().size
+	var presses: Array[int] = [0]
+	var on_press: Callable = func(): presses[0] += 1
+	button.pressed.connect(on_press)
+	var motion:=InputEventMouseMotion.new();motion.position=point;motion.global_position=point;Input.parse_input_event(motion);Input.flush_buffered_events()
+	var hovered := root.gui_get_hovered_control()
+	check(hovered == button or (hovered != null and button.is_ancestor_of(hovered)), "pointer reaches actual guide location button")
 	for down in [true,false]:
-		var event:=InputEventMouseButton.new();event.position=point;event.button_index=MOUSE_BUTTON_LEFT;event.pressed=down;Input.parse_input_event(event);await frames(2)
-	native_clicks+=1;await frames(8)
+		var event:=InputEventMouseButton.new();event.position=point;event.global_position=point;event.button_index=MOUSE_BUTTON_LEFT;event.pressed=down;Input.parse_input_event(event);Input.flush_buffered_events()
+	await frames(8)
+	check(presses[0] == 1, "one real guide location press is delivered")
+	if presses[0] != 1: print("ADVANCED_GUIDE_INPUT_DIAGNOSTIC ", JSON.stringify({"point":str(point),"logical":str(logical),"pixels":str(root.size),"viewport":str(root.get_visible_rect()),"hovered":str(hovered),"presses":presses[0]}))
+	native_clicks += presses[0]
+	if is_instance_valid(button): button.pressed.disconnect(on_press)
 
 func model_mark(game) -> Dictionary:
 	return {"advanced":game.state.advanced.duplicate(true),"revision":game.state.revision,"validated_revision":game.state.validated_revision,"checks":game.state.checks.duplicate(true),"work":game.state.work.duplicate(true),"cash":game.state.cash,"completed_ids":game.state.completed_ids.duplicate()}
@@ -40,6 +53,10 @@ func save_capture(label: String) -> void:
 	check(root.get_texture().get_image().save_png(audit_folder.path_join(label+("-narrow" if narrow else "-wide")+".png"))==OK,"capture "+label)
 
 func run() -> void:
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--case="): requested_case = arg.trim_prefix("--case=")
+	if not requested_case.is_empty() and requested_case != "advanced-portal" and not GUIDE.ADVANCED_REVIEW_TARGETS.has(requested_case):
+		check(false, "unknown advanced guide case filter"); quit(1); return
 	narrow="--narrow" in OS.get_cmdline_user_args();capture_enabled="--capture" in OS.get_cmdline_user_args()
 	audit_folder=OS.get_environment("WHL_CAPTURE_DIR")
 	if audit_folder.is_empty():audit_folder=ProjectSettings.globalize_path("res://../artifacts/advanced-guide")
@@ -48,6 +65,7 @@ func run() -> void:
 	var game=ui._game();game.set_process(false)
 	ui._set_text_scale(1.3 if narrow else 1.0)
 	for case_id in GUIDE.ADVANCED_REVIEW_TARGETS:
+		if not requested_case.is_empty() and requested_case != str(case_id): continue
 		if not ui.current_kind.is_empty():ui.close_panel(false,false);await frames(3)
 		check(accept_fixture(game,case_id),case_id+" accepted fixture")
 		ui.controls.menu.hide();ui.open_panel("terminal");var desk=ui.desktop
@@ -73,6 +91,9 @@ func run() -> void:
 			check(page!=null and page.is_visible_in_tree(),case_id+" actual work page is visible")
 		var work_control: Control=desk.find_child(str(INITIAL_TARGETS[case_id][1]),true,false)
 		check(work_control!=null and work_control.is_visible_in_tree(),case_id+" real work control is displayed")
+		if case_id == "advanced-pentest" and work_control != null:
+			var resources: Array = work_control.find_children("*", "Button", true, false).filter(func(button): return str(button.get_meta("path", "")) in ["share01", "evidence"])
+			check(not work_control is Tree and resources.size() == 2, "guide reaches selectable scope objects on the diagram")
 		check(model_mark(game)==before,case_id+" locate leaves observations, validation, billing and work unchanged")
 		if case_id in ["advanced-hunt","advanced-cloud"]:await save_capture(case_id+"-guide")
 		await locate_by_mouse(ui.next_task_guide)
@@ -80,6 +101,9 @@ func run() -> void:
 		var current_target: Control=desk.find_child(expected,true,false)
 		check(current_target!=null and current_target.is_visible_in_tree(),case_id+" destination survives repeated navigation")
 		print("ADVANCED_GUIDE_CASE ",case_id," target=",expected," visible=",current_target!=null and current_target.is_visible_in_tree()," unchanged=",model_mark(game)==before)
+	if not requested_case.is_empty() and requested_case != "advanced-portal":
+		print("ADVANCED_GUIDE_NAVIGATION failures=",failures.size()," native_clicks=",native_clicks," narrow=",narrow," case=",requested_case)
+		ui.queue_free(); await frames(3); quit(0 if failures.is_empty() else 1); return
 	if not ui.current_kind.is_empty():ui.close_panel(false,false);await frames(3)
 	check(accept_fixture(game,"advanced-portal"),"incident accepted fixture")
 	var start: Dictionary=game.advanced_action("incident_start",{"variant":"mixed","seed":7})
