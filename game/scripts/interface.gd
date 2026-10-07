@@ -1391,9 +1391,10 @@ func _staffing() -> void:
 func _company() -> void:
 	var g := _game(); if g == null: return
 	_maintenance_progress_labels.clear()
-	_maintenance_ui_signature = _maintenance_signature(g)
-	_operating_ui_signature = _operating_signature(g)
 	var view := str(get_meta("company_view", "overview"))
+	if view != "care":
+		_maintenance_ui_signature = _maintenance_signature(g)
+		_operating_ui_signature = _operating_signature(g)
 	var nav := HFlowContainer.new(); nav.name = "CompanyViews"; nav.add_theme_constant_override("h_separation", 12); nav.add_theme_constant_override("v_separation", 4); modal_body.add_child(nav)
 	for spec in [["overview", UI.copy("rmd_overview")], ["growth", UI.copy("v220_growth")], ["care", "顧客保守"], ["saas_watch", "SaaS監視"]]:
 		var tab := _button(str(spec[1]), _select_company_view.bind(str(spec[0])))
@@ -1492,97 +1493,7 @@ func _company_growth(g) -> void:
 	preload("res://scripts/skill_investment_board.gd").build(self,g)
 
 func _company_care(g) -> void:
-	var portfolio: Dictionary = g.care_portfolio()
-	var details := modal_body
-	var compact_company := root.size.x < 1100
-	if portfolio.get("clients", []).is_empty():
-		details.add_child(_label("保守契約なし", 20, M.MUTED))
-		var browse := _button(UI.copy("ops_sales").get_slice("・", 0), open_panel.bind("sales")); M.button(browse, "primary"); browse.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN; details.add_child(browse)
-		return
-	if not portfolio.get("clients", []).is_empty():
-		var contract_rates := UI.copy("care_contract_rates", "")
-		var contract_text := contract_rates % [int(portfolio.get("gross_daily", 0)), int(portfolio.get("service_cost_daily", 0)), int(portfolio.get("net_daily", 0))] if not contract_rates.is_empty() else ""
-		var summary := _label(contract_text, 15, TEAL); summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; details.add_child(summary)
-		if g.has_method("maintenance_summary"):
-			var maintenance_summary: Dictionary = g.maintenance_summary()
-			var count_template := UI.copy("care_summary", "")
-			if not count_template.is_empty() and int(maintenance_summary.get("pending", 0)) + int(maintenance_summary.get("working", 0)) + int(maintenance_summary.get("failed", 0)) > 0: details.add_child(_label(count_template % [int(maintenance_summary.get("pending", 0)), int(maintenance_summary.get("working", 0)), int(maintenance_summary.get("done", 0)), int(maintenance_summary.get("failed", 0))], 14, MUTED))
-			var today_template := UI.copy("care_today", "")
-			if not today_template.is_empty() and int(maintenance_summary.get("earned", 0)) + int(maintenance_summary.get("service_cost", 0)) > 0: details.add_child(_label(today_template % [int(maintenance_summary.get("earned", 0)), int(maintenance_summary.get("service_cost", 0)), int(maintenance_summary.get("net", 0))], 14, TEAL))
-	var table := VBoxContainer.new(); table.size_flags_horizontal = Control.SIZE_EXPAND_FILL; table.add_theme_constant_override("separation", 4); details.add_child(table)
-	var widths: Array = [150, 88, 100, 84, 64] if compact_company else [220, 100, 120, 100, 80]
-	var header := HBoxContainer.new(); header.add_theme_constant_override("separation", 8); table.add_child(header)
-	for index in 5:
-		var heading: Label = _label(["顧客", "日額", "満足度", "状態", "実績"][index], 12, MUTED); heading.custom_minimum_size.x = widths[index]; heading.autowrap_mode = TextServer.AUTOWRAP_OFF; header.add_child(heading)
-	if portfolio.get("clients", []).is_empty(): table.add_child(_label("保守契約なし", 14, MUTED))
-	for client in portfolio.get("clients", []):
-		var relation: Dictionary = client
-		var client_name := str(relation.get("client", ""))
-		var history_relation: Dictionary = g.state.get("customer_relations", {}).get(client_name, {})
-		var status_text: String = {"active":"稼働","pending":"納品待ち","suspended":"停止"}.get(str(relation.get("status", "")),"停止")
-		var client_box := VBoxContainer.new(); client_box.add_theme_constant_override("separation", 3); table.add_child(client_box)
-		var care_top_row := HBoxContainer.new(); care_top_row.add_theme_constant_override("separation", 8); client_box.add_child(care_top_row)
-		var values: Array = [client_name, "¥%d" % int(relation.get("fee", 0)), "%d / 100" % int(relation.get("satisfaction", 70)), status_text, "%d件" % int(history_relation.get("completed_count", 0))]
-		var colors: Array = [INK, TEAL, INK, TEAL if status_text == "稼働" else ORANGE, MUTED]
-		for index in values.size():
-			var cell: Label = _label(str(values[index]), 13, colors[index]); cell.custom_minimum_size.x = widths[index]; cell.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN; cell.autowrap_mode = TextServer.AUTOWRAP_OFF; cell.clip_text = true; cell.tooltip_text = str(values[index]); care_top_row.add_child(cell)
-		var choose := _button(UI.copy("market_detail"), func(): set_meta("company_client", client_name); _refresh_maintenance_panel())
-		choose.name = "CompanyClient_" + client_name.sha256_text().left(10); M.button(choose, "quiet", str(get_meta("company_client", "")) == client_name); care_top_row.add_child(choose)
-		if g.has_method("maintenance_jobs") and str(get_meta("company_client", "")) == client_name:
-			var owner_row:=HFlowContainer.new();owner_row.add_theme_constant_override("h_separation",8);owner_row.add_theme_constant_override("v_separation",5);client_box.add_child(owner_row)
-			var scope_label:=_label(UI.copy("care_scope_count") % g._maintenance_targets_for(client_name).size(),12,MUTED);scope_label.autowrap_mode=TextServer.AUTOWRAP_OFF;scope_label.size_flags_vertical=Control.SIZE_SHRINK_CENTER;owner_row.add_child(scope_label)
-			var owner_label:=_label(UI.copy("care_owner"),12,MUTED);owner_label.autowrap_mode=TextServer.AUTOWRAP_OFF;owner_label.size_flags_vertical=Control.SIZE_SHRINK_CENTER;owner_row.add_child(owner_label)
-			var owner_select:=OptionButton.new();owner_select.name="CareOwner_"+client_name.sha256_text().left(10);owner_select.custom_minimum_size.x=150
-			owner_select.size_flags_vertical=Control.SIZE_SHRINK_CENTER
-			owner_select.add_item(UI.copy("care_owner_manual"));owner_select.set_item_metadata(0,"")
-			var chosen:=str(g.maintenance_owner(client_name));var found_owner:=chosen.is_empty()
-			for member in g.maintenance_owner_candidates():
-				owner_select.add_item(str(member.name));owner_select.set_item_metadata(owner_select.item_count-1,str(member.id))
-				if str(member.id)==chosen:owner_select.select(owner_select.item_count-1);found_owner=true
-			if not found_owner:
-				owner_select.add_item(UI.copy("care_owner_unavailable"));owner_select.select(owner_select.item_count-1);owner_select.set_item_disabled(owner_select.item_count-1,true)
-			owner_select.item_selected.connect(func(index):
-				g.set_maintenance_owner(client_name,str(owner_select.get_item_metadata(index)))
-				_refresh_maintenance_panel())
-			owner_row.add_child(owner_select)
-			var maintenance: Dictionary = {}
-			for job in g.maintenance_jobs():
-				if str(job.get("client", "")) == client_name: maintenance = job; break
-			var care_row := HFlowContainer.new(); care_row.add_theme_constant_override("h_separation", 6); care_row.add_theme_constant_override("v_separation", 6); client_box.add_child(care_row)
-			var care_status := str(maintenance.get("status", ""))
-			var care_key := "care_status_" + (care_status if not care_status.is_empty() else "idle")
-			var care_state := _label(UI.copy(care_key, ""), 12, TEAL if care_status in ["done", "legacy"] else ORANGE if care_status in ["working", "failed"] else MUTED); care_state.size_flags_horizontal = Control.SIZE_EXPAND_FILL; care_state.autowrap_mode = TextServer.AUTOWRAP_OFF; care_row.add_child(care_state)
-			var incident: Dictionary = g.care_incident(client_name) if g.has_method("care_incident") else {}
-			var incident_status := str(incident.get("status", ""))
-			if incident_status in ["detected", "working", "recheck"]:
-				care_state.text = UI.copy("care_incident_"+incident_status)
-			var current_assignee := str(maintenance.get("assignee", "")); var assignee_text := UI.copy("care_assignee_unassigned", "")
-			if not g.colleague_role(current_assignee).is_empty():
-				var member_template := UI.copy("care_assignee_member", ""); assignee_text = member_template % g.member_name(current_assignee) if not member_template.is_empty() else g.member_name(current_assignee)
-			elif current_assignee == "player":
-				var self_template := UI.copy("care_assignee_self", ""); assignee_text = self_template % g.player_name() if not self_template.is_empty() else g.player_name()
-			elif current_assignee == "verified": assignee_text = UI.copy("care_maintenance_signed")
-			var assignee_label := _label(assignee_text, 12, MUTED); assignee_label.custom_minimum_size.x = 74; assignee_label.autowrap_mode = TextServer.AUTOWRAP_OFF; care_row.add_child(assignee_label)
-			if care_status == "working":
-				var progress_template := UI.copy("care_progress", "")
-				if not progress_template.is_empty():
-					var progress_label := _label(progress_template % [int(float(maintenance.get("total", 0)) - float(maintenance.get("remaining", 0))), int(maintenance.get("total", 0))], 12, MUTED); progress_label.custom_minimum_size.x = 72; care_row.add_child(progress_label)
-					_maintenance_progress_labels[client_name] = progress_label
-			var result := _button(UI.copy("care_result", ""), Callable(self, "_show_maintenance_result").bind(client_name)); result.name = "CareResult_" + client_name.sha256_text().left(10); result.disabled = care_status not in ["done", "failed"]; care_row.add_child(result)
-			var self_check_text := UI.copy("care_incident_reinspect", "") if incident_status == "recheck" else UI.copy("care_self_check", "")
-			var self_check := _button(self_check_text, Callable(self, "_run_maintenance").bind(client_name)); self_check.name = "CareSelfCheck_" + client_name.sha256_text().left(10); self_check.disabled = not g.has_method("can_run_maintenance") or not g.can_run_maintenance(client_name); care_row.add_child(self_check)
-			if incident_status in ["detected", "working"] and g.has_method("open_maintenance_incident"):
-				var incident_button := _button(UI.copy("care_incident_open", ""), Callable(self, "_open_maintenance_incident").bind(client_name)); incident_button.name = "CareIncident_"+client_name.sha256_text().left(10)
-				var incident_reason := str(g.maintenance_incident_reason(client_name)) if g.has_method("maintenance_incident_reason") else ""
-				incident_button.disabled = not incident_reason.is_empty(); incident_button.tooltip_text = incident_reason; care_row.add_child(incident_button)
-			for member in g.team_members():
-				var assignee := str(member.id)
-				var delegate_template := UI.copy("care_assign_member", ""); var delegate_text: String = delegate_template % str(member.name) if not delegate_template.is_empty() else str(member.name)
-				var delegate := _button(delegate_text, Callable(self, "_assign_maintenance").bind(client_name, assignee))
-				var unavailable := str(g.staff_availability(assignee,"maintenance"))
-				delegate.name = "Maintenance_"+assignee
-				delegate.disabled = not g.can_run_maintenance(client_name) or not unavailable.is_empty()
-				delegate.tooltip_text = unavailable; care_row.add_child(delegate)
+	preload("res://scripts/care_portfolio_panel.gd").build(self, g)
 
 func _company_operating_desk(g, summary: Dictionary) -> void:
 	var panel := VBoxContainer.new(); panel.name = "OperatingDesk"; panel.add_theme_constant_override("separation", 18); modal_body.add_child(panel)
@@ -2202,6 +2113,9 @@ func _on_game_changed() -> void:
 			_schedule_equipment_catalog_refresh(delivery_signature)
 	if current_kind == "company":
 		var g := _game()
+		if g != null and str(get_meta("company_view", "overview")) == "care":
+			preload("res://scripts/care_portfolio_panel.gd").refresh_live(self, g)
+			return
 		if g != null and g.has_method("maintenance_jobs"):
 			var maintenance_signature := _maintenance_signature(g)
 			var operating_signature := _operating_signature(g)
