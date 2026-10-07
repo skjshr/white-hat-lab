@@ -8,6 +8,7 @@ var factor := 1.0
 var snapshot: Dictionary = {}
 var refresh := 0.0
 var all_standby := true
+var retained_logical_height := 0.0
 var route: Button
 
 func setup(g, scale: float) -> void:
@@ -44,8 +45,15 @@ func _update() -> void:
 	all_standby = true
 	for person in snapshot.get("people", []):
 		if not person.get("jobs", []).is_empty(): all_standby = false
-	custom_minimum_size.y = (108 if all_standby else 72 + maxi(1, snapshot.get("people", []).size()) * 34) * factor
+	_update_content_height(snapshot.get("people", []).size(), all_standby)
 	_layout()
+
+func _update_content_height(people_count: int, standby: bool) -> void:
+	var required := 108.0 if standby or people_count <= 0 else 72.0 + people_count * 34.0
+	# Keep the current sales rows stationary while a colleague finishes work.
+	# A newly opened canvas starts fresh; a roster increase may still expand it.
+	retained_logical_height = maxf(retained_logical_height, required)
+	custom_minimum_size.y = retained_logical_height * factor
 
 func _text(value: String, x: float, y: float, points: int, color: Color, width: float) -> void:
 	if width > 0: draw_string(UI.font(500), Vector2(x,y)*factor, value, HORIZONTAL_ALIGNMENT_LEFT, width*factor, roundi(points*factor), color)

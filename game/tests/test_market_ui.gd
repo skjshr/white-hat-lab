@@ -1,6 +1,7 @@
 extends SceneTree
 
 const COPY = preload("res://scripts/ui_theme.gd")
+const CAPACITY = preload("res://scripts/intake_capacity_canvas.gd")
 
 var ui
 var game
@@ -126,6 +127,20 @@ func run() -> void:
 	check(ui.modal_body.find_child("SalesLane_draft", true, false) != null, "draft lane")
 	check(ui.modal_body.find_child("SalesLane_requote", true, false) != null, "requote lane")
 	check(ui.modal_body.find_child("SalesLane_accepted", true, false) != null, "accepted lane")
+	var capacity_probe = CAPACITY.new()
+	capacity_probe.factor = 1.3
+	capacity_probe._update_content_height(3, false)
+	var active_height: float = capacity_probe.custom_minimum_size.y
+	capacity_probe._update_content_height(3, true)
+	check(is_equal_approx(capacity_probe.custom_minimum_size.y, active_height), "intake canvas keeps rows anchored when assignments finish")
+	capacity_probe._update_content_height(4, false)
+	check(capacity_probe.custom_minimum_size.y > active_height, "intake canvas expands for a larger roster")
+	capacity_probe.free()
+	var empty_capacity_probe = CAPACITY.new()
+	empty_capacity_probe.factor = 1.3
+	empty_capacity_probe._update_content_height(0, true)
+	check(is_equal_approx(empty_capacity_probe.custom_minimum_size.y, 108.0 * 1.3), "empty roster uses compact standby height")
+	empty_capacity_probe.free()
 	var sales_modal_id: int=ui.modal.get_instance_id()
 	filter_stage("new")
 	await frames(4)
@@ -204,7 +219,7 @@ func run() -> void:
 		var board: Control=node("SalesBoard") as Control
 		check(board!=null and board.size.x<=ui.modal_scroll.size.x+2.0,"narrow board fits the modal width")
 		var first_card: BaseButton=node("SalesOffer_"+str(remaining_offer.id)) as BaseButton
-		check(first_card!=null and first_card.custom_minimum_size.y<=78.0,"narrow card header stays compact")
+		check(first_card!=null and first_card.custom_minimum_size.y<=105.0,"narrow offer header fits timing details")
 	# Compact board exposes actionable rows immediately, without an accordion.
 	ui.modal_scroll.scroll_vertical = 0
 	await frames(6)
