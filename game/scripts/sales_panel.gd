@@ -9,6 +9,10 @@ const SALES_CHART = preload("res://scripts/sales_chart.gd")
 const M = preload("res://scripts/management_ui.gd")
 const ART = preload("res://scripts/equipment_art.gd")
 const STOCK = preload("res://scripts/customer_stock.gd")
+const INTAKE = preload("res://scripts/intake_decision_model.gd")
+const CAPACITY = preload("res://scripts/intake_capacity_canvas.gd")
+const DEADLINES = preload("res://scripts/intake_deadline_strip.gd")
+const GLYPH = preload("res://scripts/service_glyph.gd")
 
 const HEADER := THEME.HEADER
 const TAB_BAR := M.LINE
@@ -64,6 +68,13 @@ static func build(ui) -> void:
 	var selected_tab: Button = {"inquiries": inquiries, "summary": summary, "catalog": catalog, "pricing": pricing}[view]
 	selected_tab.button_pressed = true
 	for tab in [inquiries, summary, catalog, pricing]: M.button(tab, "tab", tab == selected_tab)
+	if view == "inquiries":
+		var capacity := CAPACITY.new(); body.add_child(capacity); capacity.setup(g, float(ui.text_scale))
+		var work := Button.new(); work.name = "IntakeOpenWorkday"; work.text = "担当・保守を調整 →"
+		work.add_theme_font_size_override("font_size",14); M.button(work,"quiet")
+		work.pressed.connect(func(): ui.operations_choices["view"] = "today"; ui.open_panel("board"))
+		work.size_flags_horizontal = Control.SIZE_SHRINK_END
+		capacity.set_route(work)
 	if view in ["inquiries", "catalog"]:
 		_add_filters(ui,g,body)
 	match view:
@@ -176,7 +187,12 @@ static func _lane(ui, g, lane_id: String, title_key: String, items: Array) -> VB
 	if items.is_empty():
 		lane.visible=false
 		return lane
+	var ordered: Array = []
 	for item in items:
+		if str(item.get("offer", {}).get("case_id", "")) == "advanced-saas-priority": ordered.append(item)
+	for item in items:
+		if str(item.get("offer", {}).get("case_id", "")) != "advanced-saas-priority": ordered.append(item)
+	for item in ordered:
 		cards.add_child(_offer_card(ui, g, lane_id, item))
 	return lane
 
@@ -187,31 +203,49 @@ static func _offer_card(ui, g, lane_id: String, item: Dictionary) -> PanelContai
 		var quote: Dictionary=g.contract_quote(item.offer)
 		amount=int(quote.quoted_fee)
 	var contact := _contact_for(item)
+	var offer: Dictionary = item.get("offer", {})
+	var decision := INTAKE.offer(g, offer) if not offer.is_empty() and lane_id != "accepted" else {}
+	var business: Dictionary = decision.get("priority_business", {})
+	var urgent := bool(business.get("available", false))
 	var card:=PanelContainer.new();card.name="SalesCard_"+_node_id(id);card.size_flags_horizontal=Control.SIZE_EXPAND_FILL;card.add_theme_stylebox_override("panel",M.surface(Color.TRANSPARENT,0))
 	var header:=Button.new();header.name="SalesOffer_"+_node_id(id);header.custom_minimum_size.y=60;header.size_flags_horizontal=Control.SIZE_EXPAND_FILL
 	_list_row_style(header)
 	card.add_child(header)
-	var row:=HBoxContainer.new();row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT);row.offset_left=10;row.offset_right=-10;row.offset_top=4;row.offset_bottom=-4;row.add_theme_constant_override("separation",12);header.add_child(row)
-	var offer: Dictionary = item.get("offer", {})
+	if urgent:
+		header.add_theme_stylebox_override("normal",M.surface(Color("fff4e9"),8,true))
+	var stack := VBoxContainer.new(); stack.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); stack.offset_left=12; stack.offset_right=-12; stack.offset_top=10; stack.offset_bottom=-10; header.add_child(stack)
+	var row:=HBoxContainer.new();row.add_theme_constant_override("separation",12);stack.add_child(row)
 	var requirement: Dictionary = offer.get("supply_requirement", {})
 	if not requirement.is_empty():
 		var object := TextureRect.new(); object.name = "SalesAppliance_" + _node_id(id)
 		object.texture = ART.icon(str(STOCK.product(str(requirement.get("sku", ""))).get("icon", "")))
 		object.custom_minimum_size = Vector2(78, 58); object.expand_mode = TextureRect.EXPAND_IGNORE_SIZE; object.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		row.add_child(object)
+	else:
+		var symbol := "network" if str(offer.get("category", "")) == "response" else "ledger" if str(offer.get("category", "")) == "operations" else "device"
+		GLYPH.add_to(row, "blocked" if urgent else symbol, 46 * float(ui.text_scale), M.DANGER if urgent else M.ACCENT)
 	var identity:=VBoxContainer.new();identity.size_flags_horizontal=Control.SIZE_EXPAND_FILL;identity.add_theme_constant_override("separation",0);row.add_child(identity)
 	var title:=_label(str(item.get("title","")),15,INK);title.add_theme_font_override("font",UI.font(700));title.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART;title.max_lines_visible=2;title.tooltip_text=title.text;identity.add_child(title)
 	var client_text := str(contact.get("company",item.get("client","")))
 	var client:=_label(client_text,12,MUTED);client.autowrap_mode=TextServer.AUTOWRAP_OFF;client.text_overrun_behavior=TextServer.OVERRUN_TRIM_ELLIPSIS;client.tooltip_text=client_text;identity.add_child(client)
-	var value:=VBoxContainer.new();value.custom_minimum_size.x=150;value.add_theme_constant_override("separation",0);row.add_child(value)
+	if not decision.is_empty():
+		var timing := "納品: 受注から%d分" % int(decision.get("deadline_budget_minutes", 0))
+		var handling := "本人対応" if bool(decision.get("advanced",false)) else "受注後に担当を割当"
+		var deadline := _label(timing + " · " + handling,12,MUTED); deadline.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART; identity.add_child(deadline)
+	var value:=VBoxContainer.new();value.custom_minimum_size.x=115;value.add_theme_constant_override("separation",0);row.add_child(value)
 	var price:=_label("¥%d" % amount,17,INK);price.horizontal_alignment=HORIZONTAL_ALIGNMENT_RIGHT;price.add_theme_font_override("font",UI.font(700));value.add_child(price)
 	var state_key: String = str({"new": "market_new_today", "draft": "market_quoted", "requote": "market_requote", "accepted": "market_accepted"}.get(lane_id, "market_detail"))
 	if lane_id == "accepted" and bool(item.get("completed", false)):
 		state_key = "market_delivered"
 	var state:=_label(UI.copy(state_key),12,MUTED);state.horizontal_alignment=HORIZONTAL_ALIGNMENT_RIGHT;value.add_child(state)
-	row.minimum_size_changed.connect(func(): header.custom_minimum_size.y=maxf(60,row.get_combined_minimum_size().y+8))
+	if not decision.is_empty():
+		var net := _label(("補償前 ¥%d" if urgent else "見積利益 ¥%d") % int(decision.get("profit",0)),12,MUTED);net.horizontal_alignment=HORIZONTAL_ALIGNMENT_RIGHT;value.add_child(net)
+	if urgent:
+		var urgent_title := _label("! 緊急 · 業務の受付期限",12,M.DANGER);stack.add_child(urgent_title)
+		var strip := DEADLINES.new();stack.add_child(strip);strip.setup(business.get("queues",[]),float(ui.text_scale))
+	stack.minimum_size_changed.connect(func(): header.custom_minimum_size.y=maxf(90,stack.get_combined_minimum_size().y+20))
 	header.tooltip_text=title.text + " / " + client_text
-	_ignore_mouse(row)
+	_ignore_mouse(stack)
 	header.pressed.connect(func():ui._select_contract(id))
 	return card
 

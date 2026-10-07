@@ -323,7 +323,7 @@ func _reset_state() -> void:
 	state = {"version":STATE_VERSION,"maintenance_scope_version":2,"chapter":0,"day":1,"cash":5000,"trust":0,
 		"accepted":false,"inspected":false,"config":_default_fields(0),"revision":0,
 		"validated_revision":-1,"checks":[],"completed_ids":[],"history":[],
-		"equipment":[],"delivery_orders":[],"office_expansion":{"status":"locked","price":28000,"available_day":-1},"assignments":{},"clients":{},"customer_relations":{},"care_agreements":{},"staff":{},"staff_payroll":{"enabled":false,"last_settled_day":-1,"due":[]},"care_incidents":{},"maintenance_targets":{},"maintenance_jobs":[],"maintenance_settled_day":-1,"offer_quotes":{},"quote_decisions":[],"retainer_settled_day":-1,"contract_contexts":{},"contract_closeouts":{},"credit_loss":0,"offer_plan":"standard","pricing_policy":_default_pricing_policy(),"procurement_cart":CUSTOMER_STOCK.empty_cart(),"desktop_sessions":{},"retainer_daily":{},"restore_preview":0,"strategy":"","skills":{"operations":0,"advisory":0,"response":0},"profit":0,"credit":0,"cash_flow_start_day":0,"recurring_clients":[],"strategy_income":0,"career_mode":false,"contracts_completed":0,"current_contract_id":"","offers":[],"market_day":-1,"market_leads":[],"awaiting_contract":false,"game_complete":false,"errors":[],"profile":profile_defaults(),"diagnostics_required":false,"ui_help_seen":{},"dispatch_queues":{},"dispatch_holds":{}}
+		"equipment":[],"delivery_orders":[],"office_expansion":{"status":"locked","price":28000,"available_day":-1},"assignments":{},"clients":{},"customer_relations":{},"care_agreements":{},"staff":{},"staff_payroll":{"enabled":false,"last_settled_day":-1,"due":[]},"care_incidents":{},"maintenance_targets":{},"maintenance_jobs":[],"maintenance_settled_day":-1,"offer_quotes":{},"offer_plan_selections":{},"quote_decisions":[],"retainer_settled_day":-1,"contract_contexts":{},"contract_closeouts":{},"credit_loss":0,"offer_plan":"standard","pricing_policy":_default_pricing_policy(),"procurement_cart":CUSTOMER_STOCK.empty_cart(),"desktop_sessions":{},"retainer_daily":{},"restore_preview":0,"strategy":"","skills":{"operations":0,"advisory":0,"response":0},"profit":0,"credit":0,"cash_flow_start_day":0,"recurring_clients":[],"strategy_income":0,"career_mode":false,"contracts_completed":0,"current_contract_id":"","offers":[],"market_day":-1,"market_leads":[],"awaiting_contract":false,"game_complete":false,"errors":[],"profile":profile_defaults(),"diagnostics_required":false,"ui_help_seen":{},"dispatch_queues":{},"dispatch_holds":{}}
 	_assignments = {}
 	state.targets = []; state.target_index = 0; state.contract = {}; state.contract_plan = "standard"; state.offer_plan = "standard"; state.clock_minutes = BUSINESS_START_MINUTE; state.work = {"minutes":0.0,"started_at":BUSINESS_START_MINUTE,"started_day":1,"restarts_failed":0,"resets":0,"incident_cost":0,"plan":"standard"}
 	state.vm_states = {}; state.peak_profit = 0; _machine = null; _machine_key = ""
@@ -666,6 +666,7 @@ func load_game() -> bool:
 	if not state.has("strategy_income"): state.strategy_income = 0
 	if not state.has("customer_relations") or not state.customer_relations is Dictionary: state.customer_relations = {}; needs_migration = true
 	if not state.has("care_agreements") or not state.care_agreements is Dictionary: state.care_agreements = {}; needs_migration = true
+	if not state.has("offer_plan_selections") or not state.offer_plan_selections is Dictionary: state.offer_plan_selections = {}; needs_migration = true
 	if not state.has("contract_contexts") or not state.contract_contexts is Dictionary: state.contract_contexts = {}; needs_migration = true
 	if not state.has("offer_plan") or str(state.offer_plan).is_empty(): state.offer_plan = str(state.get("contract_plan", "standard")); needs_migration = true
 	if not state.has("desktop_sessions") or not state.desktop_sessions is Dictionary: state.desktop_sessions = {}; needs_migration = true
@@ -1031,9 +1032,58 @@ func contract_queue() -> Array:
 func offer_plan() -> String:
 	return str(state.get("offer_plan",state.get("contract_plan","standard")))
 
-func set_offer_plan(plan: String) -> bool:
+func offer_plan_for(offer: Dictionary) -> String:
+	var plan_ids: Array[String] = []
+	for plan in contract_plans(): plan_ids.append(str(plan.id))
+	var offer_id := str(offer.get("id", ""))
+	var selected := ""
+	var selections_value: Variant = state.get("offer_plan_selections", {})
+	if selections_value is Dictionary:
+		var saved_selection := str(selections_value.get(offer_id, ""))
+		if saved_selection in plan_ids: selected = saved_selection
+	if selected.is_empty():
+		var quotes_value: Variant = state.get("offer_quotes", {}).get(offer_id, {}) if state.get("offer_quotes", {}) is Dictionary else {}
+		var saved_plans: Array[String] = []
+		if quotes_value is Dictionary:
+			for plan_id in plan_ids:
+				if not quotes_value.has(plan_id): continue
+				if plan_id == "care" and not care_case_reason(offer).is_empty(): continue
+				saved_plans.append(plan_id)
+		# Older saves store amounts per plan but no last-selection marker. Prefer a
+		# unique compatible draft plan; with several, use the global plan when it
+		# has a saved amount, otherwise choose the first compatible plan deterministically.
+		var global_plan := offer_plan()
+		if saved_plans.size() == 1: selected = saved_plans[0]
+		elif not saved_plans.is_empty():
+			selected = global_plan if global_plan in saved_plans else saved_plans[0]
+	if selected.is_empty(): selected = offer_plan()
+	if selected not in plan_ids: selected = "standard"
+	if selected == "care" and not care_case_reason(offer).is_empty(): return "standard"
+	return selected
+
+func set_offer_plan(plan: String, offer_id: String = "") -> bool:
 	for candidate in contract_plans():
-		if str(candidate.id)==plan: state.offer_plan=plan; changed.emit(); return true
+		if str(candidate.id) != plan: continue
+		if offer_id.is_empty():
+			state.offer_plan = plan
+			changed.emit()
+			return true
+		var target_offer: Dictionary = {}
+		for offer in state.get("offers", []):
+			if offer is Dictionary and str(offer.get("id", "")) == offer_id:
+				target_offer = offer
+				break
+		if target_offer.is_empty(): return false
+		if plan == "care" and not care_case_reason(target_offer).is_empty(): return false
+		var previous_state: Dictionary = state.duplicate(true)
+		var selections_value: Variant = state.get("offer_plan_selections", {})
+		if not selections_value is Dictionary: state.offer_plan_selections = {}
+		state.offer_plan_selections[offer_id] = plan
+		if not save_game():
+			state = previous_state
+			return false
+		changed.emit()
+		return true
 	return false
 
 func switch_contract(id: String) -> bool:
@@ -2240,7 +2290,7 @@ func set_offer_quote(id: String, amount: int) -> bool:
 	return false
 
 func contract_quote(offer: Dictionary, quoted_override: int = -1) -> Dictionary:
-	var plan_id := str(state.get("offer_plan", "standard"))
+	var plan_id := offer_plan_for(offer)
 	var specs: Array = offer.get("target_specs", []) if offer.get("target_specs", []) is Array else []
 	var pricing := _contract_budget(int(offer.get("chapter", state.chapter)), int(offer.get("targets", 1)), specs, plan_id)
 	var plan: Dictionary = pricing.plan
@@ -2799,6 +2849,8 @@ func _make_offers(previous_skills: Dictionary = {}) -> void:
 	var current_ids: Array = state.offers.map(func(offer): return str(offer.id))
 	for quote_id in state.offer_quotes.keys():
 		if quote_id not in current_ids: state.offer_quotes.erase(quote_id)
+	for selected_offer_id in state.offer_plan_selections.keys():
+		if selected_offer_id not in current_ids: state.offer_plan_selections.erase(selected_offer_id)
 
 func candidate_payload_available(offers: Array) -> bool:
 	for offer in offers:

@@ -1009,19 +1009,27 @@ func _contract_detail(offer: Dictionary) -> void:
 	var plan_label := _label(UI.copy("board_plan"),14,UI.MUTED); plan_label.autowrap_mode=TextServer.AUTOWRAP_OFF; plan_label.size_flags_vertical=Control.SIZE_SHRINK_CENTER; plan_row.add_child(plan_label)
 	var plan := OptionButton.new(); plan.name="ContractPlan"; plan.size_flags_horizontal=Control.SIZE_EXPAND_FILL; var plans: Array = g.contract_plans()
 	for item in plans: plan.add_item(str(item.label))
-	var selected_plan := str(g.offer_plan()) if g.has_method("offer_plan") else str(g.state.contract_plan)
+	var selected_plan := str(g.offer_plan_for(offer))
 	for index in plans.size():
 		if plans[index].id == selected_plan: plan.select(index)
+		if plans[index].id == "care":
+			var unsupported := str(g.care_case_reason(offer))
+			plan.set_item_disabled(index, not unsupported.is_empty())
+			plan.get_popup().set_item_tooltip(index, unsupported)
 	plan.item_selected.connect(func(index):
 		var input = body.find_child("OfferPrice", true, false)
 		if input is SpinBox: input.apply()
 		var draft_amount := roundi(input.value) if input is SpinBox else int(quote.quoted_fee)
-		var changed: bool = bool(g.set_offer_plan(str(plans[index].id))) if g.has_method("set_offer_plan") else bool(g.set_contract_plan(str(plans[index].id)))
+		var changed: bool = bool(g.set_offer_plan(str(plans[index].id), str(offer.id)))
 		if changed:
 			_select_contract(str(offer.id))
 			if draft_amount != int(quote.quoted_fee):
 				var next_input = modal_body.find_child("OfferPrice", true, false)
 				if next_input is SpinBox: next_input.value = draft_amount
+		else:
+			for old_index in plans.size():
+				if str(plans[old_index].id) == selected_plan: plan.select(old_index)
+			_management_feedback("プランを保存できませんでした。元の契約条件を維持しています。")
 	)
 	plan_row.add_child(plan)
 	var price_row := HBoxContainer.new(); price_row.add_theme_constant_override("separation",12); price_row.size_flags_horizontal=Control.SIZE_EXPAND_FILL; inputs.add_child(price_row)
@@ -1079,9 +1087,9 @@ func _contract_detail(offer: Dictionary) -> void:
 	conditions.add_child(_label(UI.copy("billing_terms") + "  " + str(g.invoice_terms(offer).label),14,INK))
 	if business_quote:conditions.add_child(_label("正常業務の誤停止は6分単位で顧客満足−1（端数切上げ、上限15）。対象端末の封じ込めに必要な隔離は誤停止に含みません。",13,INK))
 	conditions.add_child(_label("%s · 会社Lv.%d / 専門Lv.%d / 難度%d" % [str(offer.service),offer.required_level,offer.required_rank,offer.grade],14,INK))
-	if graphical_quote or (int(operating_preview.get("required", 0)) == 0 and int(operating_preview.get("shortage", 0)) == 0):
+	if graphical_quote and (int(operating_preview.get("required", 0)) > 0 or int(operating_preview.get("shortage", 0)) > 0):
 		_contract_operations_preview(conditions, offer, g, true)
-	if hardware_quote: conditions.add_child(_label("%d拠点 · 作業目安 %d分 · 導入・照合・納入" % [int(offer.targets), int(quote.budget)], 14, INK))
+	if hardware_quote: conditions.add_child(_label("%d拠点 · 納品期限: 受注から%d分 · 導入・照合・納入" % [int(offer.targets), int(quote.budget)], 14, INK))
 	if priority_quote: conditions.add_child(_label("納品期限 %d分 · 基本経費 ¥%d / 受付期限は上の業務図で確認" % [int(quote.budget), int(quote.costs)], 14, INK))
 	if share_quote: conditions.add_child(_label(UI.copy("board_facts") % [int(offer.targets),int(quote.budget),int(quote.costs)],14,INK))
 	var care_reason := ""

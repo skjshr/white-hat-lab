@@ -8,12 +8,21 @@ func legacy_portal(g: Node) -> void:
 	check(g.start_free_career(), "legacy career")
 	var offer := portal_offer(g)
 	g.set_offer_plan("care")
-	var old_quote: Dictionary = g.contract_quote(offer)
+	# The current quote intentionally falls back to standard for this unsupported
+	# case. Reconstruct the former care terms directly instead of treating that
+	# new fallback quote as the legacy agreement.
+	var old_terms: Dictionary = g._contract_budget(int(offer.chapter), int(offer.targets), offer.get("target_specs", []), "care")
+	var old_plan: Dictionary = old_terms.plan
+	var category := str(offer.get("category", "advisory"))
+	var old_reference_fee := roundi(float(offer.get("reward", offer.get("base_reward", 0))) * float(old_plan.multiplier))
+	var old_fee := roundi(float(old_reference_fee) * float(g.pricing_policy().get(category, 100)) / 100.0)
+	var fallback_quote: Dictionary = g.contract_quote(offer)
 	g.set_offer_plan("standard")
-	check(g.set_offer_quote(str(offer.id), int(old_quote.quoted_fee)) and g.choose_contract(str(offer.id)), "legacy base contract")
+	check(str(fallback_quote.selected_plan) == "standard" and g.set_offer_quote(str(offer.id), int(fallback_quote.quoted_fee)) and g.choose_contract(str(offer.id)), "legacy base contract")
 	# Schema reconstruction, not a way for current players to bypass eligibility.
 	g.state.contract_plan = "care"; g.state.work.plan = "care"
-	g.state.contract.agreed_budget = float(old_quote.budget)
+	g.state.contract.agreed_fee = old_fee
+	g.state.contract.agreed_budget = float(old_terms.budget)
 	check(g._agree_care(str(offer.client)), "legacy pending reservation fixture")
 	g._sync_contract_context()
 	check(g.save_game(), "legacy accepted save")
@@ -45,23 +54,31 @@ func run() -> void:
 		var definition: Dictionary = CATALOG.by_id(id)
 		check(not definition.is_empty() and not g.care_case_reason(definition).is_empty(), id + " unsupported case reason")
 		var offer: Dictionary = {}
+		var quote: Dictionary = {}
 		for candidate in g.state.offers:
 			if str(candidate.get("case_id", ""))==id: offer=candidate;break
-		if bool(definition.get("saas_watch_only", false)):
-			check(offer.is_empty(), id + " requires a previous delivery and is absent from the initial market")
-			# Quote the catalog scope without fabricating an earned alert or
-			# inserting an offer. Catalog targets are specs, quote targets a count.
+		var requires_saved_payload: bool = bool(definition.get("saas_watch_only", false)) or id in ["advanced-saas-ai-preflight", "advanced-saas-ai-handoff", "advanced-saas-priority"]
+		if requires_saved_payload:
+			check(offer.is_empty(), id + " requires a real saved source payload and is absent from the fresh market")
+			# Check plan compatibility against the authored catalog scope only.
+			# Do not synthesize a live follow-up offer or claim its payload exists.
 			var scope: Dictionary = definition.duplicate(true)
 			scope.case_id = id
 			scope.target_specs = definition.get("targets", []).duplicate(true)
 			scope.targets = scope.target_specs.size()
-			var quote: Dictionary = g.contract_quote(scope, 0)
-			check(str(quote.selected_plan) == "care" and str(quote.reason) == SUPPORT.REASON, id + " quote explicitly rejects unsupported care even within budget")
+			quote = g.contract_quote(scope, 0)
+			check(str(quote.selected_plan) == "standard" and str(quote.reason) != SUPPORT.REASON, id + " quote falls back from unsupported care")
 		else:
-			check(not offer.is_empty() and not str(g.contract_quote(offer).reason).is_empty(), id + " quote explains exclusion")
+			quote = g.contract_quote(offer)
+			check(not offer.is_empty() and str(quote.selected_plan) == "standard" and str(quote.reason) != SUPPORT.REASON, id + " quote falls back from unsupported care")
+	var unsupported_offer := portal_offer(g)
 	var before := JSON.stringify(g.state)
-	check(not g.choose_contract(str(portal_offer(g).id)), "new unsupported care rejected")
-	check(JSON.stringify(g.state)==before, "rejected care creates no reservation or decline")
+	check(not g.set_offer_plan("care", str(unsupported_offer.id)), "explicit unsupported care selection rejected")
+	check(JSON.stringify(g.state)==before, "rejected care selection leaves state unchanged")
+	var care_before: Dictionary = g.state.care_agreements.duplicate(true)
+	check(g.choose_contract(str(unsupported_offer.id)), "unsupported case can be accepted under standard fallback")
+	check(str(g.state.contract_plan) == "standard" and str(g.state.contract.get("case_id", "")) == "advanced-portal", "accepted unsupported case retains standard plan")
+	check(g.state.care_agreements == care_before, "standard fallback acceptance creates no care reservation")
 	check(g.care_case_reason(CATALOG.by_id("service-1-case-0")).is_empty(), "normal backup care stays supported")
 	check(not g.care_case_reason({"case_id":"composite", "target_specs":[{"case_id":"service-1-case-0"},{"case_id":"advanced-api"}]}).is_empty(), "mixed scope with unsupported engine rejected")
 	g.queue_free()

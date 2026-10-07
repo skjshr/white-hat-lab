@@ -19,7 +19,7 @@
     "board_conditions": "契約条件",
     "board_plan": "プラン",
     "board_price": "提示額",
-    "board_facts": "%d拠点 · 目安%d分 · 経費¥%d",
+    "board_facts": "%d拠点 · 納品期限: 受注から%d分 · 経費¥%d",
     "board_profit": "見込利益 ¥%d",
     "board_quote_limits": "相場 ¥%d / 上限 ¥%d",
     "board_save_draft": "下書き保存",
