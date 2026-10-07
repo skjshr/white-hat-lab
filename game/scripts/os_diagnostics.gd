@@ -7,6 +7,7 @@ const Observation = preload("res://scripts/diagnostic_observation.gd")
 const Workbench = preload("res://scripts/diagnostic_workbench.gd")
 const ShareObservation = preload("res://scripts/share_diagnostic_observation.gd")
 const ShareWorkbench = preload("res://scripts/share_diagnostic_workbench.gd")
+const SourceTray = preload("res://scripts/diagnostic_source_tray.gd")
 const INK := UI.INK
 const MUTED := UI.MUTED
 const BLUE := UI.PRIMARY
@@ -132,9 +133,10 @@ static func _reveal_result(d) -> void:
 static func refresh(d) -> void:
 	var w: Dictionary = d.widgets.verify
 	var probes: Array = d.game.diagnostic_probes()
+	var staff_rows: Array = d.game.staff_diagnostic_observations()
 	var ready: bool = d.game.can_deliver()
 	var mode := str(d.diagnostic_ui.get("mode", "checks"))
-	var signature := str(probes) + str(ready) + str(d.game.vm_info().connected) + str(d.game.state.get("validated_revision", -1)) + str(w.selected) + str(w.raw_visible) + mode + str(d.diagnostic_ui.get("observations", [])) + str(w.get("operation_error", "")) + str(w.get("object", ""))
+	var signature := str(probes) + str(staff_rows) + str(w.get("evidence_source", "auto")) + str(w.get("staff_feedback", "")) + str(ready) + str(d.game.vm_info().connected) + str(d.game.state.get("validated_revision", -1)) + str(w.selected) + str(w.raw_visible) + mode + str(d.diagnostic_ui.get("observations", [])) + str(w.get("operation_error", "")) + str(w.get("object", ""))
 	if str(w.signature) == signature: return
 	w.signature = signature
 	if w.has("reflow"): w.reflow.call()
@@ -201,40 +203,79 @@ static func refresh(d) -> void:
 		label.clip_text = true
 		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		col.add_child(label)
-		var note = d._label(("原本 · " if str(probe.command).begins_with("sha256sum ") else "") + _status(probe), 11, _status_color(probe))
+		var staff_available := staff_rows.any(func(item): return str(item.get("probe_id", "")) == id)
+		var note = d._label(("原本 · " if str(probe.command).begins_with("sha256sum ") else "") + ("担当者の観測あり" if staff_available and not bool(probe.get("recorded", false)) else _status(probe)), 11, _status_color(probe))
 		note.autowrap_mode = TextServer.AUTOWRAP_OFF
 		note.clip_text = true
 		note.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		col.add_child(note)
 		button.tooltip_text = str(probe.label) + " / " + _status(probe)
 
-	var state_color := _status_color(current)
+	var staff: Dictionary = {}
+	for row in staff_rows:
+		if str(row.get("probe_id", "")) != selected: continue
+		if staff.is_empty() or int(row.get("completed_day", -1)) * 1440 + int(row.get("completed_minute", -1)) >= int(staff.get("completed_day", -1)) * 1440 + int(staff.get("completed_minute", -1)):
+			staff = row
+	var source := str(w.get("evidence_source", "auto"))
+	if source == "auto": source = "staff" if not staff.is_empty() and not bool(current.get("recorded", false)) else "current"
+	if staff.is_empty(): source = "current"
+	var showing_staff := source == "staff"
+	var specimen: Dictionary = current.duplicate(true)
+	if showing_staff:
+		for key in ["result", "recorded", "fresh", "passed", "fingerprint", "fingerprint_kind"]:
+			if staff.has(key): specimen[key] = staff[key]
+		specimen.erase("initial_result")
+	var state_color := _status_color(specimen)
 	var top = d._row(right, 5)
 	var current_title = d._label(_probe_label(current) + " · 原本照合" if str(current.command).begins_with("sha256sum ") else str(current.label), 18, INK)
 	current_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_child(current_title)
-	var status = d._label(_status(current), 13, state_color)
+	var staff_status := "担当観測 · " + ("変更前" if not bool(specimen.get("fresh", false)) else "条件一致" if bool(specimen.get("passed", false)) else "条件不一致")
+	var status = d._label(staff_status if showing_staff else _status(specimen), 13, state_color)
 	top.add_child(status)
 	var host = d.game.vm_info()
 	right.add_child(d._label(("顧客端末  ·  " + str(host.get("host", ""))) if bool(host.get("connected", false)) else "顧客端末  ·  未接続", 12, MUTED))
+	if not staff.is_empty():
+		var tray = SourceTray.new()
+		right.add_child(tray)
+		tray.setup(float(d.game.settings.get("text_scale", 1.0)), staff, current, source)
+		tray.source_selected.connect(func(value: String):
+			w.evidence_source = value; w["object"] = ""; w.raw_visible = false; w.erase("staff_feedback"); w.erase("operation_error")
+			refresh(d)
+		)
 	var expectation := str(current.get("expectation", current.get("description", "")))
 	var description := str(current.get("description", ""))
-	if not description.is_empty() and description != expectation:
+	var graphical := str(current.command).begins_with("curl ") or str(current.command).begins_with("smbclient ") or str(current.command).begins_with("sha256sum ")
+	if not graphical and not description.is_empty() and description != expectation:
 		var details = d._disclosure(right, "検査詳細")
 		var description_label = d._label(description, 13, INK)
 		description_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		details.add_child(description_label)
-	var command_row = d._row(right, 5)
+	var command_row := HFlowContainer.new()
+	command_row.add_theme_constant_override("h_separation", 6)
+	right.add_child(command_row)
 	var requires_login := bool(current.get("requires_login",false))
 	var command_text := UI.copy("identity_username")+": "+str(current.get("user","")) if requires_login else _copy("os_command", "コマンド")+"  $ " + str(current.command)
-	var graphical := str(current.command).begins_with("curl ") or str(current.command).begins_with("smbclient ") or str(current.command).begins_with("sha256sum ")
 	if not graphical:
 		var command = d._label(command_text, 13, BLUE)
 		command.add_theme_font_override("font", d.mono)
 		command.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		command_row.add_child(command)
-	var run = d._primary(UI.copy("identity_test_login") if requires_login else "検査実行", func():
+	if showing_staff:
+		var adopt: Button = d._primary("採用済み" if bool(staff.get("adopted", false)) else "観測を採用", func():
+			var result: Dictionary = d.game.adopt_staff_diagnostic(selected, str(staff.get("member_id", "")))
+			w.staff_feedback = "" if bool(result.get("ok", false)) else str(result.get("message", ""))
+			if bool(result.get("ok", false)): w.evidence_source = "current"; w["object"] = ""
+			refresh(d)
+		)
+		adopt.name = "DiagnosticAdoptStaff"
+		adopt.disabled = not bool(staff.get("can_adopt", false)) or bool(staff.get("adopted", false))
+		adopt.tooltip_text = str(staff.get("reason", ""))
+		UI.os_primary(adopt, DIAG_ACCENT)
+		command_row.add_child(adopt)
+	var run = d._primary(UI.copy("identity_test_login") if requires_login else "自分で再計測" if showing_staff else "検査実行", func():
 		d._trace("diagnostic", selected)
+		w.evidence_source = "current"; w.erase("staff_feedback")
 		if requires_login: d._open_identity_login(str(current.get("user","current")))
 		else:
 			w["object"] = ""
@@ -253,11 +294,28 @@ static func refresh(d) -> void:
 		command_row.add_child(_tool(d, "link", "顧客端末に接続", func(): d.game.vm_run("ssh client"); refresh(d), "接続"))
 	else:
 		if not requires_login and not graphical: command_row.add_child(_tool(d, "code", "端末入力", d._type_command.bind(str(current.command)), "端末入力"))
+	if showing_staff and not bool(staff.get("can_adopt", false)) and not bool(staff.get("fresh", false)):
+		var reason: Label = d._label("状態変更後のため再計測が必要です" if bool(staff.get("adopted", false)) else str(staff.get("reason", "")), 12, UI.WARNING)
+		reason.name = "DiagnosticStaffReason"
+		reason.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		right.add_child(reason)
+	if not str(w.get("staff_feedback", "")).is_empty():
+		var feedback: Label = d._label(str(w.staff_feedback), 13, DIAG_ACCENT)
+		feedback.name = "DiagnosticStaffFeedback"; right.add_child(feedback)
 	if graphical:
-		_graphical_result(d, right, current, command_row)
+		_graphical_result(d, right, specimen)
+		if not description.is_empty() and description != expectation:
+			var details = d._disclosure(right, "検査詳細")
+			var description_label = d._label(description, 13, INK)
+			description_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			details.add_child(description_label)
+		if not staff.is_empty() and bool(current.get("recorded", false)):
+			var comparison = d._disclosure(right, "担当の観測と検査記録を比較")
+			_staff_comparison(d, comparison, staff, current)
 		_delivery_action(d, right, probes)
 		return
 
+	current = specimen
 	var result_text := str(current.get("result", ""))
 	var summary := "未実行"
 	if not result_text.is_empty(): summary = result_text.get_slice("\n", 0)
@@ -315,7 +373,7 @@ static func _delivery_action(d, right: Control, probes: Array) -> void:
 	report.size_flags_horizontal = Control.SIZE_SHRINK_END
 	right.add_child(report)
 
-static func _graphical_result(d, parent: Control, probe: Dictionary, command_row: Control) -> void:
+static func _graphical_result(d, parent: Control, probe: Dictionary) -> void:
 	var w: Dictionary = d.widgets.verify
 	var shared := str(probe.command).begins_with("smbclient ") or str(probe.command).begins_with("sha256sum ")
 	var value: Dictionary = ShareObservation.project(probe) if shared else Observation.project(probe)
@@ -346,9 +404,7 @@ static func _graphical_result(d, parent: Control, probe: Dictionary, command_row
 		w["replay"] = false
 		bench.replay()
 	var tools := HFlowContainer.new(); tools.add_theme_constant_override("h_separation", 6); content.add_child(tools)
-	for action in command_row.get_children():
-		command_row.remove_child(action); tools.add_child(action)
-	parent.remove_child(command_row); command_row.queue_free()
+	# Primary measurement/adoption stays above the drawing at enlarged text sizes.
 	var replay: Button = d._button("観測を再生", bench.replay)
 	replay.name = "DiagnosticReplayObservation"; replay.disabled = not bool(value.recorded) or str(value.transport) == "unknown"; tools.add_child(replay)
 	var compare_label := UI.copy("compare_close" if bool(w.raw_visible) else "compare_results")
@@ -470,11 +526,15 @@ static func _reveal_inspector(d) -> void:
 	if is_instance_valid(inspector) and scroll is ScrollContainer: scroll.ensure_control_visible(inspector)
 
 static func _select(d, id: String) -> void:
+	d.widgets.verify.erase("evidence_source")
+	d.widgets.verify.erase("staff_feedback")
 	d.widgets.verify.selected = id
 	d.widgets.verify["object"] = ""
 	d.diagnostic_ui["selected"] = id
 	d._save_session(false)
 	refresh(d)
+	var scroll = d.widgets.verify.right.get_parent()
+	if scroll is ScrollContainer: scroll.set_deferred("scroll_vertical", 0)
 
 static func _request_workspace(d, parent: VBoxContainer) -> void:
 	parent.add_child(d._label("要求URL", 13, MUTED))
@@ -557,6 +617,20 @@ static func _build_comparison(d, parent: Control, probe: Dictionary) -> void:
 	_output(d, panes, "DiagnosticFirst", UI.copy("compare_first"), initial, diff.removed, Color("633739"))
 	_output(d, panes, "DiagnosticLatest", UI.copy("compare_latest"), latest, diff.added, Color("254e3d"))
 
+static func _staff_comparison(d, parent: Control, staff: Dictionary, probe: Dictionary) -> void:
+	var observed := str(staff.get("result", ""))
+	var measured := str(probe.get("result", ""))
+	var diff := Comparison.compare(observed, measured)
+	var panes := BoxContainer.new()
+	panes.name = "DiagnosticStaffComparison"
+	panes.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panes.add_theme_constant_override("separation", 8)
+	parent.add_child(panes)
+	panes.resized.connect(func(): panes.vertical = panes.size.x < 720)
+	panes.vertical = panes.size.x < 720
+	_output(d, panes, "DiagnosticStaffOriginal", str(staff.get("member_name", "担当者")) + "の観測" + (" · 変更前" if not bool(staff.get("fresh", false)) else ""), observed, diff.removed, Color("633739"))
+	_output(d, panes, "DiagnosticStaffCompared", "検査記録 · " + _status(probe), measured, diff.added, Color("254e3d"))
+
 static func _output(d, parent: Control, id: String, title: String, text: String, changed: Array, tint: Color) -> void:
 	var panel := VBoxContainer.new()
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -578,6 +652,12 @@ static func _output(d, parent: Control, id: String, title: String, text: String,
 	output.add_theme_color_override("font_color", Color("f1f4f8"))
 	output.add_theme_color_override("font_readonly_color", Color("f1f4f8"))
 	output.add_theme_color_override("line_number_color", Color("acb9ca"))
+	output.gui_input.connect(func(event):
+		if event is InputEventKey and event.pressed and event.keycode == KEY_TAB:
+			var next := output.find_prev_valid_focus() if event.shift_pressed else output.find_next_valid_focus()
+			if is_instance_valid(next): next.grab_focus()
+			output.accept_event()
+	)
 	panel.add_child(output)
 	for line in changed:
 		output.set_line_background_color(int(line), tint)

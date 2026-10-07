@@ -1136,7 +1136,7 @@ func _record_command(command: String, output: String, before: String, after: Str
 		if _normalize_command(str(probe.get("command", ""))) == normalized:
 			matched_probe = str(probe.get("id", ""))
 			if not bool(probe.get("recorded", false)): probe.initial_result = output
-			probe.result = output; probe.recorded = true; _stamp_probe_fingerprint(probe, output, after); probe.fresh = true; probe.passed = _probe_passes(output, str(probe.get("expectation", "")))
+			probe.result = output; probe.recorded = true; probe.erase("staff_observation_source"); _stamp_probe_fingerprint(probe, output, after); probe.fresh = true; probe.passed = _probe_passes(output, str(probe.get("expectation", "")))
 			matched_expectation = str(probe.get("expectation", "")); matched_passed = bool(probe.passed)
 	# A real credential-bearing login or password-update command is evidence for
 	# the corresponding user probe even though its secret-bearing command cannot
@@ -1150,7 +1150,7 @@ func _record_command(command: String, output: String, before: String, after: Str
 			if not identity_user.is_empty() and probe_user == identity_user and probe_id in ["current-mfa", "former-login"]:
 				matched_probe = probe_id
 				if not bool(probe.get("recorded", false)): probe.initial_result = output
-				probe.result = output; probe.recorded = true; _stamp_probe_fingerprint(probe, output, after); probe.fresh = true; probe.passed = _probe_passes(output, str(probe.get("expectation", "")))
+				probe.result = output; probe.recorded = true; probe.erase("staff_observation_source"); _stamp_probe_fingerprint(probe, output, after); probe.fresh = true; probe.passed = _probe_passes(output, str(probe.get("expectation", "")))
 				matched_expectation = str(probe.get("expectation", "")); matched_passed = bool(probe.passed)
 				break
 	if not matched_probe.is_empty():
@@ -2130,17 +2130,29 @@ func _aya_readonly_probe(command: String) -> bool:
 
 func _aya_observe_probes() -> Array[String]:
 	var observed: Array[String] = []
+	var structured: Array[Dictionary] = []
 	for probe in _active_probes():
 		var command := str(probe.get("command", "")).strip_edges()
 		if not _aya_readonly_probe(command): continue
+		var probe_id := str(probe.get("id", ""))
+		var probe_user := "current" if probe_id == "current-mfa" else ("former" if probe_id == "former-login" else "")
+		if bool(probe.get("requires_login", false)) or (not probe_user.is_empty() and _identity_probe_requires_login(probe_user)): continue
 		# Call the command implementation directly. This deliberately bypasses
 		# run/_record_command so a staff observation cannot manufacture a pass.
 		var output := _run_internal(command)
+		var expectation := str(probe.get("expectation", ""))
+		var proof := {"command":command,"expectation":expectation}
+		_stamp_probe_fingerprint(proof, output, _fingerprint())
+		var observation := {"probe_id":probe_id,"command":command,"expectation":expectation,"result":output,"recorded":true,"fingerprint":str(proof.get("fingerprint", ""))}
+		if proof.has("fingerprint_kind"): observation.fingerprint_kind = str(proof.fingerprint_kind)
+		structured.append(observation)
 		observed.append("$ " + command + "\n" + output)
+	state.cooperation_observations = structured
 	return observed
 
 func cooperate(role: String, worker: Dictionary = {}) -> Array[String]:
 	var log: Array[String] = []
+	state.erase("cooperation_observations")
 	# The role still selects the bounded operation.  A worker may only change
 	# the report attribution and its operator-home output path; it cannot alter
 	# probes, checks, or the VM identity/configuration.

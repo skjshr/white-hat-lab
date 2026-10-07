@@ -274,6 +274,9 @@ func _finish_colleague(id: String, job: Dictionary) -> void:
 		for field in ["baseline_recorded","baseline_locked","baseline_config","baseline_sha","baseline_report","baseline_report_content"]:
 			state[field] = job_target.get(field, false if field in ["baseline_recorded","baseline_locked"] else "")
 	var machine = _vm(); var before: Array = machine.evaluate().duplicate(); var mutation := int(machine.state.mutation); var role := colleague_role(id); var log: Array = machine.cooperate(role, {"name":member_name(id),"report_path":colleague_result_path(id),"observed_day":int(state.day),"observed_time":business_clock()})
+	var diagnostic_observations: Array = machine.state.get("cooperation_observations", []) if machine.state.get("cooperation_observations", []) is Array else []
+	diagnostic_observations = diagnostic_observations.duplicate(true)
+	machine.state.erase("cooperation_observations")
 	# Persist the job's VM/context in memory first; _store_vm() would save and emit
 	# while the background context is active, leaking it into the player's screen.
 	state.vm_states[_vm_key()] = machine.export_state()
@@ -299,7 +302,8 @@ func _finish_colleague(id: String, job: Dictionary) -> void:
 		for previous_receipt in receipts:
 			if not previous_receipt is Dictionary or str(previous_receipt.get("member_id", "")) != id:
 				retained.append(previous_receipt)
-		retained.append({"job_id":job_id,"contract_id":job_context,"target_index":job_target_index,"member_id":id,"member_name":member_name(id),"role":role,"phase":str(job.phase),"result":str(job.result),"result_path":str(job.get("result_path", colleague_result_path(id))),"revision":int(job.revision),"completed_day":completed_day,"completed_minute":completed_minute,"time_known":true,"work_minutes":_crew_minutes(job),"legacy":false})
+		retained.append({"job_id":job_id,"contract_id":job_context,"target_index":job_target_index,"vm_key":_vm_key(job_target_index),"member_id":id,"member_name":member_name(id),"role":role,"phase":str(job.phase),"result":str(job.result),"result_path":str(job.get("result_path", colleague_result_path(id))),"revision":int(job.revision),"completed_day":completed_day,"completed_minute":completed_minute,"time_known":true,"work_minutes":_crew_minutes(job),"legacy":false})
+		if role == "aya": retained[-1].diagnostic_observations_v1 = diagnostic_observations
 		# Capture the actual report now; later work or editor changes must not
 		# replace the observations attached to this completed assignment.
 		retained[-1].report_content = str(machine.state.get("fs", {}).get(str(retained[-1].result_path), job.result))
@@ -1809,6 +1813,137 @@ func diagnostic_probes() -> Array:
 	var machine = _vm()
 	if not machine.has_method("probes"): return []
 	return machine.probes()
+
+func _staff_diagnostic_gate_reason() -> String:
+	if not bool(state.get("accepted", false)): return "案件を受注していません"
+	if current_done(): return "納品済み案件は変更できません"
+	if advanced_active(): return "この案件では同僚観測を採用できません"
+	if not _customer_hardware_connected(): return UI_COPY.copy("stock_error_hardware")
+	if not vm_info().connected: return "顧客端末に接続してください"
+	return ""
+
+func _current_staff_receipts(member_id: String = "") -> Array:
+	var targets: Array = state.get("targets", []) if state.get("targets", []) is Array else []
+	var target_index := int(state.get("target_index", 0))
+	if target_index < 0 or target_index >= targets.size() or not targets[target_index] is Dictionary: return []
+	var receipts: Variant = targets[target_index].get("work_receipts", [])
+	if not receipts is Array: return []
+	var expected_contract := str(state.get("current_contract_id", ""))
+	var expected_vm_key := _vm_key(target_index)
+	var output: Array = []
+	var seen_members: Dictionary = {}
+	for index in range(receipts.size() - 1, -1, -1):
+		var receipt: Variant = receipts[index]
+		if not receipt is Dictionary: continue
+		var who := str(receipt.get("member_id", ""))
+		if who.is_empty() or (not member_id.is_empty() and who != member_id) or seen_members.has(who): continue
+		if str(receipt.get("role", "")) != "aya": continue
+		if not receipt.has("contract_id") or str(receipt.get("contract_id", "")) != expected_contract: continue
+		if not receipt.has("target_index") or int(receipt.get("target_index", -1)) != target_index: continue
+		if str(receipt.get("vm_key", "")) != expected_vm_key: continue
+		seen_members[who] = true
+		output.append(receipt)
+	return output
+
+func staff_diagnostic_observations() -> Array:
+	var output: Array = []
+	var receipts := _current_staff_receipts()
+	if receipts.is_empty() or not state.get("accepted", false) or advanced_active(): return output
+	var probes := diagnostic_probes()
+	var machine = _vm()
+	var gate_reason := _staff_diagnostic_gate_reason()
+	for receipt in receipts:
+		var observations: Variant = receipt.get("diagnostic_observations_v1", null)
+		if not observations is Array: continue
+		for source in observations:
+			if not source is Dictionary: continue
+			var probe_id := str(source.get("probe_id", ""))
+			var command := str(source.get("command", ""))
+			var expectation := str(source.get("expectation", ""))
+			var result := str(source.get("result", ""))
+			var current_probe: Dictionary = {}
+			for candidate in probes:
+				if str(candidate.get("id", "")) == probe_id:
+					current_probe = candidate
+					break
+			var fresh := false
+			var reason := ""
+			if not bool(source.get("recorded", true)) or probe_id.is_empty() or command.is_empty():
+				reason = "同僚の実観測として確認できません"
+			elif current_probe.is_empty():
+				reason = "現在の検査項目にありません"
+			elif str(current_probe.get("command", "")) != command or str(current_probe.get("expectation", "")) != expectation:
+				reason = "検査条件が変わりました"
+			elif not machine._aya_readonly_probe(command):
+				reason = "許可された読み取り観測ではありません"
+			elif bool(current_probe.get("requires_login", false)):
+				reason = "この検査は認証が必要です"
+			elif str(source.get("fingerprint", "")).is_empty():
+				reason = "観測状態の記録がありません"
+			else:
+				var proof := {"command":command,"expectation":expectation,"recorded":true,"fingerprint":str(source.get("fingerprint", ""))}
+				if source.has("fingerprint_kind"): proof.fingerprint_kind = str(source.fingerprint_kind)
+				fresh = bool(machine._probe_is_fresh(proof))
+				if not fresh: reason = "観測後に状態が変わりました"
+			var passed := fresh and bool(machine._probe_passes(result, expectation))
+			var source_job_id := str(receipt.get("job_id", ""))
+			var attribution: Dictionary = current_probe.get("staff_observation_source", {}) if current_probe.get("staff_observation_source", {}) is Dictionary else {}
+			var adopted := not attribution.is_empty() and str(attribution.get("job_id", "")) == source_job_id and str(attribution.get("member_id", "")) == str(receipt.get("member_id", ""))
+			var can_adopt := reason.is_empty() and gate_reason.is_empty() and not adopted
+			if not gate_reason.is_empty() and reason.is_empty(): reason = gate_reason
+			elif adopted: reason = "すでに採用済み"
+			elif can_adopt: reason = "採用できます"
+			output.append({"probe_id":probe_id,"member_id":str(receipt.get("member_id", "")),"member_name":str(receipt.get("member_name", "")),"completed_day":int(receipt.get("completed_day", -1)),"completed_minute":int(receipt.get("completed_minute", -1)),"command":command,"expectation":expectation,"result":result,"recorded":true,"fresh":fresh,"passed":passed,"can_adopt":can_adopt,"adopted":adopted,"reason":reason,"receipt_job_id":source_job_id,"fingerprint":str(source.get("fingerprint", "")),"fingerprint_kind":str(source.get("fingerprint_kind", ""))})
+	return output
+
+func adopt_staff_diagnostic(probe_id: String, member_id: String) -> Dictionary:
+	if not state.get("accepted", false): return {"ok":false,"message":"案件を受注していません"}
+	var gate_reason := _staff_diagnostic_gate_reason()
+	if not gate_reason.is_empty(): return {"ok":false,"message":gate_reason}
+	var row: Dictionary = {}
+	for candidate in staff_diagnostic_observations():
+		if str(candidate.get("probe_id", "")) == probe_id and str(candidate.get("member_id", "")) == member_id:
+			row = candidate
+			break
+	if row.is_empty(): return {"ok":false,"message":"対象に一致する構造化観測がありません"}
+	if bool(row.get("adopted", false)): return {"ok":true,"message":"すでに採用済みです"}
+	if not bool(row.get("can_adopt", false)): return {"ok":false,"message":str(row.get("reason", "この観測は採用できません"))}
+	var previous_state := state.duplicate(true)
+	var previous_assignments := _assignments.duplicate(true)
+	var previous_machine = _machine
+	var previous_machine_key := _machine_key
+	var machine = _vm()
+	var previous_vm: Dictionary = machine.export_state()
+	var before: Array = machine.evaluate().duplicate(true)
+	var mutation := int(machine.state.get("mutation", 0))
+	var active_probe: Dictionary = {}
+	for candidate in machine._active_probes():
+		if str(candidate.get("id", "")) == probe_id:
+			active_probe = candidate
+			break
+	if active_probe.is_empty() or str(active_probe.get("command", "")) != str(row.command) or str(active_probe.get("expectation", "")) != str(row.expectation) or not machine._aya_readonly_probe(str(row.command)) or bool(active_probe.get("requires_login", false)):
+		return {"ok":false,"message":"検査条件が変わりました"}
+	var proof := {"command":str(row.command),"expectation":str(row.expectation),"recorded":true,"fingerprint":str(row.fingerprint)}
+	if not str(row.get("fingerprint_kind", "")).is_empty(): proof.fingerprint_kind = str(row.fingerprint_kind)
+	if not machine._probe_is_fresh(proof): return {"ok":false,"message":"観測後に状態が変わりました"}
+	if not active_probe.has("initial_result"): active_probe.initial_result = str(row.result)
+	active_probe.result = str(row.result)
+	active_probe.recorded = true
+	active_probe.fingerprint = str(row.fingerprint)
+	if proof.has("fingerprint_kind"): active_probe.fingerprint_kind = str(proof.fingerprint_kind)
+	else: active_probe.erase("fingerprint_kind")
+	active_probe.fresh = true
+	active_probe.passed = bool(machine._probe_passes(str(row.result), str(row.expectation)))
+	active_probe.staff_observation_source = {"job_id":str(row.receipt_job_id),"member_id":member_id,"member_name":str(row.member_name),"completed_day":int(row.completed_day),"completed_minute":int(row.completed_minute)}
+	if not _store_vm(before, mutation):
+		state = previous_state
+		_assignments = previous_assignments
+		machine.state = previous_vm
+		_machine = previous_machine
+		_machine_key = previous_machine_key
+		changed.emit()
+		return {"ok":false,"message":"観測の採用を保存できませんでした。操作前の状態へ戻しました。"}
+	return {"ok":true,"message":"同僚の実観測を検査記録に採用しました"}
 
 func run_diagnostic(id: String) -> String:
 	for probe in diagnostic_probes():
