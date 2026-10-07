@@ -13,6 +13,24 @@ func json_of(value: String) -> Dictionary:
 func _init() -> void:
 	var vm = VM.new(); vm.setup(3)
 	expect(int(vm.state.get("identity_model_version", 0)) == 2, "new v2 stamp")
+	# Resume an alphabetically serialized chapter-3 contract after only the
+	# current account has drifted. Verdicts must remain paired with authored labels.
+	var ordered_scenario := json_of("{\"desired\":{\"current\":\"active\",\"former\":\"disabled\",\"mfa\":\"on\",\"sessions\":\"revoked\"},\"checks\":[\"退職者は新しくログインできない\",\"退職者の既存セッションも利用できない\",\"在籍者はログインできる\",\"利用者の追加認証を必須化\"],\"probes\":[]}")
+	var order_vm = VM.new(); order_vm.setup(3, {}, ordered_scenario)
+	order_vm.run("ssh client")
+	var expected_identity := {"former":"disabled", "sessions":"revoked", "current":"active", "mfa":"on"}
+	order_vm.write_file(str(order_vm.state.config_path), order_vm.configuration_text(expected_identity))
+	order_vm.run("systemctl restart identity")
+	var drifted_identity := expected_identity.duplicate(true); drifted_identity.current = "disabled"
+	order_vm.write_file(str(order_vm.state.config_path), order_vm.configuration_text(drifted_identity))
+	order_vm.run("systemctl restart identity")
+	var saved_identity: Dictionary = JSON.parse_string(JSON.stringify(order_vm.export_state()))
+	var resumed_identity = VM.new(); resumed_identity.setup(3, saved_identity)
+	var resumed_checks := resumed_identity.snapshot()
+	expect(resumed_checks.size() == 4 and resumed_checks[0].operation == "退職者は新しくログインできない" and resumed_checks[0].ok, "JSON reload aligns former-login PASS")
+	expect(resumed_checks[1].operation == "退職者の既存セッションも利用できない" and resumed_checks[1].ok, "JSON reload aligns former-session PASS")
+	expect(resumed_checks[2].operation == "在籍者はログインできる" and not resumed_checks[2].ok, "JSON reload aligns current-login FAIL")
+	expect(resumed_checks[3].operation == "利用者の追加認証を必須化" and resumed_checks[3].ok, "JSON reload aligns current-MFA PASS")
 	expect(str(vm.run("identity users")) == "Not connected. ssh client で顧客端末に接続してください。", "disconnected identity denied")
 	vm.run("ssh client")
 	var users := json_of(vm.run("identity users")); expect(bool(users.get("ok",false)) and int(users.get("code",0)) == 200, "users json status")

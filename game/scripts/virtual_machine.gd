@@ -2049,6 +2049,10 @@ func _evaluate_scenario() -> Array[bool]:
 	var desired: Dictionary = scenario.get("desired", {})
 	var result: Array[bool] = []
 	var desired_keys: Array = desired.keys()
+	if _chapter == 3:
+		# Saved JSON objects sort these keys alphabetically, but chapter 3's
+		# authored checks follow the identity contract order.
+		desired_keys = ["former", "sessions", "current", "mfa"].filter(func(key): return desired.has(key))
 	if _chapter == 4:
 		# JSON sorts object keys. Keep verdicts aligned with the authored EDR
 		# labels after reload instead of reporting logs=keep under the PC-A label.
