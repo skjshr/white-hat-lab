@@ -1746,6 +1746,25 @@ func _backup_snapshot_signature() -> String:
 	var live: Dictionary = game._vm().state
 	return JSON.stringify({"mutation":live.get("mutation",0),"connected":live.connected,"active":live.active,"dirty":live.get("dirty",false),"done":game.current_done()})
 
+func show_backup_work(route: String) -> void:
+	if game == null or game._current_chapter() != 1: return
+	if route == "backup-restore":
+		var saved: Dictionary = game._vm().state.get("last_restore", {})
+		_show_app("files")
+		FILES.navigate(self, str(saved.get("target", "/restore")), true)
+		return
+	if route not in ["backup-plan", "backup-local", "backup-offsite"]: return
+	backup_ui.plan_open = route == "backup-plan"
+	if route != "backup-plan":
+		backup_ui.repository = "local" if route == "backup-local" else "offsite"
+		for key in ["snapshot", "path", "preview", "restore_plan", "restore_open"]: backup_ui.erase(key)
+	# These links locate existing controls. They must not run snapshots, restore,
+	# save a plan or erase its unsaved dropdown choices simply by opening it.
+	show_guide_service(BACKUP_URL)
+	_render_backup()
+	_browser_scroll_top()
+	_save_session(false)
+
 func _render_backup() -> void:
 	if not widgets.has("browser") or not is_instance_valid(widgets.browser.get("page")): return
 	var page: VBoxContainer = widgets.browser.page; _clear(page)

@@ -843,6 +843,15 @@ func _open_priority_work(id: String, target_index: int, queue_id: String = "disp
 		selection.tab = "board"
 		desktop._show_app("advanced")
 
+func _open_backup_work(id: String, target_index: int, route: String) -> void:
+	if route not in ["backup-plan", "backup-local", "backup-offsite", "backup-restore"]: return
+	if is_instance_valid(desktop) and not close_panel(false, false): return
+	var g := _game()
+	if not g.switch_contract(id): _operations_feedback(UI.copy("ops_result_failed")); return
+	if target_index >= 0 and not g.select_target(target_index): _operations_feedback(UI.copy("ops_result_failed")); return
+	open_panel("terminal")
+	if is_instance_valid(desktop): desktop.show_backup_work(route)
+
 func _open_incident_work(id: String, target_index: int, queue_id: String) -> void:
 	# Resolve the live incident again, then preserve the current workstation
 	# before switching contract. A stale ribbon must not resurrect closed work.

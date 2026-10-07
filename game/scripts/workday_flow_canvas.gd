@@ -74,6 +74,10 @@ func _button(id: String, value: String, tooltip: String) -> Button:
 	button.toggle_mode = true; button.clip_text = true; button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	button.add_theme_font_override("font", UI.font(500)); button.add_theme_font_size_override("font_size", roundi(13 * factor))
 	M.button(button, "quiet")
+	# These controls use transparent surfaces; selected text must retain ink.
+	for kind in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color", "font_hover_pressed_color"]:
+		button.add_theme_color_override(kind, M.INK)
+	button.add_theme_color_override("font_disabled_color", M.MUTED)
 	for state in ["normal", "hover", "pressed", "disabled"]:
 		var style: StyleBoxFlat = M.surface(Color.TRANSPARENT, 0)
 		style.content_margin_left = (43 if id == "WorkdaySelf" else 49) * factor
@@ -85,6 +89,25 @@ func _button(id: String, value: String, tooltip: String) -> Button:
 func _layout() -> void:
 	if size.x <= 0: return
 	var width: float = size.x / factor
+	var backup: bool = not job.get("backup_work", {}).is_empty()
+	source_title.visible = not backup
+	source_client.visible = not backup
+	if backup:
+		var columns := 4 if width >= 900 else 2
+		var count := people.size() + 1
+		var cell := (width - 16.0) / columns
+		logical_height = 20 + ceili(float(count) / columns) * 64
+		custom_minimum_size.y = logical_height * factor
+		self_button.text = "自分で対応 → PC"
+		self_button.position = Vector2(8, 20) * factor
+		self_button.size = Vector2(cell - 8, 58) * factor
+		for index in person_buttons.size():
+			var slot := index + 1
+			person_buttons[index].position = Vector2(8 + (slot % columns) * cell, 20 + (slot / columns) * 64) * factor
+			person_buttons[index].size = Vector2(cell - 8, 58) * factor
+		empty_label.visible = false
+		queue_redraw()
+		return
 	source_width = clampf(width * .25, 118, 180)
 	lane_x = source_width + 39
 	logical_height = maxf(182, 20 + people.size() * 54)
@@ -104,6 +127,9 @@ func _draw() -> void:
 	if size.x <= 0: return
 	draw_set_transform(Vector2.ZERO, 0, Vector2(factor, factor))
 	var width: float = size.x / factor
+	if not job.get("backup_work", {}).is_empty():
+		_draw_backup_dispatch(width)
+		return
 	var source_center: Vector2 = Vector2(source_width * .5, 55)
 	var available: bool = not job.is_empty()
 	var source_color: Color = M.INK if available else M.MUTED
@@ -152,6 +178,22 @@ func _draw() -> void:
 func _job_title() -> String:
 	if job.is_empty(): return "仕事を選択"
 	return str(job.get("label", job.get("title", "保守点検" if str(job.get("kind", "")) == "maintenance" else job.get("id", "仕事"))))
+
+func _draw_backup_dispatch(width: float) -> void:
+	_text(Vector2(9, 13), "配分先 · 作業終了の見込み", 11, M.MUTED)
+	var columns := 4 if width >= 900 else 2
+	var cell := (width - 16.0) / columns
+	for slot in people.size() + 1:
+		var at := Vector2(8 + (slot % columns) * cell, 20 + (slot / columns) * 64)
+		var id := "self" if slot == 0 else str(people[slot - 1].get("id", ""))
+		var selected := selected_id == id
+		var color: Color = M.ACCENT if selected else M.INK
+		var center := at + Vector2(24, 28)
+		if slot == 0:
+			_pc(center, color)
+			if selected: draw_arc(center, 21, 0, TAU, 32, color, 2)
+		else: _person(center, color, selected)
+		draw_line(at + Vector2(1, 59), at + Vector2(cell - 9, 59), M.ACCENT if selected else M.LINE, 2 if selected else 1)
 
 func _quote(person: Dictionary) -> Dictionary:
 	var value: Variant = person.get("quote", {})
