@@ -53,7 +53,7 @@ static func build(ui, parent: Node, g) -> void:
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	content.add_theme_constant_override("separation", 5)
 	scroll.add_child(content)
-	_jobs(ui, content, g, snapshot.get("jobs", []), selected_key)
+	_jobs(ui, content, g, snapshot, selected_key)
 	if not job.get("business", {}).is_empty():
 		var business = BUSINESS.new()
 		business.name = "WorkdayBusiness"
@@ -125,6 +125,8 @@ static func refresh_live(ui, g) -> void:
 	var selected_key := str(ui.operations_choices.get("workday_selected", ""))
 	var snapshot: Dictionary = MODEL.snapshot(g, selected_key)
 	_update_summary(ui, snapshot.get("economy", {}))
+	var timeline = ui.modal_body.find_child("WorkdayTimeline", true, false)
+	if is_instance_valid(timeline): timeline.configure(preload("res://scripts/workday_timeline_model.gd").build(g.state, snapshot), selected_key, float(ui.text_scale))
 	var job := _selected_job(snapshot.get("jobs", []), selected_key)
 	if job.is_empty() or bool(job.get("completed", false)) or bool(job.get("draft", false)): return
 	var candidates := _canvas_candidates(snapshot.get("candidates", []), snapshot.get("people", []), job)
@@ -213,59 +215,36 @@ static func _update_summary(ui, economy: Dictionary) -> void:
 		var item := ui.modal_body.find_child("WorkdayMetric_" + str(spec[0]).validate_node_name(), true, false) as Label
 		if is_instance_valid(item): item.text = "%s  ¥%s" % [str(spec[0]), ui._group_number(int(spec[1]))]
 
-static func _jobs(ui, parent: Node, g, jobs: Array, selected_key: String) -> void:
+static func _jobs(ui, parent: Node, g, snapshot: Dictionary, selected_key: String) -> void:
+	var jobs: Array = snapshot.get("jobs", [])
 	if jobs.is_empty():
 		_label(ui, parent, "今日の割当待ちはありません。受注可能な案件は営業から確認できます。", 14, M.MUTED)
 		var sales := _button(ui, parent, "仕事を探す", func(): ui.open_panel("sales"), "WorkdaySales", "quiet")
 		sales.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 		return
-	for raw in jobs:
-		if not raw is Dictionary: continue
-		var job: Dictionary = raw
-		var key := str(job.get("key", ""))
-		var row := HBoxContainer.new()
-		row.name = "WorkdayJob_" + key.validate_node_name()
-		row.add_theme_constant_override("separation", 5)
-		parent.add_child(row)
-		var selected := key == selected_key
-		var label := _job_label(job)
-		var pick := Button.new()
-		pick.name = "WorkdaySelect_" + key.validate_node_name()
-		pick.text = label
-		pick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		pick.custom_minimum_size.y = 37 * float(ui.text_scale)
-		pick.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		pick.clip_text = true
-		pick.tooltip_text = "%s / %s / %s" % [str(job.get("client", "")), str(job.get("title", "")), str(job.get("deadline", {}).get("text", ""))]
-		M.button(pick, "tab", selected)
-		pick.pressed.connect(func():
-			ui.operations_choices.erase("workday_feedback")
-			ui.operations_choices.erase("workday_handoff_dispatch")
-			ui.operations_choices.erase("workday_record_open")
-			ui.operations_choices.erase("workday_backup_receipt")
-			ui.operations_choices.erase("workday_record_index")
-			ui.operations_choices.workday_selected = key
-			ui.operations_choices.workday_member = "self"
-			_sync_dispatch_selection(ui.operations_choices, job, "self")
-			ui._refresh_operations()
-		)
-		row.add_child(pick)
-		var status := Label.new()
-		status.text = _status(job)
-		status.custom_minimum_size.x = 82 * float(ui.text_scale)
-		status.add_theme_font_override("font", COPY.font(500))
-		status.add_theme_font_size_override("font_size", roundi(12 * float(ui.text_scale)))
-		status.add_theme_color_override("font_color", M.ACCENT if bool(job.get("completed", false)) else M.WARNING if str(job.get("status", "")) in ["late", "paused"] else M.MUTED)
-		status.clip_text = true; status.tooltip_text = status.text; status.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		row.add_child(status)
-		var money := Label.new()
-		money.text = _money(job)
-		money.custom_minimum_size.x = 78 * float(ui.text_scale)
-		money.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		money.add_theme_font_override("font", COPY.font(500))
-		money.add_theme_font_size_override("font_size", roundi(12 * float(ui.text_scale)))
-		money.add_theme_color_override("font_color", M.INK); money.clip_text = true; money.tooltip_text = money.text; money.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		row.add_child(money)
+	var timeline = preload("res://scripts/workday_timeline_canvas.gd").new()
+	timeline.name = "WorkdayTimeline"
+	parent.add_child(timeline)
+	timeline.configure(preload("res://scripts/workday_timeline_model.gd").build(g.state, snapshot), selected_key, float(ui.text_scale))
+	timeline.job_selected.connect(func(key: String):
+		var job := _selected_job(jobs, key)
+		if job.is_empty(): return
+		ui.operations_choices.erase("workday_feedback")
+		ui.operations_choices.erase("workday_handoff_dispatch")
+		ui.operations_choices.erase("workday_record_open")
+		ui.operations_choices.erase("workday_backup_receipt")
+		ui.operations_choices.erase("workday_record_index")
+		ui.operations_choices.workday_selected = key
+		ui.operations_choices.workday_member = "self"
+		_sync_dispatch_selection(ui.operations_choices, job, "self")
+		ui._refresh_operations()
+		_restore_focus(ui, "WorkdaySelect_" + key.validate_node_name())
+	)
+	timeline.business_selected.connect(func(key: String, queue_id: String):
+		var job := _selected_job(jobs, key)
+		if job.is_empty() or queue_id not in ["dispatch", "claims"]: return
+		ui._open_priority_work(str(job.id), int(job.target), queue_id)
+	)
 
 static func _empty_maintenance_routes(ui, parent: Node) -> void:
 	var row := HFlowContainer.new()
@@ -385,26 +364,6 @@ static func _member_name(candidates: Array, id: String) -> String:
 	var candidate := _candidate(candidates, id)
 	return str(candidate.get("name", id))
 
-static func _job_label(job: Dictionary) -> String:
-	var kind := str(job.get("kind", "normal"))
-	var emblem := "↻" if kind == "maintenance" else "!" if kind == "emergency" else "¥" if bool(job.get("draft", false)) else "▣"
-	var title := str(job.get("title", job.get("task_name", "仕事")))
-	var target := str(job.get("target_name", ""))
-	var deadline: Dictionary = job.get("deadline", {})
-	var due := str(deadline.get("text", ""))
-	if due.is_empty() and int(deadline.get("day", -1)) >= 0: due = "DAY%dまで" % int(deadline.day)
-	if bool(job.get("completed", false)): due=""
-	elif not job.get("business", {}).is_empty(): due="納品 " + due
-	return "%s %s · %s%s" % [emblem, str(job.get("client", "")), title, (" / " + target if not target.is_empty() else "") + (" · " + due if not due.is_empty() else "")]
-
-static func _status(job: Dictionary) -> String:
-	if str(job.get("status", ""))=="legacy": return "従来型契約"
-	if bool(job.get("draft", false)): return "請求待ち"
-	if bool(job.get("completed", false)): return "完了"
-	if not job.get("handoff", {}).get("receipts", []).is_empty() and str(job.get("status", "")) not in ["working", "queued", "paused"]:
-		return "納品確認" if str(job.handoff.get("acceptance", {}).get("state", "")) == "ready" else "引継ぎ待ち"
-	return {"ready":"検査済","working":"対応中","queued":"配分済","paused":"中断","pending":"対応待ち","late":"期限超過"}.get(str(job.get("status", "")), "未完了")
-
 static func _show_handoff(job: Dictionary, choices: Dictionary) -> bool:
 	return not bool(job.get("completed", false)) and not job.get("handoff", {}).get("receipts", []).is_empty() and not bool(choices.get("workday_handoff_dispatch", false))
 
@@ -489,19 +448,6 @@ static func _work_records(ui, parent: Node, job: Dictionary) -> void:
 	report.add_theme_color_override("default_color", M.INK)
 	report.add_theme_stylebox_override("normal", M.surface(M.CANVAS, 10))
 	parent.add_child(report)
-
-static func _money(job: Dictionary) -> String:
-	if bool(job.get("draft", false)): return "¥%s" % _grouped(int(job.get("fee", 0)))
-	if str(job.get("kind", "")) == "maintenance": return "+¥%s" % _grouped(int(job.get("fee", 0)))
-	return "¥%s" % _grouped(int(job.get("fee", 0)))
-
-static func _grouped(value: int) -> String:
-	var text := str(value)
-	var out := ""
-	while text.length() > 3:
-		out = "," + text.substr(text.length() - 3, 3) + out
-		text = text.substr(0, text.length() - 3)
-	return text + out
 
 static func _label(ui, parent: Node, text: String, size: int, color: Color) -> Label:
 	var label: Label = ui._label(text, size, color)

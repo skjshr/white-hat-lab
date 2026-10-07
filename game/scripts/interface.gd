@@ -639,11 +639,14 @@ func open_panel(kind: String) -> void:
 			modal.add_theme_stylebox_override("panel", background)
 			var shell := VBoxContainer.new(); shell.add_theme_constant_override("separation", 0); modal.add_child(shell)
 			shell.add_child(_management_header(kind))
-			var incident_ribbon := INCIDENT_RIBBON.new()
-			shell.add_child(incident_ribbon)
-			incident_ribbon.route_requested.connect(_open_incident_work)
-			incident_ribbon.board_requested.connect(func(): open_panel("board"))
-			incident_ribbon.setup(_game(), text_scale)
+			# Today's timeline already includes every accepted reception deadline.
+			# Keep the cross-app reminder on the other management surfaces.
+			if kind != "board" or str(operations_choices.get("view", "today")) != "today":
+				var incident_ribbon := INCIDENT_RIBBON.new()
+				shell.add_child(incident_ribbon)
+				incident_ribbon.route_requested.connect(_open_incident_work)
+				incident_ribbon.board_requested.connect(func(): open_panel("board"))
+				incident_ribbon.setup(_game(), text_scale)
 			var content_margin := MarginContainer.new(); content_margin.name = "ManagementContent"; content_margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
 			for side in ["left", "right", "top", "bottom"]: content_margin.add_theme_constant_override("margin_" + side, 18)
 			shell.add_child(content_margin)
