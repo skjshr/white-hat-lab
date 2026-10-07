@@ -521,7 +521,7 @@ func _options_header() -> PanelContainer:
 
 func _management_tabs(kind: String) -> HBoxContainer:
 	var tabs := HBoxContainer.new(); tabs.name = "ManagementTabs"; tabs.add_theme_constant_override("separation", 2)
-	for entry in [[UI.copy("board_list"), "board"], [UI.copy("ops_sales").get_slice("・", 0), "sales"], ["会社", "company"], [UI.copy("staffing_title"), "staffing"], ["設備", "shop"], ["PC", "terminal"]]:
+	for entry in [["業務", "board"], [UI.copy("ops_sales").get_slice("・", 0), "sales"], ["会社", "company"], [UI.copy("staffing_title"), "staffing"], ["設備", "shop"], ["PC", "terminal"]]:
 		tabs.add_child(_management_tab(str(entry[0]), str(entry[1]), kind == str(entry[1]) or (kind in ["door", "day_review"] and str(entry[1]) == "board")))
 	return tabs
 
@@ -787,7 +787,7 @@ func _refresh_operations() -> void:
 	if current_kind!="board":return
 	var scroll:=modal_scroll.scroll_vertical
 	var positions: Dictionary={}
-	for id in ["DispatchStaffScroll","DispatchTicketScroll"]:
+	for id in ["DispatchStaffScroll","DispatchTicketScroll","WorkdayScroll"]:
 		var node=modal_body.find_child(id,true,false)
 		if node is ScrollContainer:positions[id]=node.scroll_vertical
 	open_panel("board")
@@ -1624,7 +1624,9 @@ func _show_maintenance_result(client: String) -> void:
 	if g == null or not g.has_method("maintenance_result"): return
 	open_panel("terminal")
 	var result := str(g.maintenance_result(client)); var title_template := UI.copy("care_result_title", ""); var title := title_template % client if not title_template.is_empty() else client
-	if is_instance_valid(desktop) and desktop.has_method("_append"): desktop._append(title + "\n" + (result if not result.is_empty() else UI.copy("care_result_empty", "")))
+	if is_instance_valid(desktop) and desktop.has_method("_append"):
+		desktop._show_app("terminal")
+		desktop._append(title + "\n" + (result if not result.is_empty() else UI.copy("care_result_empty", "")))
 
 func _shop() -> void:
 	EQUIPMENT_PANEL.build(self)

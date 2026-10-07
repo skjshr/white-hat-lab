@@ -191,16 +191,17 @@ func run() -> void:
 	check(int(control("OfferPrice").value) == int(quote.reference_fee), "saved quote survives reconstructed interface")
 	await capture("07-sales-saved-scope-quote"); await click("AcceptContract", true)
 	check(game.contract_queue().size() == 1 and bool(game.state.accepted), "quote accepted exactly once")
-	await open_management("board"); await click("DispatchControlsDisclosure")
-	var chooser := control("DispatchMemberSelector") as OptionButton
-	for i in chooser.item_count:
-		if str(chooser.get_item_metadata(i)) == "aya": await choose("DispatchMemberSelector", i); break
-	check(control("DispatchForecast") is Label and not control("DispatchForecast").text.is_empty(), "assignment shows projected time")
-	await capture("08-board-workload-forecast"); await click("DispatchEnqueue", true)
-	check(game.dispatch_queue("aya").size() == 1, "repeat enqueue creates one assignment")
-	var jobs: Array = game.dispatch_queue("aya")
+	ui.operations_choices.view="today"
+	await open_management("board"); await click("WorkdayMember_aya")
+	check(control("WorkdayFlowCanvas") != null and control("WorkdaySelectedFeedback") is Label, "daily work exposes candidate comparison and commitment")
+	var work_before: Dictionary = game.state.duplicate(true)
+	invalid_save(true); await click("WorkdayEnqueue")
+	check(game.state == work_before and not control("WorkdaySelectedFeedback").text.is_empty(), "failed dispatch preserves work and presents retry")
+	invalid_save(false)
+	await capture("08-board-workload-forecast"); await click("WorkdayEnqueue", true)
+	check(game.dispatch_queue("aya").is_empty() and str(game.state.assignments.aya.status)=="working", "one commitment starts one investigation on an idle colleague")
+	check(control("WorkdayMember_aya").text.contains("作業中"), "committed investigator is shown working rather than unavailable")
 	await click("OperationsView_staff")
-	await click("DispatchStart_" + str(jobs[0].id))
 	game.set_office_clock_paused(false); game._process(30); game.set_office_clock_paused(true)
 	await open_app("team"); ui.desktop._refresh_team(); await frames()
 	check(str(game.state.assignments.aya.status) == "done", "actual delegated investigation completes")

@@ -2,6 +2,7 @@ extends RefCounted
 const COPY = preload("res://scripts/ui_theme.gd")
 const GAME_UI = preload("res://scripts/game_theme.gd")
 const M = preload("res://scripts/management_ui.gd")
+const WORKDAY = preload("res://scripts/workday_panel.gd")
 
 static func label(ui, host: Node, value: String, size: int = 16, color: Color = COPY.INK) -> Label:
 	var node: Label = ui._label(value,size,color); node.size_flags_horizontal=Control.SIZE_EXPAND_FILL;host.add_child(node);return node
@@ -63,7 +64,10 @@ static func strip(host: Node, tint: Color = GAME_UI.TAB) -> HBoxContainer:
 
 static func build(ui) -> void:
 	var g=ui._game();var queue: Array=g.contract_queue()
-	# The operations board keeps one shell but exposes three local responsibilities.
+	for child in ui.modal_footer.get_children():
+		ui.modal_footer.remove_child(child)
+		child.queue_free()
+	# The operations board keeps one shell for today's work and its detail views.
 	# Rebuilding only the body preserves the management header/footer and avoids a
 	# second navigation surface competing with the global Sales tab.
 	for child in ui.modal_body.get_children():
@@ -92,19 +96,21 @@ static func build(ui) -> void:
 	if ready_count>0:action(ui,head,"ops_delivery",ui.close_panel,"OperationsReceive","secondary").text=COPY.copy("ops_delivery") % ready_count
 	var spacer:=Control.new();spacer.size_flags_horizontal=Control.SIZE_EXPAND_FILL;head.add_child(spacer)
 	action(ui,head,"ops_close",ui.open_panel.bind("door"),"OperationsCloseDay","quiet")
-	var view:=str(ui.operations_choices.get("view","contracts"))
-	if view not in ["contracts","maintenance","staff"]:view="contracts"
+	var view:=str(ui.operations_choices.get("view","today"))
+	if view not in ["today","contracts","maintenance","staff"]:view="today"
 	ui.operations_choices.view=view
 	var views:=HBoxContainer.new();views.name="DispatchViews";views.add_theme_constant_override("separation",6);ui.modal_body.add_child(views)
-	for spec in [["contracts","dispatch_normal","OperationsView_contracts"],["maintenance","dispatch_maintenance","OperationsView_maintenance"],["staff","dispatch_title","OperationsView_staff"]]:
+	for spec in [["today","今日の仕事","OperationsView_today"],["contracts","dispatch_normal","OperationsView_contracts"],["maintenance","dispatch_maintenance","OperationsView_maintenance"],["staff","dispatch_title","OperationsView_staff"]]:
 		var selected:=view==str(spec[0]);var tab:=action(ui,views,str(spec[1]),select_view.bind(ui,str(spec[0])),str(spec[2]),"tab");tab.toggle_mode=true;tab.button_pressed=selected;M.button(tab,"tab",selected);tab.tooltip_text=COPY.copy(str(spec[1]));tab.size_flags_horizontal=Control.SIZE_EXPAND_FILL
+		if str(spec[0])=="today":tab.text="今日の仕事";tab.tooltip_text=tab.text
 	match view:
+		"today":WORKDAY.build(ui,ui.modal_body,g)
 		"contracts":_dispatch_tickets(ui,ui.modal_body,g,queue,false)
 		"maintenance":_dispatch_tickets(ui,ui.modal_body,g,queue,true)
 		"staff":_dispatch_staff_grid(ui,ui.modal_body,g)
 
 static func select_view(ui, view: String) -> void:
-	if view not in ["contracts","maintenance","staff"]:return
+	if view not in ["today","contracts","maintenance","staff"]:return
 	var previous_view:=str(ui.operations_choices.get("view","contracts"))
 	var current: Dictionary=ui.operations_choices.get("dispatch_selected",{})
 	var previous_scroll_name: String="DispatchStaffScroll" if previous_view=="staff" else "DispatchTicketScroll"
@@ -623,6 +629,9 @@ static func signature(g) -> String:
 
 static func refresh_live(ui) -> void:
 	var g=ui._game()
+	if str(ui.operations_choices.get("view","today"))=="today":
+		WORKDAY.refresh_live(ui,g)
+		return
 	if signature(g)!=str(ui.controls.get("operations_signature","")):ui.call_deferred("_refresh_operations");return
 	var clock=ui.modal_body.find_child("OperationsClock",true,false)
 	if clock!=null:clock.text="DAY %02d  %s" % [int(g.state.day),g.business_clock()]

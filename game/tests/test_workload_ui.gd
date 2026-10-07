@@ -60,6 +60,7 @@ func run() -> void:
 	game.state.clock_minutes=1070
 	game.set_settings({"resolution":"960x600" if narrow else "1920x1080","window_mode":"windowed","text_scale":1.3 if narrow else 1.0,"volume":0},false)
 	ui._set_text_scale(1.3 if narrow else 1.0);root.size=Vector2i(960,600) if narrow else Vector2i(1920,1080)
+	ui.operations_choices.view="contracts"
 	ui.open_panel("board");await frames(8)
 	ui.operations_choices.dispatch_selected={"kind":"normal","id":first_id,"target":0,"member":"aya"}
 	ui._refresh_operations();await frames(6)

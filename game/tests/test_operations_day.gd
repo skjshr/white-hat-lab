@@ -22,7 +22,10 @@ func capture(name: String) -> void:
 	if not capture_enabled or DisplayServer.get_name() == "headless":return
 	await create_timer(0.2).timeout;await frames(3);await RenderingServer.frame_post_draw
 	if ui.current_kind=="board":
-		check(ui.modal_body.get_global_rect().end.y<=root.size.y and ui.modal_footer.get_global_rect().end.y<=root.size.y,"dispatch content and footer fit viewport")
+		# Control rectangles use logical canvas coordinates; root.size is the
+		# physical window size when project content scaling is enabled.
+		var visible_rect := root.get_visible_rect()
+		check(ui.modal_body.get_global_rect().end.y<=visible_rect.end.y and ui.modal_footer.get_global_rect().end.y<=visible_rect.end.y,"dispatch content and footer fit viewport")
 		check(is_equal_approx(ui.text_scale,1.3 if narrow else 1.0),"native text scale applied")
 		var staff_list = control("DispatchStaffScroll")
 		if staff_list is ScrollContainer and staff_list.scroll_vertical == 0:
@@ -59,6 +62,7 @@ func run() -> void:
 	var wide_size := Vector2i(1920,1080) if "--v220-capture" in OS.get_cmdline_user_args() or "--refinement-capture" in OS.get_cmdline_user_args() else Vector2i(1280,720)
 	game.set_settings({"resolution":"960x600" if narrow else "%dx%d" % [wide_size.x,wide_size.y],"window_mode":"windowed","text_scale":1.3 if narrow else 1.0,"volume":0},false);root.size=Vector2i(960,600) if narrow else wide_size
 	ui._set_text_scale(1.3 if narrow else 1.0)
+	ui.operations_choices.view="contracts"
 	ui.open_panel("board");await frames();check(control("OperationsView_contracts")!=null,"board exposes local contract view")
 	check(control("OperationsSalesEmpty")!=null,"empty contracts view keeps contextual sales entry")
 	press("OperationsSalesEmpty");check(ui.current_kind=="sales","catalog reachable from empty contracts view")
@@ -147,3 +151,4 @@ func maintenance_controls() -> void:
 	check(str(game._maintenance_job_for(client).get("status","")) in ["done","failed"],"maintenance runs to a measured outcome")
 	press("OperationsView_maintenance");await frames();press("DispatchReport");await frames()
 	check(ui.current_kind=="terminal" and not game.maintenance_result(client).is_empty(),"maintenance report opens actual result")
+	check(ui.desktop.current_app=="terminal" and ui.desktop.terminal_log.contains(game.maintenance_result(client)),"maintenance report brings the measured result to the foreground")
