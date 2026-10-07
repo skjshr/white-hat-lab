@@ -274,9 +274,16 @@ func _finish_colleague(id: String, job: Dictionary) -> void:
 		for field in ["baseline_recorded","baseline_locked","baseline_config","baseline_sha","baseline_report","baseline_report_content"]:
 			state[field] = job_target.get(field, false if field in ["baseline_recorded","baseline_locked"] else "")
 	var machine = _vm(); var before: Array = machine.evaluate().duplicate(); var mutation := int(machine.state.mutation); var role := colleague_role(id); var log: Array = machine.cooperate(role, {"name":member_name(id),"report_path":colleague_result_path(id),"observed_day":int(state.day),"observed_time":business_clock()})
+	var backup_execution: Dictionary = {}
+	var ren_backup_case := role == "ren" and int(machine.state.get("backup_model_version", 1)) >= 1 and _current_chapter() == 1
+	var recovery_selection_required := bool(machine.state.get("cooperation_requires_selection", false))
+	if ren_backup_case: backup_execution = machine.take_backup_execution_v1(recovery_selection_required)
 	var diagnostic_observations: Array = machine.state.get("cooperation_observations", []) if machine.state.get("cooperation_observations", []) is Array else []
 	diagnostic_observations = diagnostic_observations.duplicate(true)
 	machine.state.erase("cooperation_observations")
+	# This gate and the VM's operation collector describe only the completed
+	# colleague run. Persist the structured result on the work receipt instead.
+	machine.state.erase("cooperation_requires_selection")
 	# Persist the job's VM/context in memory first; _store_vm() would save and emit
 	# while the background context is active, leaking it into the player's screen.
 	state.vm_states[_vm_key()] = machine.export_state()
@@ -287,7 +294,13 @@ func _finish_colleague(id: String, job: Dictionary) -> void:
 	_account_crew_minutes(id,job,true)
 	_work_add(0.0,100 if id in ["aya","ren"] else 0,false)
 	job.status = "done"; job.remaining = 0.0; job.result = "\n".join(log)
-	job.phase = UI_COPY.copy("backup_selection_required") if role == "ren" and bool(machine.state.get("cooperation_requires_selection", false)) else ("調査ログを保存しました" if role == "aya" else "復旧・証拠保全完了")
+	if role == "ren" and ren_backup_case:
+		match str(backup_execution.get("status", "failed")):
+			"selection_required": job.phase = UI_COPY.copy("backup_selection_required")
+			"restored": job.phase = "バックアップ・復元を実行"
+			_: job.phase = "復旧未完了"
+	else:
+		job.phase = "調査ログを保存しました" if role == "aya" else "復旧・証拠保全完了"
 	job.revision = int(state.revision)
 	var completed_day := int(state.day)
 	var completed_minute := clock_minutes()
@@ -307,6 +320,7 @@ func _finish_colleague(id: String, job: Dictionary) -> void:
 		# Capture the actual report now; later work or editor changes must not
 		# replace the observations attached to this completed assignment.
 		retained[-1].report_content = str(machine.state.get("fs", {}).get(str(retained[-1].result_path), job.result))
+		if ren_backup_case: retained[-1].backup_execution_v1 = backup_execution.duplicate(true)
 		receipt_target["work_receipts"] = retained
 		state.targets[job_target_index] = receipt_target
 	_assignments[id] = job; state.assignments = _assignments.duplicate(true)

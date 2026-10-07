@@ -6,6 +6,7 @@ const OPERATIONS = preload("res://scripts/operations_dispatch.gd")
 const COPY = preload("res://scripts/ui_theme.gd")
 const BUSINESS = preload("res://scripts/priority_business_brief.gd")
 const HANDOFF = preload("res://scripts/staff_work_handoff.gd")
+const BACKUP = preload("res://scripts/staff_backup_work.gd")
 
 static func _kind(contract: Dictionary, plan: String) -> String:
 	if not str(contract.get("maintenance_incident_id", "")).is_empty() or plan == "priority": return "emergency"
@@ -59,6 +60,7 @@ static func _contracts(g, queue: Array) -> Array:
 			jobs.append({"key":"contract:%s:%d" % [id,target_index],"id":id,"contract_id":id,"kind":_kind(contract,str(row.get("plan", ""))),"client":str(row.get("client", "")),"title":str(row.get("title", "")),"status":status,"completed":completed,"draft":draft,"remaining":float(row.get("remaining", 0.0)),"remaining_kind":"deadline","deadline":deadline.duplicate(true),"fee":int(invoice.get("amount", row.get("fee", 0))) if completed else int(row.get("fee", 0)),"fee_scope":"invoice" if completed and not invoice.is_empty() else "contract","target":target_index,"target_name":str(target.get("name", "")),"target_count":targets.size(),"task_name":"請求確定" if draft else "納品済み" if completed else "調査工程","assignments":assignments,"invoice":invoice.duplicate(true),"active":bool(row.get("active", false)),"late_minutes":int(row.get("late_minutes", 0))})
 			jobs[-1].business = BUSINESS.from_context(context) if not completed else {}
 			jobs[-1].handoff = HANDOFF.from_context(context, target_index, g._assignments) if not completed else {}
+			jobs[-1].backup_work = BACKUP.from_context(context, target_index, g.state.get("vm_states", {})) if not completed and target_index >= 0 else {}
 	# A day change archives completed contexts, but their unposted invoices remain.
 	for invoice in g.state.get("billing", {}).get("invoices", []):
 		if not invoice is Dictionary or str(invoice.get("status", "")) != "draft": continue

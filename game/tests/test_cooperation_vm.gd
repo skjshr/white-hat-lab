@@ -2,6 +2,7 @@ extends SceneTree
 
 const VM = preload("res://scripts/virtual_machine.gd")
 const CATALOG = preload("res://scripts/case_catalog.gd")
+const GAME = preload("res://scripts/game.gd")
 var failures := 0
 var tested_individual := 0
 var skipped_composites := 0
@@ -121,6 +122,31 @@ func _init() -> void:
 	ren_worker.cooperate("ren", {"name":"佐々木 遥", "report_path":"/home/operator/haru-recovery.txt"})
 	var ren_report := str(ren_worker.state.fs.get("/home/operator/haru-recovery.txt", ""))
 	if not ren_report.contains("担当: 佐々木 遥") or not bool(ren_worker.state.get("cooperation_requires_selection", false)): failures += 1; print("worker recovery report/selection gate failed")
+	var receipt_vm = VM.new(); receipt_vm.setup(1, {}, CATALOG.by_id("service-1-case-0")); receipt_vm.run("ssh client"); receipt_vm.cooperate("ren")
+	var backup_execution: Dictionary = receipt_vm.take_backup_execution_v1()
+	if str(backup_execution.get("status", "")) != "restored" or not bool(backup_execution.get("backup_created", false)) or str(backup_execution.get("repository", "")) != "local" or str(backup_execution.get("schedule", "")) != "off": failures += 1; print("backup execution receipt did not reflect actual backup and restore")
+	if str(backup_execution.get("source", "")) != "/srv/data" or str(backup_execution.get("target", "")) != "/restore" or str(backup_execution.get("snapshot", "")).is_empty() or backup_execution.get("files", []).is_empty(): failures += 1; print("backup execution receipt missing paths, snapshot, or restored files")
+	if receipt_vm.export_state().has("backup_execution_v1") or receipt_vm.export_state().has("backup_execution_operations"): failures += 1; print("temporary backup execution collector leaked into saved VM state")
+	var failed_restore_vm = VM.new(); failed_restore_vm.setup(1, {}, CATALOG.by_id("service-1-case-0")); failed_restore_vm.run("ssh client"); failed_restore_vm.state.active = false; failed_restore_vm.state.last_restore = {"snapshot":"old-success"}; failed_restore_vm.cooperate("ren")
+	var failed_execution: Dictionary = failed_restore_vm.take_backup_execution_v1()
+	if str(failed_execution.get("status", "")) != "failed" or str(failed_execution.get("snapshot", "")) == "old-success" or failed_restore_vm.state.last_restore.get("snapshot", "") != "old-success": failures += 1; print("failed restore reused a prior success or changed last_restore")
+	var selection_vm = VM.new(); selection_vm.setup(1, {}, CATALOG.by_id("service-1-case-0")); selection_vm.state.snapshots = [{"id":"00000001","repository":"local","paths":["/srv/data"],"files":selection_vm.RECORDS.duplicate(true)},{"id":"00000002","repository":"local","paths":["/srv/data"],"files":selection_vm.RECORDS.duplicate(true)}]; selection_vm.run("ssh client"); selection_vm.cooperate("ren")
+	var selection_execution: Dictionary = selection_vm.take_backup_execution_v1(bool(selection_vm.state.get("cooperation_requires_selection", false)))
+	if str(selection_execution.get("status", "")) != "selection_required" or not selection_execution.get("files", []).is_empty(): failures += 1; print("multiple snapshots were not represented as a required choice")
+	var legacy_receipt_vm = VM.new(); legacy_receipt_vm.setup(1, old_saved, CATALOG.by_id("service-1-case-3")); legacy_receipt_vm.run("ssh client"); legacy_receipt_vm.cooperate("ren")
+	var legacy_execution: Dictionary = legacy_receipt_vm.take_backup_execution_v1()
+	if int(legacy_receipt_vm.state.get("backup_model_version", 0)) != 1 or str(legacy_execution.get("status", "")) != "restored": failures += 1; print("legacy v1 colleague restore receipt compatibility failed")
+	var receipt_game: Node = GAME.new(); root.add_child(receipt_game); receipt_game.set_process(false); receipt_game._reset_state()
+	receipt_game.state.chapter = 1; receipt_game.state.config = receipt_game._default_fields(1); receipt_game.state.accepted = true
+	receipt_game.state.targets = [{"chapter":1,"name":"バックアップ確認先","config":receipt_game.state.config.duplicate(true),"inspected":false,"checks":[],"revision":0,"validated_revision":-1}]
+	receipt_game.save_path = "user://qa-backup-execution-%s.json" % OS.get_process_id(); receipt_game.backup_path = receipt_game.save_path + ".bak"; receipt_game.previous_path = receipt_game.save_path + ".previous"; receipt_game.settings_path = receipt_game.save_path + ".settings"
+	receipt_game._finish_colleague("ren", {"kind":"normal","status":"working","contract_id":"","target_index":0,"total":18.0,"work_minutes":18.0,"remaining":0.0})
+	var durable_receipts: Array = receipt_game.state.targets[0].get("work_receipts", [])
+	var durable_backup_execution: Dictionary = durable_receipts[0].get("backup_execution_v1", {}) if not durable_receipts.is_empty() else {}
+	var saved_worker_vm: Dictionary = receipt_game.state.vm_states.get("story-1/site-0", {})
+	if str(durable_backup_execution.get("status", "")) != "restored" or str(durable_receipts[0].get("phase", "")) != "バックアップ・復元を実行": failures += 1; print("colleague finish did not durably save actual restore receipt and non-acceptance phase")
+	if saved_worker_vm.has("backup_execution_v1") or saved_worker_vm.has("backup_execution_operations") or saved_worker_vm.has("cooperation_requires_selection"): failures += 1; print("transient colleague execution state leaked into persisted VM export")
+	receipt_game.queue_free()
 	# A changed service result must be reflected in a later investigation report.
 	var changing_vm := VM.new(); changing_vm.setup(2, {}, CATALOG.by_id("service-2-case-0")); changing_vm.run("ssh client")
 	changing_vm.cooperate("aya", {"report_path":"/home/operator/first-observation.txt"})

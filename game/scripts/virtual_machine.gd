@@ -45,6 +45,8 @@ var _dirty := false
 var _identity: Dictionary = {"company":"あおばセキュリティ相談所","player":"青葉","aya":"綾","ren":"蓮"}
 var _linked_identity_provider: Dictionary = {}
 var _linked_business_provider: Dictionary = {}
+var _backup_execution_tracking := false
+var _backup_execution_operations: Array[Dictionary] = []
 
 func set_identity(values: Dictionary) -> void:
 	# Display identity is separate from guest paths, evidence and snapshots.
@@ -1163,10 +1165,43 @@ func _record_command(command: String, output: String, before: String, after: Str
 
 func run(command: String) -> String:
 	var before := _fingerprint()
+	var operation_count := _backup_execution_operations.size()
 	var output := _run_internal(command)
+	if _backup_execution_tracking and _backup_execution_operations.size() == operation_count:
+		var args := _tokens(command.strip_edges())
+		if not args.is_empty() and args[0] == "sudo": args.remove_at(0)
+		if not args.is_empty() and args[0] == "restic":
+			var operation := ""
+			for arg in args.slice(1):
+				if arg in ["backup", "restore"]: operation = str(arg); break
+			if not operation.is_empty():
+				var repository := str(state.get("applied", {}).get("repository", "local"))
+				for index in range(args.size() - 1):
+					if args[index] == "-r": repository = str(args[index + 1])
+				var source := str(args[args.find("backup") + 1]) if operation == "backup" and args.find("backup") + 1 < args.size() else "/srv/data"
+				var target := str(args[args.find("--target") + 1]) if operation == "restore" and args.find("--target") + 1 < args.size() else "/restore"
+				_record_backup_execution({"kind":operation,"status":"failed","repository":repository,"schedule":str(state.get("applied", {}).get("schedule", "")),"source":source if operation == "backup" else "/srv/data","snapshot":"","target":target if operation == "restore" else "/restore","files":[],"error":output if not output.is_empty() else "operation did not complete","backup_created":false})
 	if _is_restic_dry_run(command): return output
 	_record_command(command, output, before, _fingerprint())
 	return output
+
+func _record_backup_execution(operation: Dictionary) -> void:
+	if _backup_execution_tracking: _backup_execution_operations.append(operation.duplicate(true))
+
+func take_backup_execution_v1(selection_required: bool = false) -> Dictionary:
+	var operations := _backup_execution_operations.duplicate(true)
+	_backup_execution_operations.clear()
+	_backup_execution_tracking = false
+	var backup_created := false
+	var restore: Dictionary = {}
+	for operation in operations:
+		if str(operation.get("kind", "")) == "backup" and str(operation.get("status", "")) == "success": backup_created = true
+		if str(operation.get("kind", "")) == "restore": restore = operation
+	if restore.is_empty() and selection_required:
+		return {"status":"selection_required","repository":str(state.get("applied", {}).get("repository", "")),"schedule":str(state.get("applied", {}).get("schedule", "")),"source":"/srv/data","snapshot":"","target":"/restore","files":[],"error":"複数の保存候補から選択が必要です","backup_created":backup_created}
+	if restore.is_empty():
+		return {"status":"failed","repository":str(state.get("applied", {}).get("repository", "")),"schedule":str(state.get("applied", {}).get("schedule", "")),"source":"/srv/data","snapshot":"","target":"/restore","files":[],"error":"復元操作の記録がありません","backup_created":backup_created}
+	return {"status":str(restore.get("status", "failed")),"repository":str(restore.get("repository", "")),"schedule":str(restore.get("schedule", "")),"source":str(restore.get("source", "/srv/data")),"snapshot":str(restore.get("snapshot", "")),"target":str(restore.get("target", "/restore")),"files":restore.get("files", []).duplicate(true) if restore.get("files", []) is Array else [],"error":str(restore.get("error", "")),"backup_created":backup_created}
 
 func _is_restic_dry_run(command: String) -> bool:
 	var args := _tokens(command.strip_edges())
@@ -1805,7 +1840,7 @@ func _restic_select_snapshot(selector: String, repository: String) -> Dictionary
 		if selector == "latest" or _snapshot_id_text(item.get("id", "")) == selector.to_lower() or _snapshot_id_text(item.get("id", "")).begins_with(selector.to_lower()): candidates.append(item)
 	if selector == "latest":
 		return {"snapshot":candidates.back() if not candidates.is_empty() else {},"error":"" if not candidates.is_empty() else "restic: no snapshot in " + repository}
-	if candidates.size() > 1: return {"snapshot":{},"error":"restic: ambiguous snapshot ID " + selector}
+	if candidates.size() > 1: return {"snapshot":{},"error":"restic: ambiguous snapshot ID " + selector,"selection_required":true}
 	if candidates.is_empty(): return {"snapshot":{},"error":"restic: snapshot not found " + selector}
 	return {"snapshot":candidates[0],"error":""}
 
@@ -1823,7 +1858,7 @@ func _restored_data_path(name: String) -> String:
 	return str(restore.get("target", "/restore")).path_join("srv/data").path_join(name)
 
 func restic_restore_plan(repository: String, selector: String, destination: String, includes: Array = [], overwrite: String = "always") -> Dictionary:
-	var base := {"ok":false,"error":"","snapshot":{},"subfolder":"","target":"","entries":[],"fingerprint":_fingerprint()}
+	var base := {"ok":false,"error":"","selection_required":false,"snapshot":{},"subfolder":"","target":"","entries":[],"fingerprint":_fingerprint()}
 	if _chapter != 1 or not _restic_v2(): base.error = "restore planning requires backup model v2"; return base
 	if not state.active: base.error = "service configuration failed"; return base
 	if not state.connected: base.error = "Not connected"; return base
@@ -1836,7 +1871,7 @@ func restic_restore_plan(repository: String, selector: String, destination: Stri
 		subfolder = raw_selector.get_slice(":", 1); raw_selector = raw_selector.get_slice(":", 0)
 		if not subfolder.begins_with("/"): base.error = "invalid snapshot subfolder"; return base
 	var selected_result := _restic_select_snapshot(raw_selector, repository)
-	if not str(selected_result.error).is_empty(): base.error = str(selected_result.error).trim_prefix("restic: "); return base
+	if not str(selected_result.error).is_empty(): base.error = str(selected_result.error).trim_prefix("restic: "); base.selection_required = bool(selected_result.get("selection_required", false)); return base
 	var selected: Dictionary = selected_result.snapshot
 	var source_paths := _snapshot_source_paths(selected)
 	var target := _path(destination)
@@ -1923,6 +1958,7 @@ func _restic(args: Array[String]) -> String:
 		var new_id: Variant = "%08x" % (state.snapshots.size() + 1) if _restic_v2() else state.snapshots.size() + 1
 		state.snapshots.append({"id":new_id,"repository":repository,"paths":[source],"files":files.duplicate(true)})
 		_touch("backup %d files -> %s" % [files.size(), repository])
+		_record_backup_execution({"kind":"backup","status":"success","repository":repository,"schedule":str(state.get("applied", {}).get("schedule", "")),"source":source,"snapshot":_snapshot_id_text(new_id),"target":"/restore","files":[],"error":"","backup_created":true})
 		return "snapshot saved: %s\nFiles: %d\nRepository: %s" % [_snapshot_id_text(new_id),files.size(),repository]
 	if subcommand in ["ls", "dump"]:
 		if (subcommand == "ls" and command_args.size() != 3) or (subcommand == "dump" and command_args.size() != 4): return "restic: invalid " + subcommand + " arguments"
@@ -1965,11 +2001,20 @@ func _restic(args: Array[String]) -> String:
 			if not str(legacy_selected_result.error).is_empty(): return str(legacy_selected_result.error)
 			var legacy_selected: Dictionary = legacy_selected_result.snapshot
 			if dest not in state.dirs: return "restic: create target directory first"
-			for name in legacy_selected.get("files",{}): state.fs[dest + "/" + str(name)] = legacy_selected.files[name]
+			var legacy_files: Array = []
+			for name in legacy_selected.get("files",{}):
+				var source_path := str(_snapshot_source_paths(legacy_selected)[0]).path_join(str(name))
+				var target_path := dest.path_join(str(name))
+				state.fs[target_path] = legacy_selected.files[name]
+				legacy_files.append({"source":source_path,"path":target_path,"status":"restored"})
 			_touch("restored snapshot %s -> %s" % [_snapshot_id_text(legacy_selected.id),dest])
+			_record_backup_execution({"kind":"restore","status":"restored","repository":repository,"schedule":str(state.get("applied", {}).get("schedule", "")),"source":str(_snapshot_source_paths(legacy_selected)[0]),"snapshot":_snapshot_id_text(legacy_selected.id),"target":dest,"files":legacy_files,"error":"","backup_created":false})
 			return "restored %d files to %s" % [legacy_selected.get("files",{}).size(),dest]
 		var plan := restic_restore_plan(repository, selector, dest, includes, overwrite)
-		if not bool(plan.get("ok", false)): return "restic: " + str(plan.get("error", "restore plan failed"))
+		if not bool(plan.get("ok", false)):
+			var plan_error := str(plan.get("error", "restore plan failed"))
+			_record_backup_execution({"kind":"restore","status":"selection_required" if bool(plan.get("selection_required", false)) else "failed","repository":repository,"schedule":str(state.get("applied", {}).get("schedule", "")),"source":"/srv/data","snapshot":"","target":dest,"files":[],"error":plan_error,"backup_created":false})
+			return "restic: " + plan_error
 		if dry_run: return _restic_plan_output(plan)
 		var writes: Array = []
 		for entry in plan.entries:
@@ -1993,6 +2038,10 @@ func _restic(args: Array[String]) -> String:
 		state.last_restore = {"snapshot":str(plan.snapshot.id),"subfolder":str(plan.subfolder),"target":str(plan.target),"includes":includes.duplicate(),"overwrite":overwrite}
 		_sync_backup_probe_paths()
 		_touch("restored snapshot %s -> %s" % [str(plan.snapshot.id),dest])
+		var execution_files: Array = []
+		for entry in plan.entries:
+			execution_files.append({"source":str(entry.get("source", "")),"path":str(entry.get("path", "")),"status":"restored" if str(entry.get("status", "")) in ["new", "overwrite"] else str(entry.get("status", ""))})
+		_record_backup_execution({"kind":"restore","status":"restored","repository":repository,"schedule":str(state.get("applied", {}).get("schedule", "")),"source":str(_snapshot_source_paths(plan.snapshot)[0]),"snapshot":str(plan.snapshot.id),"target":dest,"files":execution_files,"error":"","backup_created":false})
 		var result := "restored %d files to %s" % [writes.size(),dest]
 		if verbose: result += "\n" + _restic_plan_output(plan, false)
 		return result
@@ -2171,6 +2220,9 @@ func cooperate(role: String, worker: Dictionary = {}) -> Array[String]:
 	var scenario: Dictionary = state.get("scenario", {})
 	var desired: Dictionary = scenario.get("desired", {})
 	if desired.is_empty(): desired = _legacy_desired()
+	if role == "ren" and _chapter == 1:
+		_backup_execution_operations.clear()
+		_backup_execution_tracking = true
 	if role == "aya":
 		# Keep the existing four observations, but bypass run() so an employee
 		# cannot accidentally mark a validation probe as measured.
@@ -2200,6 +2252,9 @@ func cooperate(role: String, worker: Dictionary = {}) -> Array[String]:
 				log.append(run("restic restore latest --target /restore"))
 		if _chapter == 4: log.append(run("cp /var/log/evidence.log /evidence/original.log"))
 		var recovery_note := DISPLAY_COPY.copy("backup_recovery_done") if recovery_complete else DISPLAY_COPY.copy("backup_selection_required")
+		if _chapter == 1 and not bool(state.cooperation_requires_selection):
+			var restored := _backup_execution_operations.any(func(operation): return str(operation.get("kind", "")) == "restore" and str(operation.get("status", "")) == "restored")
+			recovery_note = "バックアップ・復元を実行しました。受入検査は未実施です。" if restored else "復旧未完了。実行結果を確認してください。"
 		write_file(report_path, "%s / 復旧・保全記録\n担当: %s\n最終検証: %s\nservice=" % [_identity.company, report_name, _identity.player] + state.service + "\n" + recovery_note + "\n" + "\n".join(log) + "\n")
 	else: log.append("unsupported cooperation role")
 	return log
