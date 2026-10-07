@@ -6,6 +6,7 @@ const Workstation = preload("res://assets/ui/endpoint/workstation-v1.png")
 const INK := Color("323130")
 const MUTED := Color("605e5c")
 const BLUE := Color("0078d4")
+const MIN_COMPARE_WIDTH := 580.0
 
 class RecordLinks extends Control:
 	var edges: Array = []
@@ -65,39 +66,35 @@ static func render(d, parent: VBoxContainer, snap: Dictionary, on_device: Callab
 	var root := VBoxContainer.new()
 	root.name = "EdrInvestigationMap"
 	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	root.add_theme_constant_override("separation", roundi(16 * factor))
+	root.add_theme_constant_override("separation", roundi(12 * factor))
+	var map_theme: Theme = d.get_theme().duplicate() as Theme
+	map_theme.set_color("font_color", "TooltipLabel", INK)
+	map_theme.set_stylebox("panel", "TooltipPanel", UI.style(Color("fffdf5"), Color("8a999b"), 7, 5, 4))
+	root.theme = map_theme
 	parent.add_child(root)
-	var headings := HBoxContainer.new()
-	headings.add_theme_constant_override("separation", roundi(24 * factor))
-	root.add_child(headings)
-	var endpoint_heading := _text(headings, "業務 / 端末" if not business.is_empty() else "端末", factor, 12, MUTED)
-	endpoint_heading.custom_minimum_size.x = 112 * factor
-	endpoint_heading.size_flags_horizontal = Control.SIZE_FILL
-	var record_headings := HBoxContainer.new()
-	record_headings.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	record_headings.add_theme_constant_override("separation", roundi(28 * factor))
-	headings.add_child(record_headings)
-	_text(record_headings, "記録に現れたプロセス", factor, 12, MUTED).size_flags_stretch_ratio = 0.8
-	_text(record_headings, "保存された記録", factor, 12, MUTED).size_flags_stretch_ratio = 1.2
-	var shown := 0
+	var lanes := BoxContainer.new()
+	lanes.name = "EdrInvestigationLanes"
+	lanes.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lanes.add_theme_constant_override("separation", roundi(20 * factor))
+	root.add_child(lanes)
 	var devices: Array = snap.get("devices", []) if snap.get("devices", []) is Array else []
 	for raw in devices:
 		if not raw is Dictionary: continue
 		var device: Dictionary = raw
-		var groups := _record_groups(device, query)
-		if groups.is_empty() and not query.strip_edges().is_empty(): continue
-		if shown > 0:
-			var rule := HSeparator.new()
-			root.add_child(rule)
-		_lane(root, device, groups, factor, on_device, on_record, business)
-		shown += 1
-	if shown == 0:
+		_lane(lanes, device, query, factor, on_device, on_record, business)
+	if lanes.get_child_count() == 0:
 		_text(root, "一致する記録はありません", factor, 13, MUTED)
 	_text(root, str(business.get("legend", "点線: 過去の記録   実線 / ×: 現在の接続設定   業務の図を押して実測")) if not business.is_empty() else "点線: 過去の記録の関係   ○ 接続許可 / × 隔離: 現在の端末設定", factor, 11, MUTED)
+	var resize_lanes := func():
+		# Keep two endpoints comparable at 960x600; stack only when each lane
+		# would otherwise lose its business-to-event layout.
+		lanes.vertical = root.size.x < MIN_COMPARE_WIDTH * factor
+	lanes.resized.connect(resize_lanes)
+	root.resized.connect(resize_lanes)
+	resize_lanes.call()
 
-static func _record_groups(device: Dictionary, query: String) -> Array:
+static func _visible_events(device: Dictionary, query: String) -> Array:
 	var result: Array = []
-	var by_name: Dictionary = {}
 	var needle := query.strip_edges().to_lower()
 	var id := str(device.get("id", ""))
 	var device_match := needle.is_empty() or id.to_lower().contains(needle) or id.replace("_", "-").to_lower().contains(needle)
@@ -106,44 +103,44 @@ static func _record_groups(device: Dictionary, query: String) -> Array:
 		if not events[index] is Dictionary: continue
 		var event: Dictionary = events[index]
 		if not device_match and not JSON.stringify(event).to_lower().contains(needle): continue
-		# This groups matching labels, not process instances or executable files.
-		var key := JSON.stringify([str(event.get("process", "")), str(event.get("publisher", ""))])
-		if not by_name.has(key):
-			by_name[key] = result.size()
-			result.append({"process":str(event.get("process", "")), "publisher":str(event.get("publisher", "")), "events":[]})
-		result[int(by_name[key])].events.append({"index":index, "record":event})
+		result.append({"index":index, "record":event})
 	return result
 
-static func _lane(parent: VBoxContainer, device: Dictionary, groups: Array, factor: float, on_device: Callable, on_record: Callable, business: Dictionary) -> void:
+static func _lane(parent: Control, device: Dictionary, query: String, factor: float, on_device: Callable, on_record: Callable, business: Dictionary) -> void:
 	var id := str(device.get("id", ""))
-	var lane := MarginContainer.new()
+	var lane := HBoxContainer.new()
 	lane.name = "EdrInvestigationLane_" + id
 	lane.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lane.size_flags_stretch_ratio = 1.0
+	lane.add_theme_constant_override("separation", roundi(10 * factor))
 	parent.add_child(lane)
 	var links := RecordLinks.new()
 	lane.add_child(links)
-	var columns := HBoxContainer.new()
-	columns.add_theme_constant_override("separation", roundi(24 * factor))
-	lane.add_child(columns)
-	var endpoint_column:=VBoxContainer.new()
-	endpoint_column.custom_minimum_size.x=112*factor
-	endpoint_column.size_flags_vertical=Control.SIZE_SHRINK_CENTER
-	endpoint_column.add_theme_constant_override("separation",0)
-	columns.add_child(endpoint_column)
+	var endpoint_column := VBoxContainer.new()
+	endpoint_column.name = "EdrMapEndpointColumn_" + id
+	endpoint_column.custom_minimum_size.x = 105 * factor
+	endpoint_column.size_flags_horizontal = Control.SIZE_FILL
+	endpoint_column.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	endpoint_column.add_theme_constant_override("separation", 0)
+	lane.add_child(endpoint_column)
 	if business.get("names",{}).has(id):
 		var observation:Dictionary=business.get("observations",{}).get(id,{})
-		var job:=_object(endpoint_column,("EdrBusinessOpen_" if bool(observation.get("opens_app",false)) else "EdrBusinessProbe_")+id,94*factor,func():business.on_probe.call(id))
+		var job := _object(endpoint_column, ("EdrBusinessOpen_" if bool(observation.get("opens_app", false)) else "EdrBusinessProbe_") + id, 52 * factor, func(): business.on_probe.call(id))
 		var job_box:=_contents(job,factor)
 		var job_name:=str(business.names[id])
 		var glyph:=Glyph.add_to(job_box,"receipt" if job_name.contains("精算") or job_name.contains("請求") else "ledger",32*factor,MUTED)
 		glyph.size_flags_horizontal=Control.SIZE_SHRINK_CENTER
 		_text(job_box,job_name,factor,12,INK,600).horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
 		var result:=str(observation.get("label","? 未測定"))
-		_text(job_box,result,factor,11,MUTED).horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
+		_text(job_box,result,factor,12,MUTED).horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
 		job.tooltip_text=str(observation.get("tooltip",job_name+"の接続を実測\n"+str(observation.get("response",""))))
 		_ignore_children(job_box)
-		var stem:=BusinessLink.new();stem.isolated=bool(device.get("isolated",false));stem.custom_minimum_size.y=22*factor;endpoint_column.add_child(stem)
-	var endpoint := _object(endpoint_column, "EdrDevice_" + id, 126 * factor, func(): on_device.call(id))
+		var stem := BusinessLink.new()
+		stem.name = "EdrBusinessConnection_" + id
+		stem.isolated = bool(device.get("isolated", false))
+		stem.custom_minimum_size.y = 18 * factor
+		endpoint_column.add_child(stem)
+	var endpoint := _object(endpoint_column, "EdrDevice_" + id, 112 * factor, func(): on_device.call(id))
 	endpoint.custom_minimum_size.x = 112 * factor
 	endpoint.size_flags_horizontal = Control.SIZE_FILL
 	endpoint.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -153,65 +150,51 @@ static func _lane(parent: VBoxContainer, device: Dictionary, groups: Array, fact
 	image.texture = Workstation
 	image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	image.custom_minimum_size.y = 76 * factor
+	image.custom_minimum_size.y = 62 * factor
 	endpoint_body.add_child(image)
-	_text(endpoint_body, id.to_upper().replace("_", "-"), factor, 15, INK, 600).horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_text(endpoint_body, id.to_upper().replace("_", "-"), factor, 13, INK, 600).horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_text(endpoint_body, "× 隔離" if bool(device.get("isolated", false)) else "○ 接続許可", factor, 12, MUTED).horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_ignore_children(endpoint_body)
-	var process_groups := VBoxContainer.new()
-	process_groups.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	process_groups.add_theme_constant_override("separation", roundi(10 * factor))
-	columns.add_child(process_groups)
-	if groups.is_empty():
-		_text(process_groups, "保存されたイベントはありません", factor, 13, MUTED)
-	for group_index in groups.size():
-		var group: Dictionary = groups[group_index]
-		var first_index := int(group.events[0].index)
-		var group_row := HBoxContainer.new()
-		group_row.add_theme_constant_override("separation", roundi(28 * factor))
-		process_groups.add_child(group_row)
-		var process := _object(group_row, "EdrMapProcess_" + id + "_" + str(group_index), 76 * factor, func(): on_record.call(id, first_index))
-		process.size_flags_stretch_ratio = 0.8
-		process.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		process.tooltip_text = "記録中のプロセス: " + str(group.process) + "\n発行元: " + str(group.publisher)
-		var process_body := _contents(process, factor)
-		var process_glyph := Glyph.add_to(process_body, "process", 26 * factor, BLUE)
-		process_glyph.name = "EdrMapProcessGlyph"
-		process_glyph.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-		_text(process_body, str(group.process) if not str(group.process).is_empty() else "名称の記録なし", factor, 13, INK, 600).horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		_text(process_body, str(group.publisher) if not str(group.publisher).is_empty() else "発行元の記録なし", factor, 11, MUTED).horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		_ignore_children(process_body)
-		links.connect_objects(image, process_glyph, endpoint, process)
-		var records := VBoxContainer.new()
-		records.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		records.size_flags_stretch_ratio = 1.2
-		records.add_theme_constant_override("separation", roundi(4 * factor))
-		group_row.add_child(records)
-		for item in group.events:
-			var index := int(item.index)
-			var event: Dictionary = item.record
-			var record := _record(records, id, index, event, factor, on_record)
-			var record_glyph := record.find_child("EdrMapRecordGlyph", true, false) as Control
-			links.connect_objects(process_glyph, record_glyph, process, record)
+	var records := VBoxContainer.new()
+	records.name = "EdrMapEvents_" + id
+	records.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	records.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	records.add_theme_constant_override("separation", roundi(3 * factor))
+	lane.add_child(records)
+	var visible := _visible_events(device, query)
+	if visible.is_empty():
+		_text(records, "一致する記録はありません" if not query.strip_edges().is_empty() else "保存されたイベントはありません", factor, 13, MUTED)
+	for item in visible:
+		var index := int(item.index)
+		var event: Dictionary = item.record
+		var record := _record(records, id, index, event, factor, on_record)
+		var record_glyph := record.find_child("EdrMapRecordGlyph", true, false) as Control
+		links.connect_objects(image, record_glyph, endpoint, record)
 
 static func _record(parent: VBoxContainer, device_id: String, index: int, event: Dictionary, factor: float, on_record: Callable) -> Button:
-	var node := _object(parent, "EdrMapEvent_" + device_id + "_" + str(index), 62 * factor, func(): on_record.call(device_id, index))
+	var node := _object(parent, "EdrMapEvent_" + device_id + "_" + str(index), 61 * factor, func(): on_record.call(device_id, index))
+	node.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var kind := str(event.get("type", ""))
 	var type_name := str({"outbound":"送信", "dns":"DNS", "file_read":"ファイル参照"}.get(kind, kind if not kind.is_empty() else "イベント"))
 	var symbol := str({"outbound":"arrow", "dns":"network", "file_read":"file"}.get(kind, "file"))
 	var body := _contents(node, factor)
 	var heading := HBoxContainer.new()
-	heading.add_theme_constant_override("separation", roundi(6 * factor))
+	heading.add_theme_constant_override("separation", roundi(5 * factor))
 	body.add_child(heading)
 	var record_glyph := Glyph.add_to(heading, symbol, 18 * factor, BLUE if kind == "outbound" else MUTED)
 	record_glyph.name = "EdrMapRecordGlyph"
 	_text(heading, str(event.get("time", "—")) + "  " + type_name, factor, 12, INK, 600)
+	var process := str(event.get("process", ""))
+	var publisher := str(event.get("publisher", ""))
+	_text(body, (process if not process.is_empty() else "名称の記録なし") + " · " + (publisher if not publisher.is_empty() else "発行元の記録なし"), factor, 12, INK)
 	var address := str(event.get("remote_address", ""))
-	if not address.is_empty():
-		_text(body, ("関連先 " if kind == "file_read" else "") + address, factor, 12, INK)
+	var relation_label := "関連先 " if kind == "file_read" else "宛先 "
+	_text(body, relation_label + (address if not address.is_empty() else "記録なし"), factor, 12, MUTED)
 	var reference := str(event.get("change_ref", ""))
 	_text(body, "変更 " + (reference if not reference.is_empty() else "参照なし"), factor, 11, MUTED)
-	node.tooltip_text = type_name + " · " + str(event.get("time", "")) + "\n" + str(event.get("detail", "")) + "\n記録の詳細を開く"
+	var time := str(event.get("time", "")).strip_edges()
+	if time.is_empty(): time = "時刻未記録"
+	node.tooltip_text = device_id.to_upper().replace("_", "-") + " / " + time + " の記録を開く"
 	_ignore_children(body)
 	return node
 

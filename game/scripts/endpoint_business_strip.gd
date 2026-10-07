@@ -44,7 +44,7 @@ class CostBar extends Control:
 				stripe += step
 			draw_line(Vector2(fee_end, 0), Vector2(fee_end, bar.end.y + 3 * factor), UI.RED, 2 * factor)
 
-static func add_to(parent: Node, factor: float, fee: int, base_cost: int, compensation: int) -> Control:
+static func add_to(parent: Node, factor: float, fee: int, base_cost: int, compensation: int, compact := false) -> Control:
 	var scale := maxf(0.5, factor)
 	var revenue := maxi(0, fee)
 	var operating := maxi(0, base_cost)
@@ -68,6 +68,11 @@ static func add_to(parent: Node, factor: float, fee: int, base_cost: int, compen
 	bar.custom_minimum_size.y = 16 * scale
 	bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	root.add_child(bar)
+	if compact:
+		bar.mouse_filter = Control.MOUSE_FILTER_PASS
+		bar.tooltip_text = "基本・作業経費 ¥%d\n補償 ¥%d\n%s" % [operating, impact, profit_text]
+		_fit_labels.call_deferred(heading)
+		return root
 	var legend := _flow(root, scale)
 	_label(legend, "BusinessStripBaseCost", "基本・作業経費 ¥%d" % operating, 11, scale, UI.MUTED)
 	_label(legend, "BusinessStripCompensation", "補償 ¥%d" % impact, 11, scale, UI.WARNING)

@@ -202,7 +202,11 @@ static func _hotel_business(d, device_id: String) -> Dictionary:
 		return {"label":caption,"opens_app":true,"tooltip":"白波フロントで予約台帳を開く","button":"予約台帳を開く","glyph":"ledger"}
 	var folios: Array = hotel.get("folios", [])
 	var pending := folios.filter(func(item): return str(item.get("status", "")) != "received").size()
-	return {"label":"✓ 受付済み" if pending == 0 and not folios.is_empty() else "未送信 %d件" % pending if not folios.is_empty() else "! 伝票を確認", "opens_app":true, "tooltip":"白波フロントで精算票を開く","button":"白波フロントを開く","glyph":"receipt"}
+	var caption := "✓ 受付済み" if pending == 0 and not folios.is_empty() else "未送信 %d件" % pending if not folios.is_empty() else "! 伝票を確認"
+	var attempt: Dictionary = hotel.get("last_attempt", {})
+	if str(attempt.get("device", "")) == device_id and int(attempt.get("code", 0)) >= 400 and folios.any(func(item): return str(item.get("id", "")) == str(attempt.get("folio_id", ""))):
+		caption += "\n前回 × HTTP %d" % int(attempt.code)
+	return {"label":caption, "opens_app":true, "tooltip":"白波フロントで精算票を開く\n" + caption,"button":"白波フロントを開く","glyph":"receipt"}
 
 static func _open_hotel(d) -> void:
 	if _hotel_recovery(d): d.business_ui["hotel_tab"] = "reservations"
@@ -623,7 +627,7 @@ static func devices(d, body: VBoxContainer, state: Dictionary, snap: Dictionary)
 		var impact:Dictionary=d.game.state.work.get("endpoint_impact",{})
 		var work_summary:Dictionary=d.game.work_status()
 		var compensation:=Impact.total_cost(impact)
-		BusinessStrip.add_to(body,scale(d),int(work_summary.estimated_fee),maxi(0,int(work_summary.costs)-compensation),compensation)
+		BusinessStrip.add_to(body,scale(d),int(work_summary.estimated_fee),maxi(0,int(work_summary.costs)-compensation),compensation,selected.is_empty())
 		label(d,body,Impact.summary(impact,int(scenario.get("endpoint_engagement",0))),12,MUTED).name="EdrImpactSummary"
 	if selected.is_empty():
 		if bool(snap.get("recovery_enabled",false)) and str(state.get("inventory_view","business"))!="records":
@@ -633,7 +637,7 @@ static func devices(d, body: VBoxContainer, state: Dictionary, snap: Dictionary)
 		label(d,heading,"調査マップ",24).name="EdrInventoryTab"
 		if bool(snap.get("recovery_enabled",false)):
 			button(d,heading,"業務と端末","EdrBusinessMap",func():state["inventory_view"]="business";d._render_endpoint();_show_top.call_deferred(d))
-		var search:=LineEdit.new();search.name="EdrInventorySearch";search.placeholder_text=copy("edr_search");search.text=str(state.get("inventory_query",""));search.custom_minimum_size.x=260*scale(d);search.size_flags_horizontal=Control.SIZE_SHRINK_BEGIN;fluent_control(d,search);body.add_child(search)
+		var search:=LineEdit.new();search.name="EdrInventorySearch";search.placeholder_text=copy("edr_search");search.text=str(state.get("inventory_query",""));search.custom_minimum_size.x=200*scale(d);search.size_flags_horizontal=Control.SIZE_SHRINK_BEGIN;fluent_control(d,search);heading.add_child(search)
 		var table:=VBoxContainer.new();table.name="EdrInventoryRows";table.add_theme_constant_override("separation",0);body.add_child(table)
 		search.text_changed.connect(func(value):state["inventory_query"]=value;inventory(d,table,snap,state,value))
 		inventory(d,table,snap,state,search.text)
