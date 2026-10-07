@@ -285,7 +285,27 @@ func _finish_colleague(id: String, job: Dictionary) -> void:
 	_work_add(0.0,100 if id in ["aya","ren"] else 0,false)
 	job.status = "done"; job.remaining = 0.0; job.result = "\n".join(log)
 	job.phase = UI_COPY.copy("backup_selection_required") if role == "ren" and bool(machine.state.get("cooperation_requires_selection", false)) else ("調査ログを保存しました" if role == "aya" else "復旧・証拠保全完了")
-	job.revision = int(state.revision); _assignments[id] = job; state.assignments = _assignments.duplicate(true)
+	job.revision = int(state.revision)
+	var completed_day := int(state.day)
+	var completed_minute := clock_minutes()
+	var job_id := str(job.get("job_id", ""))
+	if job_id.is_empty():
+		job_id = "staff/%s/%s/site-%d/%d-%d" % [id, job_context, job_target_index, completed_day, completed_minute]
+	job.job_id = job_id
+	if job_target_index >= 0 and job_target_index < state.get("targets", []).size():
+		var receipt_target: Dictionary = state.targets[job_target_index].duplicate(true)
+		var receipts: Array = receipt_target.get("work_receipts", []) if receipt_target.get("work_receipts", []) is Array else []
+		var retained: Array = []
+		for previous_receipt in receipts:
+			if not previous_receipt is Dictionary or str(previous_receipt.get("member_id", "")) != id:
+				retained.append(previous_receipt)
+		retained.append({"job_id":job_id,"contract_id":job_context,"target_index":job_target_index,"member_id":id,"member_name":member_name(id),"role":role,"phase":str(job.phase),"result":str(job.result),"result_path":str(job.get("result_path", colleague_result_path(id))),"revision":int(job.revision),"completed_day":completed_day,"completed_minute":completed_minute,"time_known":true,"work_minutes":_crew_minutes(job),"legacy":false})
+		# Capture the actual report now; later work or editor changes must not
+		# replace the observations attached to this completed assignment.
+		retained[-1].report_content = str(machine.state.get("fs", {}).get(str(retained[-1].result_path), job.result))
+		receipt_target["work_receipts"] = retained
+		state.targets[job_target_index] = receipt_target
+	_assignments[id] = job; state.assignments = _assignments.duplicate(true)
 	_sync_contract_context()
 	if not return_context.is_empty() and return_context != job_context and state.get("career_mode",false):
 		if not _activate_contract_context(return_context): state = snapshot; _assignments = assignments_snapshot; _machine = null; _machine_key = ""; return
@@ -299,6 +319,56 @@ func _finish_colleague(id: String, job: Dictionary) -> void:
 	if not save_game(): state = snapshot; _assignments = assignments_snapshot; _machine = null; _machine_key = ""; return
 	changed.emit()
 	notified.emit(member_name(id)+": "+str(job.phase)+"。チームで成果を確認できます。")
+
+func _migrate_legacy_colleague_receipts() -> bool:
+	if not state is Dictionary or not state.get("assignments", {}) is Dictionary: return false
+	var changed_receipts := false
+	var contexts: Dictionary = state.get("contract_contexts", {}) if state.get("contract_contexts", {}) is Dictionary else {}
+	for raw_member_id in _assignments.keys():
+		var member_id := str(raw_member_id)
+		var job_value: Variant = _assignments[raw_member_id]
+		if not job_value is Dictionary: continue
+		var job: Dictionary = job_value
+		if str(job.get("kind", "normal")) != "normal" or str(job.get("status", "")) != "done" or not job.has("contract_id") or not job.has("target_index"): continue
+		var contract_id := str(job.get("contract_id", ""))
+		var target_index := int(job.get("target_index", -1))
+		var active_match := bool(state.get("accepted", false)) and contract_id == str(state.get("current_contract_id", ""))
+		var targets: Array = []
+		var context: Dictionary = {}
+		if active_match:
+			targets = state.get("targets", []) if state.get("targets", []) is Array else []
+			if contexts.has(contract_id) and contexts[contract_id] is Dictionary: context = contexts[contract_id].duplicate(true)
+		elif contexts.has(contract_id) and contexts[contract_id] is Dictionary:
+			context = contexts[contract_id].duplicate(true)
+			targets = context.get("targets", []) if context.get("targets", []) is Array else []
+		else:
+			continue
+		if target_index < 0 or target_index >= targets.size() or not targets[target_index] is Dictionary: continue
+		var target: Dictionary = targets[target_index].duplicate(true)
+		var receipts: Array = target.get("work_receipts", []) if target.get("work_receipts", []) is Array else []
+		var already_saved := false
+		for receipt in receipts:
+			if receipt is Dictionary and str(receipt.get("member_id", "")) == member_id:
+				already_saved = true
+				break
+		if already_saved: continue
+		receipts.append({"job_id":"","contract_id":contract_id,"target_index":target_index,"member_id":member_id,"member_name":"","role":str(job.get("role", "")),"phase":str(job.get("phase", "")),"result":str(job.get("result", "")),"result_path":str(job.get("result_path", "")),"revision":int(job.get("revision", -1)),"completed_day":-1,"completed_minute":-1,"time_known":false,"work_minutes":float(job.get("work_minutes_accounted", -1.0)),"legacy":true})
+		target["work_receipts"] = receipts
+		targets[target_index] = target
+		if active_match:
+			state.targets = targets
+			if context.has("targets"):
+				context.targets = targets.duplicate(true)
+				contexts[contract_id] = context
+			state.contract_contexts = contexts
+		else:
+			context.targets = targets
+			contexts[contract_id] = context
+			state.contract_contexts = contexts
+		changed_receipts = true
+	if changed_receipts:
+		state.assignments = _assignments.duplicate(true)
+	return changed_receipts
 
 ## Modal settings, pause, and title screens stop passive colleague work.
 ## Work and management screens leave the office clock running as usual.
@@ -810,6 +880,7 @@ func load_game() -> bool:
 		if not state.has(key): state[key] = {} if key in ["config", "assignments", "clients"] else []
 	_assignments = state.get("assignments", {}).duplicate(true)
 	_crew_runtime_registered.clear()
+	needs_migration = _migrate_legacy_colleague_receipts() or needs_migration
 	needs_migration = MAINTENANCE_SCOPE.migrate(self) or needs_migration
 	if state.get("awaiting_contract",false): _make_offers()
 	last_load_error = load_error
@@ -2413,6 +2484,7 @@ func verify() -> Array:
 		var advanced_result := _vm_checks()
 		state.checks = advanced_result
 		state.validated_revision = state.revision
+		_store_last_acceptance(advanced_result)
 		_sync_target()
 		if not save_game():
 			state = before; _assignments = before_assignments; _machine = before_machine; _machine_key = before_machine_key
@@ -2429,6 +2501,7 @@ func verify() -> Array:
 	state.checks = result
 	if int(state.chapter) == 1: state.restore_preview = 3 if result.size() == 3 and result[0].passed and result[1].passed and result[2].passed else 0
 	state.validated_revision = state.revision
+	_store_last_acceptance(result)
 	if not save_game():
 		state = previous_state; _assignments = previous_assignments
 		_machine = previous_machine; _machine_key = previous_machine_key
@@ -2437,6 +2510,24 @@ func verify() -> Array:
 		return []
 	changed.emit()
 	return result
+
+func _store_last_acceptance(checks: Array) -> void:
+	# Keep the last formal verification on its target so later configuration edits
+	# can show that the previous result is stale instead of looking never tested.
+	# This is part of verify's existing save transaction and is rolled back with state.
+	if checks.is_empty() or state.get("awaiting_contract", false): return
+	var targets_value: Variant = state.get("targets", [])
+	var target_index := int(state.get("target_index", -1))
+	if not targets_value is Array or target_index < 0 or target_index >= targets_value.size() or not targets_value[target_index] is Dictionary: return
+	var target: Dictionary = targets_value[target_index].duplicate(true)
+	target["last_acceptance"] = {
+		"revision":int(state.revision),
+		"checks":checks.duplicate(true),
+		"inspected":bool(state.inspected),
+		"validated_revision":int(state.validated_revision)
+	}
+	targets_value[target_index] = target
+	state.targets = targets_value
 
 func can_deliver() -> bool:
 	if bool(care_conversion_offer().get("available", false)): return false

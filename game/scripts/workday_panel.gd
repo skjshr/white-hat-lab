@@ -7,6 +7,7 @@ const M = preload("res://scripts/management_ui.gd")
 const MODEL = preload("res://scripts/company_workday.gd")
 const FLOW = preload("res://scripts/workday_flow_canvas.gd")
 const BUSINESS = preload("res://scripts/priority_brief_canvas.gd")
+const HANDOFF = preload("res://scripts/work_handoff_canvas.gd")
 
 static func build(ui, parent: Node, g) -> void:
 	if g == null or parent == null: return
@@ -53,6 +54,13 @@ static func build(ui, parent: Node, g) -> void:
 		business.name = "WorkdayBusiness"
 		content.add_child(business)
 		business.configure(job.business, float(ui.text_scale), func(queue_id: String): ui._open_priority_work(str(job.id), int(job.target), queue_id))
+	elif _show_handoff(job, choices):
+		var handoff = HANDOFF.new()
+		handoff.name = "WorkdayHandoff"
+		content.add_child(handoff)
+		handoff.configure(job.handoff, float(ui.text_scale))
+		handoff.route_requested.connect(func(route: String): _handoff_route(ui, job, route))
+		if bool(choices.get("workday_record_open", false)): _work_records(ui, content, job)
 	elif not job.is_empty() and not bool(job.get("completed", false)) and not bool(job.get("draft", false)):
 		var canvas = FLOW.new()
 		canvas.name = "WorkdayFlowCanvas"
@@ -222,6 +230,8 @@ static func _jobs(ui, parent: Node, g, jobs: Array, selected_key: String) -> voi
 		M.button(pick, "tab", selected)
 		pick.pressed.connect(func():
 			ui.operations_choices.erase("workday_feedback")
+			ui.operations_choices.erase("workday_handoff_dispatch")
+			ui.operations_choices.erase("workday_record_open")
 			ui.operations_choices.workday_selected = key
 			ui.operations_choices.workday_member = "self"
 			_sync_dispatch_selection(ui.operations_choices, job, "self")
@@ -294,6 +304,23 @@ static func _footer(ui, g, job: Dictionary, candidates: Array, member_id: String
 		label.text = "本人が対応 · 別の仕事を進める間も受付期限が進みます"
 		_button(ui, actions, "対応ソフトを開く", func(): ui._open_priority_work(str(job.id), int(job.target)), "WorkdayOpen", "primary")
 		return
+	if _show_handoff(job, ui.operations_choices):
+		var accepted: Dictionary = job.handoff.get("acceptance", {})
+		var destination := "receipt" if str(accepted.get("state", "unknown")) == "ready" else "verify"
+		label.text = "担当作業の結果を引継ぎ · 納品は未完了"
+		if str(job.get("status", "")) in ["working", "queued", "paused"]: label.text = "追加の担当作業あり · 保存された前回の記録"
+		_button(ui, actions, "納品前確認へ" if destination == "receipt" else "受入検査へ", func(): _handoff_route(ui, job, destination), "WorkdayHandoffOpen", "primary")
+		_button(ui, actions, "担当を追加", func():
+			ui.operations_choices.workday_handoff_dispatch = true
+			ui.operations_choices.workday_member = "self"
+			ui._refresh_operations()
+		, "WorkdayHandoffAssign", "quiet")
+		return
+	if not job.get("handoff", {}).get("receipts", []).is_empty():
+		_button(ui, actions, "引継ぎへ戻る", func():
+			ui.operations_choices.erase("workday_handoff_dispatch")
+			ui._refresh_operations()
+		, "WorkdayHandoffBack", "quiet")
 	if member_id != "self":
 		var candidate := _candidate(candidates, member_id)
 		var can_enqueue := bool(candidate.get("can_enqueue", false))
@@ -362,7 +389,45 @@ static func _status(job: Dictionary) -> String:
 	if str(job.get("status", ""))=="legacy": return "従来型契約"
 	if bool(job.get("draft", false)): return "請求待ち"
 	if bool(job.get("completed", false)): return "完了"
+	if not job.get("handoff", {}).get("receipts", []).is_empty() and str(job.get("status", "")) not in ["working", "queued", "paused"]:
+		return "納品確認" if str(job.handoff.get("acceptance", {}).get("state", "")) == "ready" else "引継ぎ待ち"
 	return {"ready":"検査済","working":"対応中","queued":"配分済","paused":"中断","pending":"対応待ち","late":"期限超過"}.get(str(job.get("status", "")), "未完了")
+
+static func _show_handoff(job: Dictionary, choices: Dictionary) -> bool:
+	return not bool(job.get("completed", false)) and not job.get("handoff", {}).get("receipts", []).is_empty() and not bool(choices.get("workday_handoff_dispatch", false))
+
+static func _handoff_route(ui, job: Dictionary, route: String) -> void:
+	if route == "record":
+		ui.operations_choices.workday_record_open = not bool(ui.operations_choices.get("workday_record_open", false))
+		ui._refresh_operations()
+	else: ui._operations_open(str(job.get("id", "")), int(job.get("target", -1)), route)
+
+static func _work_records(ui, parent: Node, job: Dictionary) -> void:
+	for receipt in job.get("handoff", {}).get("receipts", []):
+		var member := str(receipt.get("member_name", ""))
+		if member.is_empty(): member = str(receipt.get("member_id", ""))
+		member = {"aya":"綾", "ren":"蓮"}.get(member, member)
+		var minute := int(receipt.get("completed_minute", -1))
+		var day := int(receipt.get("completed_day", -1))
+		var when := "時刻の記録なし" if minute < 0 or day < 0 else "DAY%d %02d:%02d" % [day, minute / 60, minute % 60]
+		_label(ui, parent, member + " · " + str(receipt.get("phase", "作業記録")) + " · " + when, 14, M.INK)
+		var report := TextEdit.new()
+		report.name = "HandoffReport_" + str(receipt.get("member_id", "")).validate_node_name()
+		report.text = str(receipt.get("report_content", receipt.get("result", "")))
+		report.editable = false; report.context_menu_enabled = false
+		report.custom_minimum_size.y = 160 * float(ui.text_scale)
+		report.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		report.add_theme_font_override("font", COPY.font(400))
+		report.add_theme_font_size_override("font_size", roundi(13 * float(ui.text_scale)))
+		report.add_theme_color_override("font_readonly_color", M.INK)
+		report.add_theme_stylebox_override("read_only", M.surface(M.CANVAS, 10))
+		report.gui_input.connect(func(event):
+			if event is InputEventKey and event.pressed and event.keycode == KEY_TAB:
+				var next := report.find_prev_valid_focus() if event.shift_pressed else report.find_next_valid_focus()
+				if is_instance_valid(next): next.grab_focus()
+				report.accept_event()
+		)
+		parent.add_child(report)
 
 static func _money(job: Dictionary) -> String:
 	if bool(job.get("draft", false)): return "¥%s" % _grouped(int(job.get("fee", 0)))

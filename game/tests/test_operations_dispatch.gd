@@ -3,6 +3,7 @@ extends SceneTree
 const UI = preload("res://scripts/interface.gd")
 const OPERATIONS = preload("res://scripts/operations_dispatch.gd")
 const MAINTENANCE = preload("res://scripts/maintenance_dispatch.gd")
+const STAFF_HANDOFF = preload("res://scripts/staff_work_handoff.gd")
 
 var game
 var failures: Array[String] = []
@@ -66,13 +67,29 @@ func run() -> void:
 	check(str(assignment.get("contract_id", "")) == multi_id and int(assignment.get("target_index", -1)) == 1 and str(assignment.get("vm_key", "")) == multi_id+"/site-1", "assignment binds requested target VM")
 	check(game.save_game() and game.load_game(), "assignment reloads")
 	check(str(game.state.assignments.get("aya", {}).get("contract_id", "")) == multi_id and int(game.state.assignments.get("aya", {}).get("target_index", -1)) == 1, "assignment survives reload")
+	var saved_path := str(game.save_path)
+	game.save_path = "user://missing-operations-finish-save/finish.json"
+	game._process(30.0)
+	game.save_path = saved_path
+	var after_failed_finish: Dictionary = STAFF_HANDOFF.from_context(game.state.contract_contexts.get(multi_id, {}), 1, game.state.assignments)
+	check(str(game.state.assignments.get("aya", {}).get("status", "")) == "working" and after_failed_finish.receipts.is_empty(), "failed completion save rolls back receipt and leaves work retryable")
 	game._process(30.0)
 	check(str(game.state.current_contract_id) == active_id and int(game.state.target_index) == active_target, "completion restores active projection")
 	var completed: Dictionary = game.state.assignments.get("aya", {})
 	check(str(completed.get("status", "")) == "done", "cross-contract colleague completes")
+	var handoff: Dictionary = STAFF_HANDOFF.from_context(game.state.contract_contexts.get(multi_id, {}), 1, game.state.assignments)
+	check(handoff.receipts.size() == 1 and str(handoff.receipts[0].member_id) == "aya" and bool(handoff.receipts[0].time_known), "completed receipt saved once with its exact target and time")
 	var vm_state: Dictionary = game.state.vm_states.get(multi_id+"/site-1", {})
 	var report := str(vm_state.get("fs", {}).get("/home/operator/aya-inspection.txt", ""))
+	check(not report.is_empty() and str(handoff.receipts[0].get("report_content", "")) == report, "receipt captures the actual completed report including observations")
 	check(not report.is_empty(), "completed work persists on requested VM")
+	check(OPERATIONS.assign(game, "aya", other_id, 0), "same worker can take a different target after completion")
+	game._process(30.0)
+	handoff = STAFF_HANDOFF.from_context(game.state.contract_contexts.get(multi_id, {}), 1, game.state.assignments)
+	check(handoff.receipts.size() == 1 and str(handoff.receipts[0].result_path) == str(completed.result_path), "later assignment does not overwrite target receipt")
+	check(game.save_game() and game.load_game(), "target work receipt survives reload")
+	handoff = STAFF_HANDOFF.from_context(game.state.contract_contexts.get(multi_id, {}), 1, game.state.assignments)
+	check(handoff.receipts.size() == 1 and str(handoff.receipts[0].member_id) == "aya", "reloaded target keeps its receipt without duplicate")
 	await _priority_dispatch()
 	_finish()
 
