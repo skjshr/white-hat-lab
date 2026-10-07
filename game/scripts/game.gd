@@ -51,6 +51,7 @@ const PLACEMENT_RULES = preload("res://scripts/placement_rules.gd")
 const MARKET_DEMAND = preload("res://scripts/market_demand.gd")
 const CUSTOMER_STOCK = preload("res://scripts/customer_stock.gd")
 const DISPATCH_FORECAST = preload("res://scripts/dispatch_forecast.gd")
+const PRIORITY_COMPANY_CLOCK = preload("res://scripts/priority_company_clock.gd")
 const PRICING_CATEGORIES := ["advisory", "operations", "response"]
 const PRICING_MIN_PERCENT := 50
 const PRICING_MAX_PERCENT := 150
@@ -222,11 +223,22 @@ func _begin_crew_time(job: Dictionary) -> void:
 
 func _advance_crew_clock(job: Dictionary, finished: bool = true) -> void:
 	if not job.has("work_started_at"): return
+	_sync_priority_company_clock()
 	var total := maxf(0.001,float(job.get("total",0.0)))
 	var outstanding := 0.0 if finished else _crew_minutes(job)*float(job.get("remaining",total))/total
 	var elapsed := maxf(0.0,float(job.get("segment_minutes",_crew_minutes(job)))-outstanding)
 	var day_offset := (int(job.get("work_started_day",state.day))-int(state.day))*1440
 	state.clock_minutes = maxi(clock_minutes(),day_offset+ceili(float(job.work_started_at)+elapsed-0.00001))
+	_sync_priority_company_clock()
+
+func _company_absolute_minute() -> int:
+	return int(state.get("day", 1)) * 1440 + clock_minutes()
+
+func _sync_priority_company_clock() -> void:
+	if not state is Dictionary or state.is_empty(): return
+	if PRIORITY_COMPANY_CLOCK.sync_state(state, _company_absolute_minute()):
+		_sync_target()
+		_sync_contract_context()
 
 func _account_crew_minutes(member_id: String, job: Dictionary, finished: bool) -> void:
 	var total := maxf(0.001,float(job.get("total",0.0)))
@@ -1027,7 +1039,9 @@ func set_offer_plan(plan: String) -> bool:
 func switch_contract(id: String) -> bool:
 	if not state.get("career_mode", false) or not state.contract_contexts.has(id): return false
 	var previous_state := state.duplicate(true); var previous_machine = _machine; var previous_key := _machine_key
+	_sync_priority_company_clock()
 	if not _activate_contract_context(id): return false
+	_sync_priority_company_clock()
 	if not save_game(): state = previous_state; _machine = previous_machine; _machine_key = previous_key; return false
 	changed.emit(); return true
 
@@ -1622,6 +1636,10 @@ func advanced_action(action: String, args: Dictionary = {}) -> Dictionary:
 	var before_assignments := _assignments.duplicate(true)
 	var before_machine = _machine
 	var before_machine_key := _machine_key
+	# Catch up elapsed company time before the priority engine advances its own
+	# clock for this action. Both updates then share one transaction and anchor.
+	_sync_priority_company_clock()
+	var advanced_before_action: Dictionary = state.advanced.duplicate(true)
 	var result: Dictionary = _advanced_engine().act(state.advanced, action, args)
 	if not bool(result.get("changed", false)):
 		# Engines may populate last_result even for a rejected action. Keep the
@@ -1649,9 +1667,9 @@ func advanced_action(action: String, args: Dictionary = {}) -> Dictionary:
 	var change_cost := maxi(0, int(result.get("cost", 0))) if action == "request_change" and str(state.advanced.get("kind", "")) == "advanced-pentest" else 0
 	if change_cost > 0:
 		state.work["pentest_change_cost"] = int(state.work.get("pentest_change_cost", 0)) + change_cost
-	if str(state.advanced.get("kind", "")) == "advanced-saas-response":
+	if str(state.advanced.get("kind", "")) in ["advanced-saas-response", "advanced-saas-priority"]:
 		change_cost = maxi(0, int(result.get("cost", 0)))
-		var business_added := maxi(0, _saas_business_cost(state.advanced) - _saas_business_cost(before.get("advanced", {})))
+		var business_added := maxi(0, _saas_business_cost(state.advanced) - _saas_business_cost(advanced_before_action))
 		_record_saas_costs(int(result.get("usage_cost", 0)), maxi(0, int(result.get("impact_cost", 0)) - business_added), business_added, int(result.get("manual_cost", 0)))
 	_work_add(float(result.get("minutes", 0)), change_cost, true)
 	_sync_target()
@@ -1715,7 +1733,7 @@ func _record_saas_costs(usage: int, impact: int, business: int = 0, manual: int 
 
 func _saas_outcome() -> Dictionary:
 	var model: Dictionary = state.get("advanced", {})
-	if str(model.get("kind", "")) != "advanced-saas-response": return {}
+	if str(model.get("kind", "")) not in ["advanced-saas-response", "advanced-saas-priority"]: return {}
 	var outcome := {"costs":state.work.get("saas_costs", {}).duplicate(true)}
 	for key in ["model_version", "elapsed_minutes", "egress", "invoice", "report", "records", "organization", "watch_source", "threat_app_id", "session_case", "ai_preflight", "handoff", "priority"]:
 		if model.has(key): outcome[key] = model[key].duplicate(true) if model[key] is Dictionary or model[key] is Array else model[key]
@@ -1723,6 +1741,7 @@ func _saas_outcome() -> Dictionary:
 
 func _work_add(minutes: float, cost: int = 0, advance_clock := true) -> void:
 	if not state.has("work") or not state.accepted: return
+	_sync_priority_company_clock()
 	var added := maxf(0.0, minutes)
 	ENDPOINT_ENGAGEMENT.advance(self, added)
 	state.work.minutes = float(state.work.get("minutes", 0.0)) + added
@@ -1737,7 +1756,9 @@ func _work_add(minutes: float, cost: int = 0, advance_clock := true) -> void:
 			var business_added := maxi(0, _saas_business_cost(state.advanced) - business_before)
 			state.work.incident_cost = int(state.work.incident_cost) + impact
 			_record_saas_costs(0, maxi(0, impact - business_added), business_added)
-	if advance_clock:state.clock_minutes = maxi(BUSINESS_START_MINUTE, int(state.get("clock_minutes", BUSINESS_START_MINUTE)) + int(round(added)))
+	if advance_clock:
+		state.clock_minutes = maxi(BUSINESS_START_MINUTE, int(state.get("clock_minutes", BUSINESS_START_MINUTE)) + int(round(added)))
+		_sync_priority_company_clock()
 
 func action_minutes(kind: String, base_minutes: float) -> float:
 	var result := base_minutes
@@ -1758,9 +1779,13 @@ func business_clock() -> String:
 func advance_office_time(minutes: float = 1.0) -> bool:
 	if not state.get("accepted", false) or current_done() or state.get("game_complete", false): return false
 	var added := clampf(minutes, 0.25, 10.0)
+	var previous := state.duplicate(true)
+	_sync_priority_company_clock()
 	state.clock_minutes = clock_minutes() + int(round(added))
-	# Walking is part of the deadline clock, but it is not billable work and
-	# does not change work_status().minutes or its incident cost.
+	_sync_priority_company_clock()
+	if not save_game(): state = previous; return false
+	# Walking is not billable work. Open priority responses still accrue
+	# deadline and exposure losses while the company clock moves.
 	changed.emit()
 	return true
 
@@ -2854,9 +2879,11 @@ func start_free_career() -> bool:
 	var previous_state: Dictionary = state.duplicate(true)
 	var previous_assignments: Dictionary = _assignments.duplicate(true)
 	if current_done():
+		_sync_priority_company_clock()
 		var closing_preview := DAY_LEDGER.preview(self)
 		_apply_retainer(); _settle_staff_payroll(); DAY_LEDGER.settle(self, closing_preview)
 		state.day += 1; state.clock_minutes = BUSINESS_START_MINUTE
+		_sync_priority_company_clock()
 	state.career_mode = true; state.game_complete = false; state.awaiting_contract = true; state.staff_payroll.enabled = true
 	state.accepted = false; state.inspected = false; state.current_contract_id = ""; state.contract = {}; state.targets = []; state.target_index = 0
 	state.checks = []; state.validated_revision = -1; _retain_maintenance_assignments()
@@ -3033,6 +3060,7 @@ func choose_contract(id: String) -> bool:
 			_sync_contract_context()
 			state.quote_decisions.append({"offer_id":id,"plan":plan_id,"amount":quoted_fee,"decision":"accepted","reference_fee":int(quote.reference_fee),"budget_limit":int(quote.budget_limit),"day":int(state.day)})
 			if state.quote_decisions.size() > 100: state.quote_decisions = state.quote_decisions.slice(-100)
+			_sync_priority_company_clock()
 			if not save_game(): state = previous_state; _assignments = previous_assignments; _machine = previous_machine; _machine_key = previous_machine_key; return false
 			changed.emit(); return true
 	return false
@@ -3251,9 +3279,12 @@ func end_day() -> bool:
 	if state.get("career_mode", false):
 		var career_before: Dictionary = state.duplicate(true); var career_assignments := _assignments.duplicate(true); var career_machine = _machine; var career_machine_key := _machine_key
 		_sync_contract_context()
+		_sync_priority_company_clock()
 		var before_settlement := DAY_LEDGER.preview(self)
 		_apply_retainer(); _settle_staff_payroll(); DAY_LEDGER.settle(self,before_settlement)
-		state.day += 1; _complete_office_expansion(); state.clock_minutes = BUSINESS_START_MINUTE; state.accepted = false; state.inspected = false; state.awaiting_contract = true; state.current_contract_id = ""; state.contract = {}; state.targets = []; state.target_index = 0; state.checks = []; state.validated_revision = -1; _assignments = {}; state.assignments = {}; CARE.advance_day(self); _prepare_maintenance_day(); _make_offers()
+		state.day += 1; _complete_office_expansion(); state.clock_minutes = BUSINESS_START_MINUTE
+		_sync_priority_company_clock()
+		state.accepted = false; state.inspected = false; state.awaiting_contract = true; state.current_contract_id = ""; state.contract = {}; state.targets = []; state.target_index = 0; state.checks = []; state.validated_revision = -1; _assignments = {}; state.assignments = {}; CARE.advance_day(self); _prepare_maintenance_day(); _make_offers()
 		var receipts: Dictionary = BILLING.settle_due(state, int(state.day))
 		if not bool(receipts.get("ok", false)):
 			state = career_before; _assignments = career_assignments; _machine = career_machine; _machine_key = career_machine_key; return false
@@ -4353,7 +4384,9 @@ func _finish_maintenance(member_id: String, job: Dictionary) -> void:
 	changed.emit()
 
 func _advance_maintenance_clock(minutes: float) -> void:
+	_sync_priority_company_clock()
 	state.clock_minutes = clock_minutes() + int(round(minutes))
+	_sync_priority_company_clock()
 
 func care_incident(client: String) -> Dictionary:
 	return CARE.visible(self, client.strip_edges())
