@@ -154,6 +154,8 @@ var creating_company := false
 var _maintenance_ui_signature := ""
 var _operating_ui_signature := ""
 var _maintenance_progress_labels: Dictionary = {}
+var _equipment_ui_delivery_signature := ""
+var _equipment_refresh_generation := 0
 var coffee_phase := "idle"
 var coffee_elapsed := 0.0
 var coffee_progress: ProgressBar
@@ -1707,7 +1709,62 @@ func _show_maintenance_result(client: String) -> void:
 		desktop._append(title + "\n" + (result if not result.is_empty() else UI.copy("care_result_empty", "")))
 
 func _shop() -> void:
+	if shop_view == "equipment":
+		_equipment_ui_delivery_signature = _equipment_delivery_signature(_game())
 	EQUIPMENT_PANEL.build(self)
+
+func _equipment_delivery_signature(g) -> String:
+	if g == null or not g.state.get("delivery_orders", []) is Array: return ""
+	var rows: Array = []
+	for order in g.state.get("delivery_orders", []):
+		if order is Dictionary:
+			rows.append([str(order.get("id", "")), str(order.get("status", ""))])
+	return JSON.stringify(rows)
+
+func _schedule_equipment_catalog_refresh(signature: String) -> void:
+	if not is_instance_valid(modal) or not is_instance_valid(modal_body): return
+	if not str(get_meta("equipment_plan_id", "")).is_empty(): return
+	var panes := modal_body.find_child("EquipmentPanes", true, false)
+	if not is_instance_valid(panes): return
+	var selector := modal.find_child("EquipmentSelectorScroll", true, false) as ScrollContainer
+	if is_instance_valid(selector): set_meta("equipment_selector_scroll", selector.scroll_vertical)
+	var selector_scroll := int(get_meta("equipment_selector_scroll", 0))
+	var outer_scroll := modal_scroll.scroll_vertical if is_instance_valid(modal_scroll) else 0
+	var focus_name := ""
+	var focus_owner := get_viewport().gui_get_focus_owner() if is_inside_tree() else null
+	if is_instance_valid(focus_owner) and modal.is_ancestor_of(focus_owner): focus_name = str(focus_owner.name)
+	_equipment_refresh_generation += 1
+	call_deferred("_refresh_equipment_catalog_if_current", weakref(modal), weakref(modal_body), weakref(panes), _equipment_refresh_generation, signature, outer_scroll, selector_scroll, focus_name)
+
+func _refresh_equipment_catalog_if_current(modal_ref: WeakRef, body_ref: WeakRef, panes_ref: WeakRef, generation: int, signature: String, outer_scroll: int, selector_scroll: int, focus_name: String) -> void:
+	var expected_modal = modal_ref.get_ref()
+	var expected_body = body_ref.get_ref()
+	var expected_panes = panes_ref.get_ref()
+	if generation != _equipment_refresh_generation or current_kind != "shop" or shop_view != "equipment": return
+	if not is_instance_valid(expected_modal) or not is_instance_valid(expected_body) or not is_instance_valid(expected_panes) or modal != expected_modal or modal_body != expected_body: return
+	if expected_body.find_child("EquipmentPanes", true, false) != expected_panes: return
+	if not str(get_meta("equipment_plan_id", "")).is_empty(): return
+	var g := _game()
+	if g == null or _equipment_delivery_signature(g) != signature: return
+	EQUIPMENT_PANEL.build(self)
+	call_deferred("_restore_equipment_catalog_state", modal_ref, body_ref, generation, outer_scroll, selector_scroll, focus_name)
+
+func _restore_equipment_catalog_state(modal_ref: WeakRef, body_ref: WeakRef, generation: int, outer_scroll: int, selector_scroll: int, focus_name: String) -> void:
+	# EquipmentPanel also ensures the selected row is visible over two frames;
+	# restore the exact pre-arrival viewport after that automatic positioning.
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var expected_modal = modal_ref.get_ref()
+	var expected_body = body_ref.get_ref()
+	if generation != _equipment_refresh_generation or current_kind != "shop" or shop_view != "equipment": return
+	if not is_instance_valid(expected_modal) or not is_instance_valid(expected_body) or modal != expected_modal or modal_body != expected_body: return
+	if is_instance_valid(modal_scroll): modal_scroll.scroll_vertical = outer_scroll
+	var selector := expected_modal.find_child("EquipmentSelectorScroll", true, false) as ScrollContainer
+	if is_instance_valid(selector): selector.scroll_vertical = selector_scroll
+	if focus_name.is_empty(): return
+	var target = expected_modal.find_child(focus_name, true, false)
+	if target is Control and target.is_visible_in_tree() and target.focus_mode != Control.FOCUS_NONE:
+		target.grab_focus()
 
 func _show_delivery_help() -> void:
 	if is_instance_valid(status_label): status_label.text = ""
@@ -2138,6 +2195,11 @@ func _on_game_changed() -> void:
 	if current_kind=="board" and is_instance_valid(modal_body) and _game().state.get("career_mode",false):OPERATIONS_PANEL.refresh_live(self)
 	if current_kind=="shop" and shop_view=="stock" and is_instance_valid(modal_body):PROCUREMENT_PANEL.refresh_live(self)
 	if current_kind=="shop" and shop_view=="stock": PROCUREMENT_PANEL.refresh_live(self)
+	if current_kind == "shop" and shop_view == "equipment" and is_instance_valid(modal_body) and str(get_meta("equipment_plan_id", "")).is_empty():
+		var delivery_signature := _equipment_delivery_signature(_game())
+		if delivery_signature != _equipment_ui_delivery_signature:
+			_equipment_ui_delivery_signature = delivery_signature
+			_schedule_equipment_catalog_refresh(delivery_signature)
 	if current_kind == "company":
 		var g := _game()
 		if g != null and g.has_method("maintenance_jobs"):
