@@ -10,6 +10,8 @@ const ENDPOINT_ENGAGEMENT = preload("res://scripts/endpoint_engagement.gd")
 const PROCUREMENT_PANEL = preload("res://scripts/procurement_panel.gd")
 const GAME_THEME = preload("res://scripts/game_theme.gd")
 const M = preload("res://scripts/management_ui.gd")
+const INCIDENT_WATCH = preload("res://scripts/company_incident_watch.gd")
+const INCIDENT_RIBBON = preload("res://scripts/company_incident_ribbon.gd")
 ## White Hat Lab interface. All learner-facing narrative is read from Game.copy.
 
 class CoffeeCup extends Control:
@@ -611,6 +613,7 @@ func open_panel(kind: String) -> void:
 		desktop.customer_requested.connect(_open_mail_customer)
 		desktop.staffing_requested.connect(func(): open_panel("staffing"))
 		desktop.contracts_requested.connect(func(): open_panel("board"))
+		desktop.incident_requested.connect(_open_incident_work)
 		desktop.next_task_requested.connect(next_task_guide.locate_task)
 		desktop.sales_requested.connect(func():
 			board_selected_id = ""
@@ -634,6 +637,11 @@ func open_panel(kind: String) -> void:
 			modal.add_theme_stylebox_override("panel", background)
 			var shell := VBoxContainer.new(); shell.add_theme_constant_override("separation", 0); modal.add_child(shell)
 			shell.add_child(_management_header(kind))
+			var incident_ribbon := INCIDENT_RIBBON.new()
+			shell.add_child(incident_ribbon)
+			incident_ribbon.route_requested.connect(_open_incident_work)
+			incident_ribbon.board_requested.connect(func(): open_panel("board"))
+			incident_ribbon.setup(_game(), text_scale)
 			var content_margin := MarginContainer.new(); content_margin.name = "ManagementContent"; content_margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
 			for side in ["left", "right", "top", "bottom"]: content_margin.add_theme_constant_override("margin_" + side, 18)
 			shell.add_child(content_margin)
@@ -833,6 +841,39 @@ func _open_priority_work(id: String, target_index: int, queue_id: String = "disp
 		var selection: Dictionary = preload("res://scripts/investigation_ui.gd").state(desktop, "advanced-saas-priority")
 		selection.queue_id = queue_id
 		selection.tab = "board"
+		desktop._show_app("advanced")
+
+func _open_incident_work(id: String, target_index: int, queue_id: String) -> void:
+	# Resolve the live incident again, then preserve the current workstation
+	# before switching contract. A stale ribbon must not resurrect closed work.
+	var incidents: Array = INCIDENT_WATCH.snapshot(_game()).get("incidents", [])
+	var matches := incidents.filter(func(item): return str(item.get("contract_id", "")) == id)
+	if matches.is_empty(): return
+	var incident: Dictionary = matches[0]
+	if not queue_id.is_empty() and not incident.get("queues", []).any(func(queue): return str(queue.get("id", "")) == queue_id): return
+	if is_instance_valid(desktop) and not close_panel(false, false): return
+	var g := _game()
+	if not g.switch_contract(id):
+		open_panel("board"); _operations_feedback(UI.copy("ops_result_failed")); return
+	# Use the rechecked target rather than an old button's captured index.
+	var target := int(incident.get("target_index", target_index))
+	if target >= 0 and not g.select_target(target):
+		open_panel("board"); _operations_feedback(UI.copy("ops_result_failed")); return
+	open_panel("terminal")
+	if not is_instance_valid(desktop): return
+	desktop_return_kind = "board"
+	desktop.configure_return(UI.copy("board_list", "案件一覧"))
+	if queue_id.is_empty() and bool(incident.get("available", false)) and not bool(incident.get("actionable", false)):
+		desktop._show_app("receipt")
+	else:
+		var selection: Dictionary = preload("res://scripts/investigation_ui.gd").state(desktop, "advanced-saas-priority")
+		if not bool(incident.get("available", false)):
+			selection.item_index = -1
+			selection.open_record = ""
+			selection.tab = "records"
+		else:
+			selection.queue_id = queue_id if not queue_id.is_empty() else "dispatch"
+			selection.tab = "board"
 		desktop._show_app("advanced")
 
 func _sales_board() -> void:

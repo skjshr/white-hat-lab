@@ -9,6 +9,7 @@ signal sales_requested
 signal next_task_requested
 signal equipment_requested
 signal stock_preparation_requested
+signal incident_requested(contract_id: String, target_index: int, queue_id: String)
 const WINDOW = preload("res://scripts/os_window.gd")
 const UI = preload("res://scripts/ui_theme.gd")
 const BUSINESS = preload("res://scripts/os_business_apps.gd")
@@ -21,6 +22,7 @@ const BROWSER_PAGE = preload("res://scripts/os_browser_page.gd")
 const BUSINESS_WORKSPACE = preload("res://scripts/os_business_workspace.gd")
 const BILLING_WORKSPACE = preload("res://scripts/os_billing_workspace.gd")
 const COMPLETED_CASE = preload("res://scripts/completed_case_workspace.gd")
+const INCIDENT_RIBBON = preload("res://scripts/company_incident_ribbon.gd")
 const IDENTITY_CONSOLE = preload("res://scripts/os_identity_console.gd")
 const IDENTITY_URL := "https://identity.client.test/admin/client/console/"
 const EDR_URL := "https://edr.client.test/security/devices"
@@ -37,6 +39,7 @@ const ORANGE := UI.WARNING
 var APPS := {"mail":["Outwatch","M","508bcc"],"terminal":["ターミナル",">_","354d60"],"files":["ファイル","F","d5a04a"],"editor":["エディタ","</>","4b968e"],"browser":["ブラウザ","W","5d91be"],"monitor":["サービス監視","S","315b91"],"verify":["診断ラボ","V","499276"],"team":["チーム","T","bd835c"],"manual":["リファレンス","?","728397"],"receipt":["納品・精算","¥","4b968e"]}
 var game: Node
 var workspace: Control
+var incident_ribbon: Control
 var taskbar: HBoxContainer
 var start_menu: PanelContainer
 var overview: PanelContainer
@@ -244,6 +247,13 @@ func _build() -> void:
 		else: _toggle_overview())
 	start_menu.hide()
 	overview=PanelContainer.new(); overview.set_anchors_preset(Control.PRESET_BOTTOM_WIDE); overview.offset_left=10; overview.offset_right=-10; overview.offset_top=-230; overview.offset_bottom=-58; overview.add_theme_stylebox_override("panel",UI.style(UI.SURFACE,UI.BORDER,12,10)); add_child(overview); overview.hide()
+	incident_ribbon = INCIDENT_RIBBON.new()
+	add_child(incident_ribbon)
+	incident_ribbon.route_requested.connect(func(id: String, target: int, queue: String): incident_requested.emit(id, target, queue))
+	incident_ribbon.board_requested.connect(_contracts)
+	incident_ribbon.minimum_size_changed.connect(_layout_shell.call_deferred)
+	incident_ribbon.visibility_changed.connect(_layout_shell.call_deferred)
+	incident_ribbon.setup(game, float(game.settings.get("text_scale", 1.0)))
 	_state_changed()
 	_layout_shell()
 
@@ -367,7 +377,12 @@ func _layout_shell() -> void:
 	if is_instance_valid(compact_nav): compact_nav.visible = false
 	workspace.offset_left = 0
 	workspace.offset_top = 0
-	workspace.offset_bottom = -52
+	var incident_height := incident_ribbon.custom_minimum_size.y if is_instance_valid(incident_ribbon) and incident_ribbon.visible else 0.0
+	workspace.offset_bottom = -52 - incident_height
+	if is_instance_valid(incident_ribbon):
+		incident_ribbon.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+		incident_ribbon.offset_left = 0; incident_ribbon.offset_right = 0
+		incident_ribbon.offset_top = -52 - incident_height; incident_ribbon.offset_bottom = -52
 	for w in windows.values():
 		if w.maximized:
 			w.position = Vector2.ZERO
@@ -971,7 +986,9 @@ func _load_session() -> void:
 		var workstation_readme := "業務PCの使い方\n\nメールで受注、ターミナルの ssh client で接続。\n顧客ファイルを編集・保存し、サービスを再起動します。\n検証結果を確認して納品・精算から報告。\n\nAlt+Tab: アプリ切替\nCtrl+S: 保存\nCtrl+L: アドレス欄\nタイトルバーをダブルクリック: 最大化\n右下のハンドル: サイズ変更\n"
 		game.state.os_files = {"/home/operator/Documents/作業メモ.txt":"","/home/operator/Documents/README.txt":workstation_readme}
 func _state_changed() -> void:
-	if not is_instance_valid(tray) or switching_target or refreshing: return
+	# A queued desktop still receives synchronous changes during contract routing.
+	# Its diagnostics and session belong to the previous contract until it is freed.
+	if is_queued_for_deletion() or not is_instance_valid(tray) or switching_target or refreshing: return
 	refreshing = true
 	set_deferred("refreshing",false)
 	var work: Dictionary = game.work_status() if game.has_method("work_status") else {}
