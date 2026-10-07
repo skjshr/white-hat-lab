@@ -43,7 +43,7 @@ func run() -> void:
 	game.advance_delivery(30.0)
 	check(game.take_delivery("teamdesk") and game.begin_delivery_placement("teamdesk") and game.place_delivery("teamdesk",game.equipment_slot("teamdesk")),"desk received and installed")
 	ui.open_panel("staffing"); await process_frame
-	check(press(ui.modal_body,"Hire_mio"),"hire button active and executed")
+	check(press(ui.modal,"Hire_mio"),"hire button active and executed")
 	await process_frame
 	check(game.team_members().size()==3 and int(game.staff_summary().count)==1,"additional member in roster")
 	game.state.market_day = int(game.state.day)
@@ -87,7 +87,7 @@ func run() -> void:
 	check(str(game._maintenance_job_for(client).get("status",""))=="done" and game.maintenance_result(client).begins_with("PASS"),"delegated maintenance ran real saved VM probes")
 	check(game.save_game() and game.load_game(),"staff and report survive reload")
 	ui.open_panel("staffing"); await process_frame
-	check(press(ui.modal_body,"Release_mio"),"idle hired worker released from panel")
+	check(press(ui.modal,"Release_mio"),"idle hired worker released from panel")
 	ui.open_panel("terminal"); pc=ui.desktop; pc._show_app("team"); pc._refresh_team(); await process_frame
 	check(pc.widgets.team.cards.size()==2,"released worker removed from team cards")
 	var report_path := str(game.export_report("user://qa-v116-report-"+str(OS.get_process_id())))
