@@ -20,6 +20,7 @@ const ADVANCED_WORKSPACE = preload("res://scripts/os_advanced_operations.gd")
 const BROWSER_PAGE = preload("res://scripts/os_browser_page.gd")
 const BUSINESS_WORKSPACE = preload("res://scripts/os_business_workspace.gd")
 const BILLING_WORKSPACE = preload("res://scripts/os_billing_workspace.gd")
+const COMPLETED_CASE = preload("res://scripts/completed_case_workspace.gd")
 const IDENTITY_CONSOLE = preload("res://scripts/os_identity_console.gd")
 const IDENTITY_URL := "https://identity.client.test/admin/client/console/"
 const EDR_URL := "https://edr.client.test/security/devices"
@@ -548,6 +549,7 @@ func _show_app(app: String) -> void:
 	if app == "verify": _refresh_checks()
 	if app == "receipt": _refresh_receipt()
 	if app == "billing": _render_billing()
+	if app == "browser": _refresh_completed_browser()
 	if app == "team": _refresh_team()
 	if app == "advanced": _refresh_advanced()
 	_restore_keyboard_focus(app)
@@ -738,6 +740,32 @@ func open_invoice(id: String = "") -> void:
 	billing_ui["selected"] = id
 	_show_app("billing")
 	_save_session(false)
+
+func open_delivery_history(contract_id: String) -> bool:
+	if COMPLETED_CASE.delivery_for(game.state, contract_id).is_empty():
+		_notify("この案件の納品履歴を確認できません。")
+		return false
+	var items := BUSINESS._history_items(game)
+	var index := -1
+	var title := ""
+	for position in items.size():
+		var record: Dictionary = items[position].get("item", {})
+		if str(record.get("id", "")) != contract_id: continue
+		index = position; title = str(record.get("title", "")); break
+	if index < 0:
+		_notify("この案件の納品履歴を確認できません。")
+		return false
+	if not _save_session(): return false
+	mail_ui.merge({"folder":"history", "reading":true, "selected_id":contract_id, "selected_subject":title, "history_index":index}, true)
+	if widgets.has("mail"):
+		var mail: Dictionary = widgets.mail
+		mail.folder = "history"; mail.reading = true; mail.selected_id = contract_id
+		mail.selected_subject = title; mail.history_index = index
+	_show_app("mail")
+	if widgets.has("mail"):
+		BUSINESS.refresh_mail(self)
+		_save_session(false)
+	return true
 
 func _refresh_billing_if_changed() -> void:
 	if widgets.has("billing") and _billing_signature() != billing_render_signature: _render_billing()
@@ -977,6 +1005,9 @@ func _state_changed() -> void:
 	if _edr_console_url(browser_url):
 		var edr_signature := _edr_snapshot_signature()
 		if edr_signature != edr_render_signature: _render_endpoint()
+	if _identity_console_url(browser_url) and game.current_done() and widgets.has("browser"):
+		var identity_page: VBoxContainer = widgets.browser.page
+		if identity_page.get_node_or_null("CompletedCaseCanvas") == null: _refresh_completed_browser()
 	if _portal_page_url(browser_url):
 		var portal_signature := _portal_snapshot_signature()
 		if portal_signature != portal_render_signature: _render_portal()
@@ -1570,7 +1601,7 @@ func _render_samba() -> void:
 	if not widgets.has("browser") or not is_instance_valid(widgets.browser.get("page")): return
 	var page: VBoxContainer=widgets.browser.page; _clear(page)
 	samba_render_signature=_samba_signature()
-	if game.current_done(): page.add_child(_label(UI.copy("queue_done"))); return
+	if game.current_done(): COMPLETED_CASE.render(self, page); return
 	if not bool(game.vm_info().get("connected",false)):
 		var connect_button := _button(UI.copy("samba_connect"),func(): _samba_command("ssh client"); _render_samba()); connect_button.name="SambaConnect"; page.add_child(connect_button); return
 	preload("res://scripts/os_samba_console.gd").render(self,page)
@@ -1703,7 +1734,7 @@ func _render_backup() -> void:
 	var page: VBoxContainer = widgets.browser.page; _clear(page)
 	backup_render_signature = _backup_snapshot_signature()
 	if game.current_done():
-		page.add_child(_label(UI.copy("queue_done"),14,UI.MUTED)); return
+		COMPLETED_CASE.render(self, page); return
 	if not bool(game.vm_info().get("connected",false)):
 		page.add_child(_button("顧客端末に接続",func(): _backup_command("ssh client"); _render_backup()))
 		return
@@ -1733,8 +1764,9 @@ func _render_firewall() -> void:
 	if not widgets.has("browser") or not is_instance_valid(widgets.browser.get("page")):return
 	var page: VBoxContainer=widgets.browser.page;_clear(page)
 	firewall_render_signature=_firewall_snapshot_signature()
-	if not bool(game.vm_info().get("connected",false)) or game.current_done():
-		page.add_child(_label(UI.copy("queue_done") if game.current_done() else UI.copy("fw_connection_required"),14,UI.MUTED));return
+	if game.current_done(): COMPLETED_CASE.render(self,page);return
+	if not bool(game.vm_info().get("connected",false)):
+		page.add_child(_label(UI.copy("fw_connection_required"),14,UI.MUTED));return
 	preload("res://scripts/os_firewall_console.gd").render(self,page)
 
 func _firewall_action(action: String, payload: Dictionary = {}) -> Dictionary:
@@ -1804,10 +1836,20 @@ func _render_identity() -> void:
 	if not widgets.has("browser") or not is_instance_valid(widgets.browser.get("page")): return
 	var page: VBoxContainer = widgets.browser.page
 	_clear(page)
-	if not bool(game.vm_info().get("connected", false)) or game.current_done() or not bool(game._vm().state.get("active",false)):
+	if game.current_done(): COMPLETED_CASE.render(self,page); return
+	if not bool(game.vm_info().get("connected", false)) or not bool(game._vm().state.get("active",false)):
 		page.add_child(_label(browser_response if not browser_response.is_empty() else UI.copy("identity_connection_required", "SSH connection required"),14,UI.MUTED))
 		return
 	IDENTITY_CONSOLE.render(self,page)
+
+func _refresh_completed_browser() -> void:
+	# Returning from billing or company work must show the current saved result,
+	# without refreshing the customer's service or issuing another request.
+	if not game.current_done() or not widgets.has("browser"): return
+	if not (_samba_console_url(browser_url) or _backup_console_url(browser_url) or _firewall_console_url(browser_url) or _identity_console_url(browser_url) or _edr_console_url(browser_url) or _portal_page_url(browser_url)): return
+	var page: VBoxContainer = widgets.browser.page
+	_clear(page)
+	COMPLETED_CASE.render(self,page)
 
 func _identity_command(command_text: String) -> String:
 	if not command_text.begins_with("identity "): return JSON.stringify({"ok":false,"code":400,"error":"unsupported_command"})
@@ -1840,8 +1882,9 @@ func _render_endpoint() -> void:
 	if not widgets.has("browser") or not is_instance_valid(widgets.browser.get("page")): return
 	var page: VBoxContainer = widgets.browser.page; _clear(page)
 	edr_render_signature = _edr_snapshot_signature()
-	if not bool(game.vm_info().get("connected",false)) or game.current_done() or not bool(game._vm().state.get("active",false)):
-		page.add_child(_label(UI.copy("queue_done", "Delivered") if game.current_done() else UI.copy("edr_connection_required", "Connection required"),14,UI.MUTED)); return
+	if game.current_done(): COMPLETED_CASE.render(self,page); return
+	if not bool(game.vm_info().get("connected",false)) or not bool(game._vm().state.get("active",false)):
+		page.add_child(_label(UI.copy("edr_connection_required", "Connection required"),14,UI.MUTED)); return
 	preload("res://scripts/os_endpoint_console.gd").render(self,page)
 
 func _portal_v2() -> bool:
@@ -1863,8 +1906,9 @@ func _render_portal() -> void:
 	if not widgets.has("browser") or not is_instance_valid(widgets.browser.get("page")):return
 	var page: VBoxContainer=widgets.browser.page;_clear(page)
 	portal_render_signature=_portal_snapshot_signature()
-	if not bool(game.vm_info().get("connected",false)) or game.current_done() or not bool(game._vm().state.get("active",false)):
-		page.add_child(_label(UI.copy("queue_done") if game.current_done() else UI.copy("portal_connection_required") if not bool(game.vm_info().get("connected",false)) else UI.copy("portal_service_unavailable"),14,UI.MUTED));return
+	if game.current_done(): COMPLETED_CASE.render(self,page);return
+	if not bool(game.vm_info().get("connected",false)) or not bool(game._vm().state.get("active",false)):
+		page.add_child(_label(UI.copy("portal_connection_required") if not bool(game.vm_info().get("connected",false)) else UI.copy("portal_service_unavailable"),14,UI.MUTED));return
 	preload("res://scripts/os_portal_console.gd").render(self,page)
 
 func _portal_command(command_text: String) -> String:

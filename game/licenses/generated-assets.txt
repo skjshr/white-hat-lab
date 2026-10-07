@@ -25,3 +25,9 @@ assets/props/customer-appliances/gateway.glb and backup.glb.
 Version 2.1: assets/ui/sales/model-aya.png and model-ren.png are runtime portraits
 rendered directly from the credited Quaternius Aya and Ren game models by
 tests/render_sales_model_portraits.gd. They are not separately generated artwork.
+
+2026-10-07: assets/ui/completed-case/dossier-v1.png is an original transparent
+case-folder illustration generated with the built-in OpenAI Image Gen tool.
+It contains no third-party marks or baked case outcomes. Its exact generation
+prompt is retained in assets/ui/completed-case/dossier-v1.prompt.txt. The game
+adds the actual saved case identity, grade and result through native UI.

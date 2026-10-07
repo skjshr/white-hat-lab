@@ -1,0 +1,13 @@
+Original game asset generated with the built-in OpenAI Image Gen tool on 2026-10-07.
+Output: dossier-v1.png. Transparent background requested and alpha verified.
+Final prompt:
+Use case: stylized-concept
+Asset type: transparent game UI object for the offline security-company simulator White Hat Lab.
+Primary request: One finished case dossier, represented by a tangible office file folder that the player can click to reopen the saved work record.
+Subject: A single elegant deep petrol-teal document folder, slightly open, holding a small neat stack of warm ivory sheets. A slim brushed-metal corner clip holds the sheets. The front has a blank inset label area. No other objects.
+Style: polished realistic miniature product render, restrained geometry, crisp readable silhouette and soft tactile paper texture, matching professional office equipment game assets.
+Composition: centered three-quarter view, slightly from above, entire folder in frame with generous transparent padding, broad front surface visible, readable at 140 pixels wide. No environment, no floor, only a subtle small contact shadow within the object footprint.
+Lighting: neutral soft studio light, clean edges.
+Colors: muted petrol teal #285b60, warm ivory #f4f1e7, brushed silver. No neon.
+Text: none. The game adds its real case title, grade and status later.
+Constraints: genuinely transparent background. No words, letters, numbers, logos, seals, check marks, padlocks, shields, floating particles, extra stationery or gradients behind the object.
