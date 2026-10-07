@@ -6,6 +6,7 @@ const COPY = preload("res://scripts/ui_theme.gd")
 const M = preload("res://scripts/management_ui.gd")
 const MODEL = preload("res://scripts/company_workday.gd")
 const FLOW = preload("res://scripts/workday_flow_canvas.gd")
+const BUSINESS = preload("res://scripts/priority_brief_canvas.gd")
 
 static func build(ui, parent: Node, g) -> void:
 	if g == null or parent == null: return
@@ -47,7 +48,12 @@ static func build(ui, parent: Node, g) -> void:
 	content.add_theme_constant_override("separation", 5)
 	scroll.add_child(content)
 	_jobs(ui, content, g, snapshot.get("jobs", []), selected_key)
-	if not job.is_empty() and not bool(job.get("completed", false)) and not bool(job.get("draft", false)):
+	if not job.get("business", {}).is_empty():
+		var business = BUSINESS.new()
+		business.name = "WorkdayBusiness"
+		content.add_child(business)
+		business.configure(job.business, float(ui.text_scale), func(queue_id: String): ui._open_priority_work(str(job.id), int(job.target), queue_id))
+	elif not job.is_empty() and not bool(job.get("completed", false)) and not bool(job.get("draft", false)):
 		var canvas = FLOW.new()
 		canvas.name = "WorkdayFlowCanvas"
 		content.add_child(canvas)
@@ -284,6 +290,10 @@ static func _footer(ui, g, job: Dictionary, candidates: Array, member_id: String
 		else:
 			_button(ui, actions, "納品結果を見る", func(): ui._operations_open(str(job.get("id", "")), -1, "receipt"), "WorkdayResult", "primary")
 		return
+	if not job.get("business", {}).is_empty():
+		label.text = "本人が対応 · 別の仕事を進める間も受付期限が進みます"
+		_button(ui, actions, "対応ソフトを開く", func(): ui._open_priority_work(str(job.id), int(job.target)), "WorkdayOpen", "primary")
+		return
 	if member_id != "self":
 		var candidate := _candidate(candidates, member_id)
 		var can_enqueue := bool(candidate.get("can_enqueue", false))
@@ -345,6 +355,7 @@ static func _job_label(job: Dictionary) -> String:
 	var due := str(deadline.get("text", ""))
 	if due.is_empty() and int(deadline.get("day", -1)) >= 0: due = "DAY%dまで" % int(deadline.day)
 	if bool(job.get("completed", false)): due=""
+	elif not job.get("business", {}).is_empty(): due="納品 " + due
 	return "%s %s · %s%s" % [emblem, str(job.get("client", "")), title, (" / " + target if not target.is_empty() else "") + (" · " + due if not due.is_empty() else "")]
 
 static func _status(job: Dictionary) -> String:

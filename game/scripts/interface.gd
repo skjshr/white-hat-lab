@@ -824,6 +824,17 @@ func _operations_open(id: String, target_index: int, app: String = "") -> void:
 	open_panel("terminal")
 	if not app.is_empty():desktop._show_app(app)
 
+func _open_priority_work(id: String, target_index: int, queue_id: String = "dispatch") -> void:
+	var g := _game()
+	if not g.switch_contract(id): _operations_feedback(UI.copy("ops_result_failed")); return
+	if target_index >= 0 and not g.select_target(target_index): _operations_feedback(UI.copy("ops_result_failed")); return
+	open_panel("terminal")
+	if is_instance_valid(desktop):
+		var selection: Dictionary = preload("res://scripts/investigation_ui.gd").state(desktop, "advanced-saas-priority")
+		selection.queue_id = queue_id
+		selection.tab = "board"
+		desktop._show_app("advanced")
+
 func _sales_board() -> void:
 	var g := _game(); if g == null: return
 	var level: Dictionary = g.company_level()
@@ -931,7 +942,9 @@ func _contract_ticket(offer: Dictionary) -> void:
 func _select_contract(id: String) -> void:
 	for item in _game().contract_queue():
 		if str(item.get("id", "")) == id:
-			operations_choices.view = "contracts"
+			operations_choices.view = "today"
+			operations_choices.workday_selected = "contract:%s:%d" % [id, int(item.get("target_index", 0))]
+			operations_choices.workday_member = "self"
 			operations_choices.dispatch_selected = {"kind":"contract", "id":id, "target":int(item.get("target_index",0)), "member":""}
 			open_panel("board")
 			return
@@ -956,13 +969,19 @@ func _contract_detail(offer: Dictionary) -> void:
 	for scenario in CaseCatalog.all():
 		if str(scenario.id) == str(offer.get("case_id", "")): intake = scenario.get("intake", {}).duplicate(true); break
 	var share_quote: bool = str(intake.get("kind", "")) == "daily-report"
-	var graphical_quote: bool = hardware_quote or share_quote
+	var priority_brief: Dictionary = preload("res://scripts/priority_business_brief.gd").from_offer(offer)
+	var priority_quote: bool = not priority_brief.is_empty()
+	var graphical_quote: bool = hardware_quote or share_quote or priority_quote
 	if hardware_quote:
 		var scene := HARDWARE_QUOTE_BOARD.new()
 		scene.setup(offer, g.offer_operations_preview(offer), text_scale, _open_quote_procurement.bind(str(offer.id)))
 		body.add_child(scene)
 	elif share_quote:
 		var scene := SHARE_INTAKE_BOARD.new(); scene.setup(intake, text_scale); body.add_child(scene)
+	elif priority_quote:
+		var scene := preload("res://scripts/priority_brief_canvas.gd").new()
+		scene.name = "QuotePriorityBusiness"; body.add_child(scene); scene.configure(priority_brief, text_scale)
+		body.add_child(_label("受注後は別の仕事・保守でも受付期限が進みます。読むだけでは進みません。", 13, UI.MUTED))
 	else: body.add_child(_label(UI.copy("board_facts") % [int(offer.targets),int(quote.budget),int(quote.costs)],14,INK))
 	var endpoint_quote: bool = offer.get("target_specs",[]).any(func(item):return int(item.get("scenario",{}).get("endpoint_engagement",0)) in [1,2])
 	var business_quote:bool=offer.get("target_specs",[]).any(func(item):return int(item.get("scenario",{}).get("endpoint_engagement",0))==2)
@@ -1063,6 +1082,7 @@ func _contract_detail(offer: Dictionary) -> void:
 	if graphical_quote or (int(operating_preview.get("required", 0)) == 0 and int(operating_preview.get("shortage", 0)) == 0):
 		_contract_operations_preview(conditions, offer, g, true)
 	if hardware_quote: conditions.add_child(_label("%d拠点 · 作業目安 %d分 · 導入・照合・納入" % [int(offer.targets), int(quote.budget)], 14, INK))
+	if priority_quote: conditions.add_child(_label("納品期限 %d分 · 基本経費 ¥%d / 受付期限は上の業務図で確認" % [int(quote.budget), int(quote.costs)], 14, INK))
 	if share_quote: conditions.add_child(_label(UI.copy("board_facts") % [int(offer.targets),int(quote.budget),int(quote.costs)],14,INK))
 	var care_reason := ""
 	if selected_plan == "care":

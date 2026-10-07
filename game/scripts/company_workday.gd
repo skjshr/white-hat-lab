@@ -4,6 +4,7 @@ extends RefCounted
 const FORECAST = preload("res://scripts/dispatch_forecast.gd")
 const OPERATIONS = preload("res://scripts/operations_dispatch.gd")
 const COPY = preload("res://scripts/ui_theme.gd")
+const BUSINESS = preload("res://scripts/priority_business_brief.gd")
 
 static func _kind(contract: Dictionary, plan: String) -> String:
 	if not str(contract.get("maintenance_incident_id", "")).is_empty() or plan == "priority": return "emergency"
@@ -55,6 +56,7 @@ static func _contracts(g, queue: Array) -> Array:
 				for state in ["working", "paused", "queued"]:
 					if assignments.any(func(item): return str(item.status) == state): status = state; break
 			jobs.append({"key":"contract:%s:%d" % [id,target_index],"id":id,"contract_id":id,"kind":_kind(contract,str(row.get("plan", ""))),"client":str(row.get("client", "")),"title":str(row.get("title", "")),"status":status,"completed":completed,"draft":draft,"remaining":float(row.get("remaining", 0.0)),"remaining_kind":"deadline","deadline":deadline.duplicate(true),"fee":int(invoice.get("amount", row.get("fee", 0))) if completed else int(row.get("fee", 0)),"fee_scope":"invoice" if completed and not invoice.is_empty() else "contract","target":target_index,"target_name":str(target.get("name", "")),"target_count":targets.size(),"task_name":"請求確定" if draft else "納品済み" if completed else "調査工程","assignments":assignments,"invoice":invoice.duplicate(true),"active":bool(row.get("active", false)),"late_minutes":int(row.get("late_minutes", 0))})
+			jobs[-1].business = BUSINESS.from_context(context) if not completed else {}
 	# A day change archives completed contexts, but their unposted invoices remain.
 	for invoice in g.state.get("billing", {}).get("invoices", []):
 		if not invoice is Dictionary or str(invoice.get("status", "")) != "draft": continue
@@ -132,6 +134,8 @@ static func signature(g) -> String:
 		var targets: Array = []
 		for target in context.get("targets", []): targets.append([str(target.get("name", "")),bool(OPERATIONS._target_checks(target).done)])
 		shape.append(["contract",str(row.id),str(row.title),bool(row.completed),targets])
+		if str(context.get("contract", {}).get("case_id", "")) == BUSINESS.CASE_ID:
+			shape.append(["business",context.get("advanced", {}).get("elapsed_minutes", 0),context.get("advanced", {}).get("revision", 0),context.get("work", {}).get("incident_cost", 0)])
 	for job in g.maintenance_jobs(): shape.append(["maintenance",str(job.id),str(job.status),str(job.get("assignee", "")),g.maintenance_owner(str(job.client))])
 	for member in g.team_members():
 		var id := str(member.id)
